@@ -7389,6 +7389,9 @@ var TabContextMenu = {
   }
 };
 
+XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
+                                  "resource:///modules/devtools/DevTools.jsm");
+
 XPCOMUtils.defineLazyGetter(this, "HUDConsoleUI", function () {
   let tempScope = {};
   Cu.import("resource:///modules/HUDService.jsm", tempScope);
