@@ -13,7 +13,11 @@ const EXPORTED_SYMBOLS = [ "gDevTools" ];
  * have alternative sets of tools, for example to allow a Firebug type
  * alternative. It has the same lifetime as the browser.
  */
-function DevTools() {}
+function DevTools() {
+  this._tools = new Map();
+  this._toolboxes = new Map();
+  this._listeners = {};
+}
 
 DevTools.prototype = {
   /**
@@ -44,7 +48,8 @@ DevTools.prototype = {
    *   element: ...
    * }
    *
-   * Definition of the 'element' property is left as an exercise to the implementor
+   * Definition of the 'element' property is left as an exercise to the
+   * implementor.
    */
   HostType: {
     IN_BROWSER: "browser",
@@ -83,11 +88,9 @@ DevTools.prototype = {
    *          populated with the markup from |url|. And returns an instance of
    *          ToolInstance (function|required)
    * - showInContextMenu: Should the tool be added to the context menu? (boolean|optional)
-   * MIKE: Maybe use targets toolbox & contextMenu instead? // Paul: too inspector-specific
-   * MIKE: Why too inspector-specific? Users can create whatever tools they want.
    */
   registerTool: function DT_registerTool(aToolDefinition) {
-
+    this._tools.set(aToolDefinition.id, aToolDefinition);
   },
 
   /**
@@ -95,7 +98,7 @@ DevTools.prototype = {
    * Needed so that add-ons can remove themselves when they are deactivated
    */
   unregisterTool: function DT_unregisterTool(aId) {
-
+    this._tools.delete(aId);
   },
 
   /**
@@ -103,7 +106,7 @@ DevTools.prototype = {
    * themselves with
    */
   getToolDefinitions: function DT_getToolDefinitions() {
-
+    return this._tools;
   },
 
   /**
@@ -111,7 +114,15 @@ DevTools.prototype = {
    * (optionally with aDefaultToolId opened)
    */
   openToolbox: function DT_openToolbox(aTarget, aHost, aDefaultToolId) {
+    if (this._toolboxes.has(aTarget)) {
+      return null;
+    }
 
+    let tb = new Toolbox(aTarget, aHost, aDefaultToolId);
+    if (tb) {
+      this._toolboxes.set(aTarget, tb);
+      toolbox.open();
+    }
   },
 
   /**
@@ -119,7 +130,18 @@ DevTools.prototype = {
    * map is a copy, not reference (can't be altered)
    */
   getToolBoxes: function DT_getToolBoxes() {
+    let toolboxes = new Map();
 
+    for (let [key, value] in this._toolboxes) {
+      toolboxes.set(key, value);
+    }
+    return toolboxes;
+  },
+
+  destroy: function DT_destroy() {
+    delete this._tools;
+    delete this._toolboxes;
+    delete this._listeners;
   },
 
   /*
@@ -136,19 +158,60 @@ DevTools.prototype = {
        TOOLBOXCLOSED: "devtools-toolbox-closed",
      }
    */
+
   /**
-   * Add a ToolEvent listener.
-   * @param  {ToolEvent} aEvent
-   *         The ToolEvent to listen for.
-   * @param  {Function} aListener
-   *         MIKE: Why not just pass in the handler instead of the listener?
+   * Add a ToolEvent listener to this object.
+   *
+   * @param {ToolEvent} aEvent
+   *        The event name to which we're adding.
+   * @param {Function} aListener
+   *        Called when the event is fired.
    */
   on: function DT_on(aEvent, aListener) {
-
+    if (!(aEvent in this._listeners)) {
+      this._listeners[aEvent] = [];
+    }
+    this._listeners[aEvent].push(aListener);
   },
 
+  /**
+   * Remove a ToolEvent listener from this object.
+   *
+   * @param {ToolEvent} aEvent
+   *        The event name to which we're removing.
+   * @param function aListener
+   *        The listener to remove.
+   */
   off: function DT_off(aEvent, aListener) {
+    this._listeners[aEvent] =
+      this._listeners[aEvent].filter(function(l) aListener != l);
+  },
 
+  /**
+   * Emit an event on the inspector.  All arguments to this method will
+   * be sent to listner functions.
+   */
+  _emit: function DT_emit(aEvent)
+  {
+    if (!(aEvent in this._listeners)) {
+      return;
+    }
+
+    let originalListeners = this._listeners[aEvent];
+    for (let listener of this._listeners[aEvent]) {
+      // If the inspector was destroyed during event emission, stop
+      // emitting.
+      if (!this._listeners) {
+        break;
+      }
+
+      // If listeners were removed during emission, make sure the
+      // event handler we're going to fire wasn't removed.
+      if (originalListeners === this._listeners[aEvent] ||
+          this._listeners[aEvent].some(function(l) l === listener)) {
+        listener.apply(null, arguments);
+      }
+    }
   },
 };
 
@@ -165,9 +228,74 @@ const gDevTools = new DevTools();
  * target. Visually, it's a document (about:devtools) that includes the tools
  * tabs and all the iframes where the tool instances will be living in.
  */
-function Toolbox(aTarget, aHost, aDefaultToolId) {}
+function Toolbox(aTarget, aHost, aDefaultToolId) {
+  this._target = aTarget;
+  this._host = aHost;
+  this._defaultToolId = aDefaultToolId;
+  this._toolInstances = new Map();
+
+  for (let tool of gDevTools.getToolDefinitions()) {
+    let instance = tool.build();
+    this._toolInstances.set(tool.id, instance);
+  }
+}
 
 Toolbox.prototype = {
+  /**
+   * Returns a *copy* of the _toolInstances collection.
+   */
+  getToolInstances: function TB_getToolInstances() {
+    let instances = new Map();
+
+    for (let [key, value] in this._toolInstances) {
+      instances.set(key, value);
+    }
+    return instances;
+  },
+
+  /**
+   * Get/alter the target of a Toolbox so we're debugging something different.
+   * See TargetType for more details.
+   * TODO: Do we allow |toolbox.target = null;| ?
+   */
+  get target() {
+    return this._target;
+  },
+
+  set target(aValue) {
+    this._target = aValue;
+  },
+
+  /**
+   * Get/alter the host of a Toolbox, i.e. is it in browser or in a separate
+   * tab. See HostType for more details.
+   */
+  get host() {
+    return this._host;
+  },
+
+  set host(aValue) {
+    this._host = aValue;
+  },
+
+  /**
+   * Get/alter the currently displayed tool.
+   */
+  get currentToolId() {
+    return this._currentToolId;
+  },
+
+  set currentToolId(aValue) {
+    this._currentToolId = aValue;
+  },
+
+  /**
+   * Opens the toolbox
+   */
+  open: function TBOX_open() {
+
+  },
+
   /**
    * Remove all UI elements, detach from target and clear up
    */
@@ -175,48 +303,6 @@ Toolbox.prototype = {
 
   },
 };
-
-/**
- * Get/alter the target of a Toolbox so we're debugging something different.
- * See TargetType for more details.
- * TODO: Do we allow |toolbox.target = null;| ?
- */
-Object.defineProperty(Toolbox.prototype, 'target', {
-  get: function TBOX_getTarget() {
-
-  },
-
-  set: function TBOX_setTarget() {
-
-  }
-});
-
-/**
- * Get/alter the host of a Toolbox, i.e. is it in browser or in a separate
- * tab. See HostType for more details.
- */
-Object.defineProperty(Toolbox.prototype, 'host', {
-  get: function TBOX_getHost() {
-
-  },
-
-  set: function TBOX_setHost() {
-
-  }
-});
-
-/**
- * Get/alter the currently displayed tool.
- */
-Object.defineProperty(Toolbox.prototype, 'currentToolId', {
-  get: function TBOX_getCurrentToolId() {
-
-  },
-
-  set: function TBOX_setCurrentToolId() {
-
-  }
-});
 
 //------------------------------------------------------------------------------
 
@@ -228,9 +314,41 @@ Object.defineProperty(Toolbox.prototype, 'currentToolId', {
  * There may be no benefit in doing this as an abstract type, but if nothing
  * else gives us a place to write documentation.
  */
-function DevToolInstance() {}
+function DevToolInstance(aTarget, aId) {
+  this._target = aTarget;
+  this._id = aId;
+}
 
 DevToolInstance.prototype = {
+  /**
+   * Get the target of a Tool so we're debugging something different.
+   * TODO: Not sure about that. Maybe it's the ToolBox's job to destroy the tool
+   * and start it again with a new target.
+   *   JOE: If we think that, does the same go for Toolbox? I'm leaning towards
+   *        Keeping these in both cases. Either way I like symmetry.
+   *        Certainly target should be read-only to the public or we could have
+   *        one tool in a toolbox having a different target to the others
+   */
+  get target() {
+    return this._target;
+  },
+
+  set target(aValue) {
+    this._target = aValue;
+  },
+
+  /**
+   * Get the type of this tool.
+   * TODO: If this function isn't used then it should be removed
+   */
+  get id() {
+    return this._id;
+  },
+
+  set id(aValue) {
+    this._id = value;
+  },
+
   /**
    * The Toolbox in which this Tool was hosted has been closed, possibly due to
    * the target being closed. We should clear-up.
@@ -254,35 +372,3 @@ DevToolInstance.prototype = {
 
   },
 };
-
-/**
- * Get the target of a Tool so we're debugging something different.
- * TODO: Not sure about that. Maybe it's the ToolBox's job to destroy the tool
- * and start it again with a new target.
- *   JOE: If we think that, does the same go for Toolbox? I'm leaning towards
- *        Keeping these in both cases. Either way I like symmetry.
- *        Certainly target should be read-only to the public or we could have
- *        one tool in a toolbox having a different target to the others
- */
-Object.defineProperty(DevToolInstance.prototype, 'target', {
-  get: function DTI_getTarget() {
-
-  },
-
-  set: function DTI_setTarget() {
-
-  }
-});
-/**
- * Get the type of this tool.
- * TODO: If this function isn't used then it should be removed
- */
-Object.defineProperty(DevToolInstance.prototype, 'id', {
-  get: function DTI_getId() {
-
-  },
-
-  set: function DTI_setId() {
-
-  }
-});
