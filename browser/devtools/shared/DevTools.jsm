@@ -17,6 +17,12 @@ function DevTools() {
   this._tools = new Map();
   this._toolboxes = new Map();
   this._listeners = {};
+
+  let emitter = new EventEmitter();
+  this.on = emitter.on.bind(emitter);
+  this.off = emitter.off.bind(emitter);
+  this.once = emitter.once.bind(emitter);
+  this._emit = emitter.emit.bind(emitter);
 }
 
 DevTools.prototype = {
@@ -142,76 +148,6 @@ DevTools.prototype = {
     delete this._tools;
     delete this._toolboxes;
     delete this._listeners;
-  },
-
-  /*
-   * Events:
-   * All events come with an reference to the original target {tool, toolbox}
-   *
-   * Totally WIP - more will emerge during the implementation:
-   * ToolEvent: {
-       TOOLREADY: "devtools-tool-ready",
-       TOOLHIDE: "devtools-tool-hide",
-       TOOLSHOW: "devtools-tool-show",
-       TOOLCLOSED: "devtools-tool-closed",
-       TOOLBOXREADY: "devtools-toolbox-ready",
-       TOOLBOXCLOSED: "devtools-toolbox-closed",
-     }
-   */
-
-  /**
-   * Add a ToolEvent listener to this object.
-   *
-   * @param {ToolEvent} aEvent
-   *        The event name to which we're adding.
-   * @param {Function} aListener
-   *        Called when the event is fired.
-   */
-  on: function DT_on(aEvent, aListener) {
-    if (!(aEvent in this._listeners)) {
-      this._listeners[aEvent] = [];
-    }
-    this._listeners[aEvent].push(aListener);
-  },
-
-  /**
-   * Remove a ToolEvent listener from this object.
-   *
-   * @param {ToolEvent} aEvent
-   *        The event name to which we're removing.
-   * @param function aListener
-   *        The listener to remove.
-   */
-  off: function DT_off(aEvent, aListener) {
-    this._listeners[aEvent] =
-      this._listeners[aEvent].filter(function(l) aListener != l);
-  },
-
-  /**
-   * Emit an event on the inspector.  All arguments to this method will
-   * be sent to listner functions.
-   */
-  _emit: function DT_emit(aEvent)
-  {
-    if (!(aEvent in this._listeners)) {
-      return;
-    }
-
-    let originalListeners = this._listeners[aEvent];
-    for (let listener of this._listeners[aEvent]) {
-      // If the inspector was destroyed during event emission, stop
-      // emitting.
-      if (!this._listeners) {
-        break;
-      }
-
-      // If listeners were removed during emission, make sure the
-      // event handler we're going to fire wasn't removed.
-      if (originalListeners === this._listeners[aEvent] ||
-          this._listeners[aEvent].some(function(l) l === listener)) {
-        listener.apply(null, arguments);
-      }
-    }
   },
 };
 
