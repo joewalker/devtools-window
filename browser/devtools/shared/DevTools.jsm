@@ -97,7 +97,6 @@ DevTools.prototype = {
    * - build: Function that takes a single parameter, a frame, which has been
    *          populated with the markup from |url|. And returns an instance of
    *          ToolInstance (function|required)
-   * - showInContextMenu: Should the tool be added to the context menu? (boolean|optional)
    */
   registerTool: function DT_registerTool(aToolDefinition) {
     this._tools.set(aToolDefinition.id, aToolDefinition);
@@ -129,20 +128,18 @@ DevTools.prototype = {
     }
 
     let tb = new Toolbox(aTarget, aHost, aDefaultToolId);
-    if (tb) {
-      this._toolboxes.set(aTarget, tb);
-      toolbox.open();
-    }
+    this._toolboxes.set(aTarget, tb);
+    tb.open();
   },
 
   /**
    * Return a map(DevToolsTarget, DevToolBox) of all the Toolboxes
    * map is a copy, not reference (can't be altered)
    */
-  getToolBoxes: function DT_getToolBoxes() {
+  getToolBoxes: function DT_getToolBoxes(x) {
     let toolboxes = new Map();
 
-    for (let [key, value] in this._toolboxes) {
+    for (let [key, value] of this._toolboxes) {
       toolboxes.set(key, value);
     }
     return toolboxes;
@@ -172,11 +169,12 @@ function Toolbox(aTarget, aHost, aDefaultToolId) {
   this._target = aTarget;
   this._host = aHost;
   this._defaultToolId = aDefaultToolId;
+  this._currentToolId = this._defaultToolId;
   this._toolInstances = new Map();
 
-  for (let tool of gDevTools.getToolDefinitions()) {
+  for (let [toolId, tool] of gDevTools.getToolDefinitions()) {
     let instance = tool.build();
-    this._toolInstances.set(tool.id, instance);
+    this._toolInstances.set(toolId, instance);
   }
 }
 
@@ -187,7 +185,7 @@ Toolbox.prototype = {
   getToolInstances: function TB_getToolInstances() {
     let instances = new Map();
 
-    for (let [key, value] in this._toolInstances) {
+    for (let [key, value] of this._toolInstances) {
       instances.set(key, value);
     }
     return instances;
@@ -264,10 +262,10 @@ DevToolInstance.prototype = {
    * Get the target of a Tool so we're debugging something different.
    * TODO: Not sure about that. Maybe it's the ToolBox's job to destroy the tool
    * and start it again with a new target.
-   *   JOE: If we think that, does the same go for Toolbox? I'm leaning towards
-   *        Keeping these in both cases. Either way I like symmetry.
-   *        Certainly target should be read-only to the public or we could have
-   *        one tool in a toolbox having a different target to the others
+   * JOE: If we think that, does the same go for Toolbox? I'm leaning towards
+   * Keeping these in both cases. Either way I like symmetry.
+   * Certainly target should be read-only to the public or we could have
+   * one tool in a toolbox having a different target to the others
    */
   get target() {
     return this._target;
