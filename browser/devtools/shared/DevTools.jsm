@@ -4,6 +4,10 @@
 
 "use strict";
 
+const Cu = Components.utils;
+
+Cu.import("resource:///modules/devtools/EventEmitter.jsm");
+
 const EXPORTED_SYMBOLS = [ "gDevTools" ];
 
 /**
