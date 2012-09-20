@@ -1,6 +1,23 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 var EXPORTED_SYMBOLS = ["EventEmitter"];
 
-function EventEmitter() {
+/**
+ * EventEmitter.
+ *
+ * @param Object aObjectToExtend
+ *        If aObjectToExtend is not null, the public methods of EventEmitter
+ *        are bound to the object.
+ */
+function EventEmitter(aObjectToExtend) {
+  if (aObjectToExtend) {
+    aObjectToExtend.on = this.on.bind(this);
+    aObjectToExtend.off = this.off.bind(this);
+    aObjectToExtend.once = this.once.bind(this);
+    aObjectToExtend.emit = this.emit.bind(this);
+  }
 }
 
 EventEmitter.prototype = {
