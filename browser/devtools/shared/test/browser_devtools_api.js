@@ -57,6 +57,13 @@ function runTests(aTab) {
   is(gDevTools.getToolDefinitions().has(toolId), false,
     "The tool is no longer registered");
 
+  // Test killswitch
+  Services.prefs.setBoolPref(toolDefinition.killswitch, false);
+  gDevTools.registerTool(toolDefinition);
+  is(gDevTools.getToolDefinitions().has(toolId), false,
+    "The tool is not registered (the killswitch disables it)");
+  gDevTools.unregisterTool(toolId);
+
   gDevTools.destroy();
 }
 

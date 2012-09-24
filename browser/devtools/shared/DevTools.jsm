@@ -6,6 +6,7 @@
 
 const Cu = Components.utils;
 
+Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 
 const EXPORTED_SYMBOLS = [ "gDevTools" ];
@@ -20,13 +21,8 @@ const EXPORTED_SYMBOLS = [ "gDevTools" ];
 function DevTools() {
   this._tools = new Map();
   this._toolboxes = new Map();
-  this._listeners = {};
 
-  let emitter = new EventEmitter();
-  this.on = emitter.on.bind(emitter);
-  this.off = emitter.off.bind(emitter);
-  this.once = emitter.once.bind(emitter);
-  this._emit = emitter.emit.bind(emitter);
+  new EventEmitter(this);
 }
 
 DevTools.prototype = {
@@ -99,15 +95,27 @@ DevTools.prototype = {
    *          ToolInstance (function|required)
    */
   registerTool: function DT_registerTool(aToolDefinition) {
-    this._tools.set(aToolDefinition.id, aToolDefinition);
+    let toolId = aToolDefinition.id;
+
+    aToolDefinition.killswitch = aToolDefinition.killswitch ||
+      "devtools." + toolId + ".enabled";
+    this._tools.set(toolId, aToolDefinition);
+
+    for (let [key, toolbox] of this._toolboxes) {
+      toolbox.emit("tool-registered", toolId);
+    }
   },
 
   /**
-   * Removes all tools that match the given |aId|
+   * Removes all tools that match the given |aToolId|
    * Needed so that add-ons can remove themselves when they are deactivated
    */
-  unregisterTool: function DT_unregisterTool(aId) {
-    this._tools.delete(aId);
+  unregisterTool: function DT_unregisterTool(aToolId) {
+    this._tools.delete(aToolId);
+
+    for (let [key, toolbox] of this._toolboxes) {
+      toolbox.emit("tool-unregistered", aToolId);
+    }
   },
 
   /**
@@ -115,7 +123,22 @@ DevTools.prototype = {
    * themselves with
    */
   getToolDefinitions: function DT_getToolDefinitions() {
-    return this._tools;
+    let tools = new Map();
+
+    for (let [key, value] of this._tools) {
+      let enabled;
+
+      try {
+        enabled = Services.prefs.getBoolPref(value.killswitch);
+      } catch(e) {
+        enabled = true;
+      }
+
+      if (enabled) {
+        tools.set(key, value);
+      }
+    }
+    return tools;
   },
 
   /**
@@ -129,7 +152,8 @@ DevTools.prototype = {
 
     let tb = new Toolbox(aTarget, aHost, aDefaultToolId);
     this._toolboxes.set(aTarget, tb);
-    tb.open();
+
+    return tb;
   },
 
   /**
@@ -148,7 +172,6 @@ DevTools.prototype = {
   destroy: function DT_destroy() {
     delete this._tools;
     delete this._toolboxes;
-    delete this._listeners;
   },
 };
 
@@ -172,6 +195,13 @@ function Toolbox(aTarget, aHost, aDefaultToolId) {
   this._currentToolId = this._defaultToolId;
   this._toolInstances = new Map();
 
+  this._handleEvent = this._handleEvent.bind(this);
+
+  new EventEmitter(this);
+
+  this.on("tool-registered", this._handleEvent);
+  this.on("tool-unregistered", this._handleEvent);
+
   for (let [toolId, tool] of gDevTools.getToolDefinitions()) {
     let instance = tool.build();
     this._toolInstances.set(toolId, instance);
@@ -179,6 +209,44 @@ function Toolbox(aTarget, aHost, aDefaultToolId) {
 }
 
 Toolbox.prototype = {
+
+  _handleEvent: function TB_handleEvent(aEventId, ...args) {
+    let toolId;
+
+    switch(aEventId) {
+      /**
+       * Handler for the tool-registered event.
+       * @param  {String} aToolId
+       *         The ID of the registered tool.
+       */
+      case "tool-registered":
+        let defs = gDevTools.getToolDefinitions();
+        let tool = defs.get(toolId);
+
+        toolId = args[0];
+
+        // tool may not exist if the killswitch is set to false.
+        if (tool) {
+          let instance = tool.build();
+          this._toolInstances.set(toolId, instance);
+        }
+        break;
+
+      /**
+       * Handler for the tool-unregistered event.
+       * @param  {String} aToolId
+       *         The ID of the unregistered tool.
+       */
+      case "tool-unregistered":
+        toolId = args[0];
+
+        if (this._toolInstances.has(toolId)) {
+          this._toolInstances.delete(toolId);
+        }
+        break;
+    }
+  },
+
   /**
    * Returns a *copy* of the _toolInstances collection.
    */
@@ -292,21 +360,6 @@ DevToolInstance.prototype = {
    * the target being closed. We should clear-up.
    */
   destroy: function DTI_destroy() {
-
-  },
-
-  /**
-   * This tool is being hidden.
-   * TODO: What is the definition of hidden?
-   */
-  hide: function DTI_hide() {
-
-  },
-
-  /**
-   * This tool is being shown.
-   */
-  show: function DTI_show() {
 
   },
 };
