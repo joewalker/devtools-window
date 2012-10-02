@@ -278,6 +278,18 @@ TryAttachNativeStub(JSContext *cx, IonCacheGetProperty &cache, HandleObject obj,
     if (!IsCacheableGetProp(obj, holder, shape))
         return true;
 
+    // TI infers the possible types of native object properties. There's one
+    // edge case though: for singleton objects it does not add the initial
+    // "undefined" type, see the propertySet comment in jsinfer.h. We can't
+    // monitor the return type inside an idempotent cache though, so we don't
+    // handle this case.
+    if (cache.idempotent() &&
+        holder->hasSingletonType() &&
+        holder->getSlot(shape->slot()).isUndefined())
+    {
+        return true;
+    }
+
     *isCacheableNative = true;
 
     if (cache.stubCount() < MAX_STUBS) {
@@ -302,7 +314,7 @@ js::ion::GetPropertyCache(JSContext *cx, size_t cacheIndex, HandleObject obj, Mu
 
     RootedScript script(cx);
     jsbytecode *pc;
-    cache.getScriptedLocation(script.address(), &pc);
+    cache.getScriptedLocation(&script, &pc);
 
     // Override the return value if we are invalidated (bug 728188).
     AutoDetectInvalidation adi(cx, vp.address(), ion);
@@ -819,7 +831,7 @@ js::ion::GetElementCache(JSContext *cx, size_t cacheIndex, HandleObject obj, Han
         }
     }
 
-    JSScript *script;
+    RootedScript script(cx);
     jsbytecode *pc;
     cache.getScriptedLocation(&script, &pc);
 
@@ -1143,7 +1155,7 @@ js::ion::GetNameCache(JSContext *cx, size_t cacheIndex, HandleObject scopeChain,
     IonCacheName &cache = ion->getCache(cacheIndex).toName();
     RootedPropertyName name(cx, cache.name());
 
-    JSScript *script;
+    RootedScript script(cx);
     jsbytecode *pc;
     cache.getScriptedLocation(&script, &pc);
 

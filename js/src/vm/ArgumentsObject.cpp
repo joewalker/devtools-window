@@ -35,7 +35,7 @@ ArgumentsObject::create(JSContext *cx, StackFrame *fp)
     bool strict = fp->callee().inStrictMode();
     Class *clasp = strict ? &StrictArgumentsObjectClass : &NormalArgumentsObjectClass;
 
-    RootedShape shape(cx, EmptyShape::getInitialShape(cx, clasp, proto,
+    RootedShape shape(cx, EmptyShape::getInitialShape(cx, clasp, TaggedProto(proto),
                                                       proto->getParent(), FINALIZE_KIND,
                                                       BaseShape::INDEXED));
     if (!shape)
@@ -169,7 +169,7 @@ ArgSetter(JSContext *cx, HandleObject obj, HandleId id, JSBool strict, MutableHa
     attrs &= (JSPROP_ENUMERATE | JSPROP_PERMANENT); /* only valid attributes */
 
     NormalArgumentsObject &argsobj = obj->asNormalArguments();
-    JSScript *script = argsobj.containingScript();
+    RootedScript script(cx, argsobj.containingScript());
 
     if (JSID_IS_INT(id)) {
         unsigned arg = unsigned(JSID_TO_INT(id));

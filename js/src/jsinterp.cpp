@@ -1029,7 +1029,7 @@ IteratorMore(JSContext *cx, JSObject *iterobj, bool *cond, MutableHandleValue rv
 }
 
 static inline bool
-IteratorNext(JSContext *cx, JSObject *iterobj, MutableHandleValue rval)
+IteratorNext(JSContext *cx, HandleObject iterobj, MutableHandleValue rval)
 {
     if (iterobj->isPropertyIterator()) {
         NativeIterator *ni = iterobj->asPropertyIterator().getNativeIterator();
@@ -1048,11 +1048,13 @@ IteratorNext(JSContext *cx, JSObject *iterobj, MutableHandleValue rval)
  * types of the pushed values are consistent with type inference information.
  */
 static inline void
-TypeCheckNextBytecode(JSContext *cx, JSScript *script, unsigned n, const FrameRegs &regs)
+TypeCheckNextBytecode(JSContext *cx, JSScript *script_, unsigned n, const FrameRegs &regs)
 {
 #ifdef DEBUG
     if (cx->typeInferenceEnabled() &&
-        n == GetBytecodeLength(regs.pc)) {
+        n == GetBytecodeLength(regs.pc))
+    {
+        RootedScript script(cx, script_);
         TypeScript::CheckBytecode(cx, script, regs.pc, regs.sp);
     }
 #endif
@@ -1778,7 +1780,9 @@ BEGIN_CASE(JSOP_ITERNEXT)
     JS_ASSERT(regs.sp[-1].isObject());
     PUSH_NULL();
     MutableHandleValue res = MutableHandleValue::fromMarkedLocation(&regs.sp[-1]);
-    if (!IteratorNext(cx, &regs.sp[-2].toObject(), res))
+    RootedObject &obj = rootObject0;
+    obj = &regs.sp[-2].toObject();
+    if (!IteratorNext(cx, obj, res))
         goto error;
 }
 END_CASE(JSOP_ITERNEXT)
@@ -1786,7 +1790,9 @@ END_CASE(JSOP_ITERNEXT)
 BEGIN_CASE(JSOP_ENDITER)
 {
     JS_ASSERT(regs.stackDepth() >= 1);
-    bool ok = CloseIterator(cx, &regs.sp[-1].toObject());
+    RootedObject &obj = rootObject0;
+    obj = &regs.sp[-1].toObject();
+    bool ok = CloseIterator(cx, obj);
     regs.sp--;
     if (!ok)
         goto error;
@@ -3201,10 +3207,12 @@ BEGIN_CASE(JSOP_INITELEM)
         JS_ASSERT(obj->isArray());
         JS_ASSERT(JSID_IS_INT(id));
         JS_ASSERT(uint32_t(JSID_TO_INT(id)) < StackSpace::ARGS_LENGTH_MAX);
-        if (JSOp(regs.pc[JSOP_INITELEM_LENGTH]) == JSOP_ENDINIT &&
-            !SetLengthProperty(cx, obj, (uint32_t) (JSID_TO_INT(id) + 1)))
+        JSOp next = JSOp(*(regs.pc + GetBytecodeLength(regs.pc)));
+        if ((next == JSOP_ENDINIT && op == JSOP_INITELEM) ||
+            (next == JSOP_POP && op == JSOP_INITELEM_INC))
         {
-            goto error;
+            if (!SetLengthProperty(cx, obj, (uint32_t) (JSID_TO_INT(id) + 1)))
+                goto error;
         }
     } else {
         if (!JSObject::defineGeneric(cx, obj, id, rref, NULL, NULL, JSPROP_ENUMERATE))
@@ -3916,7 +3924,9 @@ END_CASE(JSOP_ARRAYPUSH)
               case JSTRY_ITER: {
                 /* This is similar to JSOP_ENDITER in the interpreter loop. */
                 JS_ASSERT(JSOp(*regs.pc) == JSOP_ENDITER);
-                bool ok = UnwindIteratorForException(cx, &regs.sp[-1].toObject());
+                RootedObject &obj = rootObject0;
+                obj = &regs.sp[-1].toObject();
+                bool ok = UnwindIteratorForException(cx, obj);
                 regs.sp -= 1;
                 if (!ok)
                     goto error;

@@ -189,7 +189,7 @@ HttpBaseChannel::GetLoadGroup(nsILoadGroup **aLoadGroup)
 NS_IMETHODIMP
 HttpBaseChannel::SetLoadGroup(nsILoadGroup *aLoadGroup)
 {
-  if (!CanSetLoadGroup()) {
+  if (!CanSetLoadGroup(aLoadGroup)) {
     return NS_ERROR_FAILURE;
   }
 
@@ -273,7 +273,7 @@ HttpBaseChannel::GetNotificationCallbacks(nsIInterfaceRequestor **aCallbacks)
 NS_IMETHODIMP
 HttpBaseChannel::SetNotificationCallbacks(nsIInterfaceRequestor *aCallbacks)
 {
-  if (!CanSetCallbacks()) {
+  if (!CanSetCallbacks(aCallbacks)) {
     return NS_ERROR_FAILURE;
   }
 
@@ -1478,40 +1478,6 @@ CopyProperties(const nsAString& aKey, nsIVariant *aData, void *aClosure)
                                            (aClosure);
   bag->SetProperty(aKey, aData);
   return PL_DHASH_NEXT;
-}
-
-// Return whether upon a redirect code of httpStatus for method, the
-// request method should be rewritten to GET.
-//
-bool
-HttpBaseChannel::ShouldRewriteRedirectToGET(uint32_t httpStatus,
-                                            nsHttpAtom method)
-{
-  // for 301 and 302, only rewrite POST
-  if (httpStatus == 301 || httpStatus == 302)
-    return method == nsHttp::Post;
-
-  // rewrite for 303 unless it was HEAD
-  if (httpStatus == 303)
-    return method != nsHttp::Head;
-
-  // otherwise, such as for 307, do not rewrite
-  return false;
-}   
-
-// Return whether the specified method is safe as per RFC 2616, Section 9.1.1.
-bool
-HttpBaseChannel::IsSafeMethod(nsHttpAtom method)
-{
-  // This code will need to be extended for new safe methods, otherwise
-  // they'll default to "not safe".
-  return method == nsHttp::Get ||
-         method == nsHttp::Head ||
-         method == nsHttp::Options ||
-         method == nsHttp::Propfind ||
-         method == nsHttp::Report ||
-         method == nsHttp::Search ||
-         method == nsHttp::Trace;
 }
 
 nsresult

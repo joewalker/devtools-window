@@ -150,7 +150,6 @@
           <menuitem id="appmenu_remoteDebugger" observes="devtoolsMenuBroadcaster_RemoteDebugger"/>
           <menuitem id="appmenu_chromeDebugger" observes="devtoolsMenuBroadcaster_ChromeDebugger"/>
           <menuitem id="appmenu_scratchpad" observes="devtoolsMenuBroadcaster_Scratchpad"/>
-          <menuitem id="appmenu_styleeditor" observes="devtoolsMenuBroadcaster_StyleEditor"/>
           <menuitem id="appmenu_pageSource" observes="devtoolsMenuBroadcaster_PageSource"/>
           <menuitem id="appmenu_errorConsole" observes="devtoolsMenuBroadcaster_ErrorConsole"/>
           <menuseparator id="appmenu_devToolsEndSeparator"/>

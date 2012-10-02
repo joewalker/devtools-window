@@ -57,8 +57,8 @@ function DeveloperToolbar(aChromeWindow, aToolbarElement)
   this._pendingShowCallback = undefined;
   this._pendingHide = false;
   this._errorsCount = {};
-  this._webConsoleButton = this._doc
-                           .getElementById("developer-toolbar-webconsole");
+  this._errorCounterButton = this._doc
+                             .getElementById("developer-toolbar-toolbox-button");
 
   try {
     CmdCommands.refreshAutoCommands(aChromeWindow);
@@ -552,9 +552,9 @@ function DT__updateErrorsCount(aChangedTabId)
   let errors = this._errorsCount[tabId];
 
   if (errors) {
-    this._webConsoleButton.setAttribute("error-count", errors);
+    this._errorCounterButton.setAttribute("error-count", errors);
   } else {
-    this._webConsoleButton.removeAttribute("error-count");
+    this._errorCounterButton.removeAttribute("error-count");
   }
 };
 

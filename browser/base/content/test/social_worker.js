@@ -13,6 +13,9 @@ onconnect = function(e) {
         testPort = port;
         port.postMessage({topic: "test-init-done"});
         break;
+      case "test-logout":
+        apiPort.postMessage({topic: "social.user-profile", data: {}});
+        break;
       case "sidebar-message":
         sidebarPort = port;
         if (testPort && event.data.result == "ok")
@@ -64,6 +67,9 @@ onconnect = function(e) {
       case "flyout-visibility":
         testPort.postMessage({topic:"got-flyout-visibility", result: event.data.result});
         break;
+      case "test-flyout-close":
+        sidebarPort.postMessage({topic:"test-flyout-close"});
+        break;
       case "test-worker-chat":
         apiPort.postMessage({topic: "social.request-chat", data: event.data.data });
         break;
@@ -108,6 +114,12 @@ onconnect = function(e) {
               unshareTooltip: "Unshare this page",
               sharedLabel: "This page has been shared",
               unsharedLabel: "This page is no longer shared",
+              unshareLabel: "You have already shared this page",
+              portraitLabel: "Your pretty face",
+              unshareConfirmLabel: "Unshare it!",
+              unshareConfirmAccessKey: "U",
+              unshareCancelLabel: "Got it!",
+              unshareCancelAccessKey: "G"
             }
           }
         });

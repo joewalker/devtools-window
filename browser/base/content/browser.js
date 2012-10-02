@@ -1472,14 +1472,6 @@ var gBrowserInit = {
       cmd.removeAttribute("hidden");
     }
 
-    // Enable Style Editor?
-    let styleEditorEnabled = gPrefService.getBoolPref(StyleEditor.prefEnabledName);
-    if (styleEditorEnabled) {
-      let cmd = document.getElementById("Tools:StyleEditor");
-      cmd.removeAttribute("disabled");
-      cmd.removeAttribute("hidden");
-    }
-
 #ifdef MENUBAR_CAN_AUTOHIDE
     // If the user (or the locale) hasn't enabled the top-level "Character
     // Encoding" menu via the "browser.menu.showCharacterEncoding" preference,
@@ -2493,8 +2485,8 @@ function BrowserOnAboutPageLoad(document) {
 
     let ss = Components.classes["@mozilla.org/browser/sessionstore;1"].
              getService(Components.interfaces.nsISessionStore);
-    if (!ss.canRestoreLastSession)
-      document.getElementById("launcher").removeAttribute("session");
+    if (ss.canRestoreLastSession)
+      document.getElementById("launcher").setAttribute("session", "true");
 
     // Inject search engine and snippets URL.
     let docElt = document.documentElement;
@@ -2521,13 +2513,13 @@ let BrowserOnClick = {
 
     // If the event came from an ssl error page, it is probably either the "Add
     // Exception…" or "Get me out of here!" button
-    if (/^about:certerror/.test(ownerDoc.documentURI)) {
+    if (ownerDoc.documentURI.startsWith("about:certerror")) {
       this.onAboutCertError(originalTarget, ownerDoc);
     }
-    else if (/^about:blocked/.test(ownerDoc.documentURI)) {
+    else if (ownerDoc.documentURI.startsWith("about:blocked")) {
       this.onAboutBlocked(originalTarget, ownerDoc);
     }
-    else if (/^about:neterror/.test(ownerDoc.documentURI)) {
+    else if (ownerDoc.documentURI.startsWith("about:neterror")) {
       this.onAboutNetError(originalTarget, ownerDoc);
     }
     else if (/^about:home$/i.test(ownerDoc.documentURI)) {
@@ -4481,7 +4473,7 @@ var TabsProgressListener = {
 
     if (aStateFlags & Ci.nsIWebProgressListener.STATE_STOP &&
         Components.isSuccessCode(aStatus) &&
-        /^about:/.test(aWebProgress.DOMWindow.document.documentURI)) {
+        aWebProgress.DOMWindow.document.documentURI.startsWith("about:")) {
       aBrowser.addEventListener("click", BrowserOnClick, true);
       aBrowser.addEventListener("pagehide", function onPageHide(event) {
         if (event.target.defaultView.frameElement)
@@ -7374,7 +7366,7 @@ var TabContextMenu = {
 };
 
 XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
-                                  "resource:///modules/devtools/DevTools.jsm");
+                                  "resource:///modules/devtools/gDevTools.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "HUDConsoleUI", function () {
   let tempScope = {};
@@ -7470,41 +7462,6 @@ XPCOMUtils.defineLazyGetter(ResponsiveUI, "ResponsiveUIManager", function() {
   Cu.import("resource:///modules/devtools/responsivedesign.jsm", tmp);
   return tmp.ResponsiveUIManager;
 });
-
-var StyleEditor = {
-  prefEnabledName: "devtools.styleeditor.enabled",
-  /**
-   * Opens the style editor. If the UI is already open, it will be focused.
-   *
-   * @param {CSSStyleSheet} [aSelectedStyleSheet] default Stylesheet.
-   * @param {Number} [aLine] Line to which the caret should be moved (one-indexed).
-   * @param {Number} [aCol] Column to which the caret should be moved (one-indexed).
-   */
-  openChrome: function SE_openChrome(aSelectedStyleSheet, aLine, aCol)
-  {
-    let contentWindow = gBrowser.selectedBrowser.contentWindow;
-    let win = this.StyleEditorManager.getEditorForWindow(contentWindow);
-    if (win) {
-      this.StyleEditorManager.selectEditor(win);
-      return win;
-    } else {
-      return this.StyleEditorManager.newEditor(contentWindow,
-                                               aSelectedStyleSheet, aLine, aCol);
-    }
-  },
-
-  toggle: function SE_toggle()
-  {
-    this.StyleEditorManager.toggleEditor(gBrowser.contentWindow);
-  }
-};
-
-XPCOMUtils.defineLazyGetter(StyleEditor, "StyleEditorManager", function() {
-  let tmp = {};
-  Cu.import("resource:///modules/devtools/StyleEditor.jsm", tmp);
-  return new tmp.StyleEditorManager(window);
-});
-
 
 XPCOMUtils.defineLazyGetter(window, "gShowPageResizers", function () {
 #ifdef XP_WIN

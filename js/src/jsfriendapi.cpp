@@ -97,7 +97,8 @@ JS_SplicePrototype(JSContext *cx, JSObject *objArg, JSObject *protoArg)
         return JS_SetPrototype(cx, obj, proto);
     }
 
-    return obj->splicePrototype(cx, proto);
+    Rooted<TaggedProto> tagged(cx, TaggedProto(proto));
+    return obj->splicePrototype(cx, tagged);
 }
 
 JS_FRIEND_API(JSObject *)
@@ -127,7 +128,7 @@ js::PrepareForFullGC(JSRuntime *rt)
 JS_FRIEND_API(void)
 js::PrepareForIncrementalGC(JSRuntime *rt)
 {
-    if (rt->gcIncrementalState == gc::NO_INCREMENTAL)
+    if (!IsIncrementalGCInProgress(rt))
         return;
 
     for (CompartmentsIter c(rt); !c.done(); c.next()) {
@@ -538,6 +539,15 @@ JS_SetAccumulateTelemetryCallback(JSRuntime *rt, JSAccumulateTelemetryDataCallba
     rt->telemetryCallback = callback;
 }
 
+JS_FRIEND_API(JSObject *)
+JS_CloneObject(JSContext *cx, JSObject *obj_, JSObject *proto_, JSObject *parent_)
+{
+    RootedObject obj(cx, obj_);
+    Rooted<js::TaggedProto> proto(cx, proto_);
+    RootedObject parent(cx, parent_);
+    return CloneObject(cx, obj, proto, parent);
+}
+
 #ifdef DEBUG
 JS_FRIEND_API(void)
 js_DumpString(JSString *str)
@@ -795,7 +805,7 @@ NotifyDidPaint(JSRuntime *rt)
         return;
     }
 
-    if (rt->gcIncrementalState != gc::NO_INCREMENTAL && !rt->gcInterFrameGC) {
+    if (IsIncrementalGCInProgress(rt) && !rt->gcInterFrameGC) {
         PrepareForIncrementalGC(rt);
         GCSlice(rt, GC_NORMAL, gcreason::REFRESH_FRAME);
     }
@@ -807,6 +817,12 @@ extern JS_FRIEND_API(bool)
 IsIncrementalGCEnabled(JSRuntime *rt)
 {
     return rt->gcIncrementalEnabled && rt->gcMode == JSGC_MODE_INCREMENTAL;
+}
+
+JS_FRIEND_API(bool)
+IsIncrementalGCInProgress(JSRuntime *rt)
+{
+    return (rt->gcIncrementalState != gc::NO_INCREMENTAL && !rt->gcVerifyPreData);
 }
 
 extern JS_FRIEND_API(void)

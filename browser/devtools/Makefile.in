@@ -26,6 +26,7 @@ DIRS = \
   layoutview \
   shared \
   responsivedesign \
+  framework \
   $(NULL)
 
 include $(topsrcdir)/config/rules.mk

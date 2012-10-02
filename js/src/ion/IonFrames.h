@@ -257,10 +257,12 @@ namespace js {
 namespace ion {
 
 JSScript *
-GetTopIonJSScript(JSContext *cx);
+GetTopIonJSScript(JSContext *cx,
+                  const SafepointIndex **safepointIndexOut = NULL,
+                  void **returnAddrOut = NULL);
 
 void
-GetPcScript(JSContext *cx, JSScript **scriptRes, jsbytecode **pcRes);
+GetPcScript(JSContext *cx, MutableHandleScript scriptRes, jsbytecode **pcRes);
 
 // Given a slot index, returns the offset, in bytes, of that slot from an
 // IonJSFrameLayout. Slot distances are uniform across architectures, however,

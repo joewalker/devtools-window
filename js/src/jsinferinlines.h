@@ -21,6 +21,61 @@
 #ifndef jsinferinlines_h___
 #define jsinferinlines_h___
 
+inline bool
+js::TaggedProto::isObject() const
+{
+    /* Skip NULL and Proxy::LazyProto. */
+    return uintptr_t(proto) > uintptr_t(Proxy::LazyProto);
+}
+
+inline bool
+js::TaggedProto::isLazy() const
+{
+    return proto == Proxy::LazyProto;
+}
+
+inline JSObject *
+js::TaggedProto::toObject() const
+{
+    JS_ASSERT(isObject());
+    return proto;
+}
+
+inline JSObject *
+js::TaggedProto::toObjectOrNull() const
+{
+    JS_ASSERT(!proto || isObject());
+    return proto;
+}
+
+template<class Outer>
+inline bool
+js::TaggedProtoOperations<Outer>::isLazy() const
+{
+    return value()->isLazy();
+}
+
+template<class Outer>
+inline bool
+js::TaggedProtoOperations<Outer>::isObject() const
+{
+    return value()->isObject();
+}
+
+template<class Outer>
+inline JSObject *
+js::TaggedProtoOperations<Outer>::toObject() const
+{
+    return value()->toObject();
+}
+
+template<class Outer>
+inline JSObject *
+js::TaggedProtoOperations<Outer>::toObjectOrNull() const
+{
+    return value()->toObjectOrNull();
+}
+
 namespace js {
 namespace types {
 
@@ -412,7 +467,7 @@ struct AutoEnterCompilation
 inline TypeObject *
 GetTypeNewObject(JSContext *cx, JSProtoKey key)
 {
-    RootedObject proto(cx);
+    js::RootedObject proto(cx);
     if (!js_GetClassPrototype(cx, key, &proto))
         return NULL;
     return proto->getNewType(cx);
@@ -424,7 +479,7 @@ GetTypeCallerInitObject(JSContext *cx, JSProtoKey key)
 {
     if (cx->typeInferenceEnabled()) {
         jsbytecode *pc;
-        JSScript *script = cx->stack.currentScript(&pc);
+        RootedScript script(cx, cx->stack.currentScript(&pc));
         if (script)
             return TypeScript::InitObject(cx, script, pc, key);
     }
@@ -454,11 +509,11 @@ TypeMonitorCall(JSContext *cx, const js::CallArgs &args, bool constructing)
     extern void TypeMonitorCallSlow(JSContext *cx, HandleObject callee,
                                     const CallArgs &args, bool constructing);
 
-    RootedObject callee(cx, &args.callee());
+    js::RootedObject callee(cx, &args.callee());
     if (callee->isFunction()) {
         JSFunction *fun = callee->toFunction();
         if (fun->isInterpreted()) {
-            RootedScript script(cx, fun->script());
+            js::RootedScript script(cx, fun->script());
             if (!script->ensureRanAnalysis(cx))
                 return false;
             if (cx->typeInferenceEnabled())
@@ -581,14 +636,20 @@ FixObjectType(JSContext *cx, HandleObject obj)
 }
 
 /* Interface helpers for JSScript */
-extern void TypeMonitorResult(JSContext *cx, JSScript *script, jsbytecode *pc, const js::Value &rval);
-extern void TypeDynamicResult(JSContext *cx, JSScript *script, jsbytecode *pc, js::types::Type type);
+extern void TypeMonitorResult(JSContext *cx, HandleScript script, jsbytecode *pc,
+                              const js::Value &rval);
+extern void TypeDynamicResult(JSContext *cx, HandleScript script, jsbytecode *pc,
+                              js::types::Type type);
 
 inline bool
 UseNewTypeAtEntry(JSContext *cx, StackFrame *fp)
 {
-    return fp->isConstructing() && cx->typeInferenceEnabled() &&
-           fp->prev() && UseNewType(cx, fp->prev()->script(), fp->prevpc());
+
+    if (!fp->isConstructing() || !cx->typeInferenceEnabled() || !fp->prev())
+        return false;
+
+    RootedScript prevScript(cx, fp->prev()->script());
+    return UseNewType(cx, prevScript, fp->prevpc());
 }
 
 inline bool
@@ -621,7 +682,7 @@ UseNewTypeForClone(JSFunction *fun)
      * instance a singleton type and clone the underlying script.
      */
 
-    JSScript *script = fun->script();
+    RawScript script = fun->script();
 
     if (script->length >= 50)
         return false;
@@ -650,20 +711,20 @@ UseNewTypeForClone(JSFunction *fun)
 /////////////////////////////////////////////////////////////////////
 
 /* static */ inline unsigned
-TypeScript::NumTypeSets(JSScript *script)
+TypeScript::NumTypeSets(RawScript script)
 {
     return script->nTypeSets + analyze::TotalSlots(script);
 }
 
 /* static */ inline HeapTypeSet *
-TypeScript::ReturnTypes(JSScript *script)
+TypeScript::ReturnTypes(RawScript script)
 {
     TypeSet *types = script->types->typeArray() + script->nTypeSets + js::analyze::CalleeSlot();
     return types->toHeapTypeSet();
 }
 
 /* static */ inline StackTypeSet *
-TypeScript::ThisTypes(JSScript *script)
+TypeScript::ThisTypes(RawScript script)
 {
     TypeSet *types = script->types->typeArray() + script->nTypeSets + js::analyze::ThisSlot();
     return types->toStackTypeSet();
@@ -676,7 +737,7 @@ TypeScript::ThisTypes(JSScript *script)
  */
 
 /* static */ inline StackTypeSet *
-TypeScript::ArgTypes(JSScript *script, unsigned i)
+TypeScript::ArgTypes(RawScript script, unsigned i)
 {
     JS_ASSERT(i < script->function()->nargs);
     TypeSet *types = script->types->typeArray() + script->nTypeSets + js::analyze::ArgSlot(i);
@@ -684,7 +745,7 @@ TypeScript::ArgTypes(JSScript *script, unsigned i)
 }
 
 /* static */ inline StackTypeSet *
-TypeScript::LocalTypes(JSScript *script, unsigned i)
+TypeScript::LocalTypes(RawScript script, unsigned i)
 {
     JS_ASSERT(i < script->nfixed);
     TypeSet *types = script->types->typeArray() + script->nTypeSets + js::analyze::LocalSlot(script, i);
@@ -692,7 +753,7 @@ TypeScript::LocalTypes(JSScript *script, unsigned i)
 }
 
 /* static */ inline StackTypeSet *
-TypeScript::SlotTypes(JSScript *script, unsigned slot)
+TypeScript::SlotTypes(RawScript script, unsigned slot)
 {
     JS_ASSERT(slot < js::analyze::TotalSlots(script));
     TypeSet *types = script->types->typeArray() + script->nTypeSets + slot;
@@ -700,9 +761,9 @@ TypeScript::SlotTypes(JSScript *script, unsigned slot)
 }
 
 /* static */ inline TypeObject *
-TypeScript::StandardType(JSContext *cx, JSScript *script, JSProtoKey key)
+TypeScript::StandardType(JSContext *cx, HandleScript script, JSProtoKey key)
 {
-    RootedObject proto(cx);
+    js::RootedObject proto(cx);
     if (!js_GetClassPrototype(cx, key, &proto, NULL))
         return NULL;
     return proto->getNewType(cx);
@@ -730,7 +791,7 @@ struct AllocationSiteKey {
 };
 
 /* static */ inline TypeObject *
-TypeScript::InitObject(JSContext *cx, JSScript *script, jsbytecode *pc, JSProtoKey kind)
+TypeScript::InitObject(JSContext *cx, HandleScript script, jsbytecode *pc, JSProtoKey kind)
 {
     JS_ASSERT(!UseNewTypeForInitializer(cx, script, pc, kind));
 
@@ -786,35 +847,35 @@ SetInitializerObjectType(JSContext *cx, HandleScript script, jsbytecode *pc, Han
 }
 
 /* static */ inline void
-TypeScript::Monitor(JSContext *cx, JSScript *script, jsbytecode *pc, const js::Value &rval)
+TypeScript::Monitor(JSContext *cx, HandleScript script, jsbytecode *pc, const js::Value &rval)
 {
     if (cx->typeInferenceEnabled())
         TypeMonitorResult(cx, script, pc, rval);
 }
 
 /* static */ inline void
-TypeScript::MonitorOverflow(JSContext *cx, JSScript *script, jsbytecode *pc)
+TypeScript::MonitorOverflow(JSContext *cx, HandleScript script, jsbytecode *pc)
 {
     if (cx->typeInferenceEnabled())
         TypeDynamicResult(cx, script, pc, Type::DoubleType());
 }
 
 /* static */ inline void
-TypeScript::MonitorString(JSContext *cx, JSScript *script, jsbytecode *pc)
+TypeScript::MonitorString(JSContext *cx, HandleScript script, jsbytecode *pc)
 {
     if (cx->typeInferenceEnabled())
         TypeDynamicResult(cx, script, pc, Type::StringType());
 }
 
 /* static */ inline void
-TypeScript::MonitorUnknown(JSContext *cx, JSScript *script, jsbytecode *pc)
+TypeScript::MonitorUnknown(JSContext *cx, HandleScript script, jsbytecode *pc)
 {
     if (cx->typeInferenceEnabled())
         TypeDynamicResult(cx, script, pc, Type::UnknownType());
 }
 
 /* static */ inline void
-TypeScript::GetPcScript(JSContext *cx, JSScript **script, jsbytecode **pc)
+TypeScript::GetPcScript(JSContext *cx, MutableHandleScript script, jsbytecode **pc)
 {
 #ifdef JS_ION
     if (cx->fp()->beginsIonActivation()) {
@@ -822,14 +883,14 @@ TypeScript::GetPcScript(JSContext *cx, JSScript **script, jsbytecode **pc)
         return;
     }
 #endif
-    *script = cx->fp()->script();
+    script.set(cx->fp()->script());
     *pc = cx->regs().pc;
 }
 
 /* static */ inline void
 TypeScript::MonitorOverflow(JSContext *cx)
 {
-    JSScript *script;
+    RootedScript script(cx);
     jsbytecode *pc;
     GetPcScript(cx, &script, &pc);
     MonitorOverflow(cx, script, pc);
@@ -838,7 +899,7 @@ TypeScript::MonitorOverflow(JSContext *cx)
 /* static */ inline void
 TypeScript::MonitorString(JSContext *cx)
 {
-    JSScript *script;
+    RootedScript script(cx);
     jsbytecode *pc;
     GetPcScript(cx, &script, &pc);
     MonitorString(cx, script, pc);
@@ -847,7 +908,7 @@ TypeScript::MonitorString(JSContext *cx)
 /* static */ inline void
 TypeScript::MonitorUnknown(JSContext *cx)
 {
-    JSScript *script;
+    RootedScript script(cx);
     jsbytecode *pc;
     GetPcScript(cx, &script, &pc);
     MonitorUnknown(cx, script, pc);
@@ -856,7 +917,7 @@ TypeScript::MonitorUnknown(JSContext *cx)
 /* static */ inline void
 TypeScript::Monitor(JSContext *cx, const js::Value &rval)
 {
-    JSScript *script;
+    RootedScript script(cx);
     jsbytecode *pc;
     GetPcScript(cx, &script, &pc);
     Monitor(cx, script, pc, rval);
@@ -882,7 +943,7 @@ TypeScript::MonitorAssign(JSContext *cx, HandleObject obj, jsid id)
 }
 
 /* static */ inline void
-TypeScript::SetThis(JSContext *cx, JSScript *script, Type type)
+TypeScript::SetThis(JSContext *cx, HandleScript script, Type type)
 {
     if (!cx->typeInferenceEnabled())
         return;
@@ -904,14 +965,14 @@ TypeScript::SetThis(JSContext *cx, JSScript *script, Type type)
 }
 
 /* static */ inline void
-TypeScript::SetThis(JSContext *cx, JSScript *script, const js::Value &value)
+TypeScript::SetThis(JSContext *cx, HandleScript script, const js::Value &value)
 {
     if (cx->typeInferenceEnabled())
         SetThis(cx, script, GetValueType(cx, value));
 }
 
 /* static */ inline void
-TypeScript::SetLocal(JSContext *cx, JSScript *script, unsigned local, Type type)
+TypeScript::SetLocal(JSContext *cx, HandleScript script, unsigned local, Type type)
 {
     if (!cx->typeInferenceEnabled())
         return;
@@ -927,7 +988,7 @@ TypeScript::SetLocal(JSContext *cx, JSScript *script, unsigned local, Type type)
 }
 
 /* static */ inline void
-TypeScript::SetLocal(JSContext *cx, JSScript *script, unsigned local, const js::Value &value)
+TypeScript::SetLocal(JSContext *cx, HandleScript script, unsigned local, const js::Value &value)
 {
     if (cx->typeInferenceEnabled()) {
         Type type = GetValueType(cx, value);
@@ -936,7 +997,7 @@ TypeScript::SetLocal(JSContext *cx, JSScript *script, unsigned local, const js::
 }
 
 /* static */ inline void
-TypeScript::SetArgument(JSContext *cx, JSScript *script, unsigned arg, Type type)
+TypeScript::SetArgument(JSContext *cx, HandleScript script, unsigned arg, Type type)
 {
     if (!cx->typeInferenceEnabled())
         return;
@@ -952,7 +1013,7 @@ TypeScript::SetArgument(JSContext *cx, JSScript *script, unsigned arg, Type type
 }
 
 /* static */ inline void
-TypeScript::SetArgument(JSContext *cx, JSScript *script, unsigned arg, const js::Value &value)
+TypeScript::SetArgument(JSContext *cx, HandleScript script, unsigned arg, const js::Value &value)
 {
     if (cx->typeInferenceEnabled()) {
         Type type = GetValueType(cx, value);
@@ -1400,14 +1461,14 @@ TypeCallsite::TypeCallsite(JSContext *cx, JSScript *script, jsbytecode *pc,
 // TypeObject
 /////////////////////////////////////////////////////////////////////
 
-inline TypeObject::TypeObject(RawObject proto, bool function, bool unknown)
+inline TypeObject::TypeObject(TaggedProto proto, bool function, bool unknown)
 {
     PodZero(this);
 
     /* Inner objects may not appear on prototype chains. */
-    JS_ASSERT_IF(proto, !proto->getClass()->ext.outerObject);
+    JS_ASSERT_IF(proto.isObject(), !proto.toObject()->getClass()->ext.outerObject);
 
-    this->proto = proto;
+    this->proto = proto.raw();
 
     if (function)
         flags |= OBJECT_FLAG_FUNCTION;
@@ -1640,7 +1701,7 @@ JSScript::ensureRanAnalysis(JSContext *cx)
 inline bool
 JSScript::ensureRanInference(JSContext *cx)
 {
-    JS::RootedScript self(cx, this);
+    js::RootedScript self(cx, this);
     if (!ensureRanAnalysis(cx))
         return false;
     if (!self->analysis()->ranInference()) {
@@ -1686,44 +1747,34 @@ js::analyze::ScriptAnalysis::addPushedType(JSContext *cx, uint32_t offset, uint3
     pushed->addType(cx, type);
 }
 
-inline js::types::TypeObject *
-JSCompartment::getEmptyType(JSContext *cx)
-{
-    JS::MaybeCheckStackRoots(cx);
+namespace js {
 
-    if (!emptyTypeObject) {
-        JS::RootedObject nullproto(cx, NULL);
-        emptyTypeObject = types.newTypeObject(cx, JSProto_Object, nullproto, true);
+template <>
+struct RootMethods<const types::Type>
+{
+    static types::Type initial() { return types::Type::UnknownType(); }
+    static ThingRootKind kind() { return THING_ROOT_TYPE; }
+    static bool poisoned(const types::Type &v) {
+        return (v.isTypeObject() && IsPoisonedPtr(v.typeObject()))
+            || (v.isSingleObject() && IsPoisonedPtr(v.singleObject()));
     }
-    return emptyTypeObject;
-}
+};
+
+template <>
+struct RootMethods<types::Type>
+{
+    static types::Type initial() { return types::Type::UnknownType(); }
+    static ThingRootKind kind() { return THING_ROOT_TYPE; }
+    static bool poisoned(const types::Type &v) {
+        return (v.isTypeObject() && IsPoisonedPtr(v.typeObject()))
+            || (v.isSingleObject() && IsPoisonedPtr(v.singleObject()));
+    }
+};
+
+} // namespace js
 
 namespace JS {
-
 template<> class AnchorPermitted<js::types::TypeObject *> { };
-
-template <>
-struct RootMethods<const js::types::Type>
-{
-    static js::types::Type initial() { return js::types::Type::UnknownType(); }
-    static ThingRootKind kind() { return THING_ROOT_TYPE; }
-    static bool poisoned(const js::types::Type &v) {
-        return (v.isTypeObject() && IsPoisonedPtr(v.typeObject()))
-            || (v.isSingleObject() && IsPoisonedPtr(v.singleObject()));
-    }
-};
-
-template <>
-struct RootMethods<js::types::Type>
-{
-    static js::types::Type initial() { return js::types::Type::UnknownType(); }
-    static ThingRootKind kind() { return THING_ROOT_TYPE; }
-    static bool poisoned(const js::types::Type &v) {
-        return (v.isTypeObject() && IsPoisonedPtr(v.typeObject()))
-            || (v.isSingleObject() && IsPoisonedPtr(v.singleObject()));
-    }
-};
-
 }  // namespace JS
 
 #endif // jsinferinlines_h___

@@ -86,7 +86,9 @@ var tabPreviews = {
           this._pendingUpdate = true;
           setTimeout(function (self, aTab) {
             self._pendingUpdate = false;
-            if (aTab.parentNode && !aTab.hasAttribute("busy"))
+            if (aTab.parentNode &&
+                !aTab.hasAttribute("busy") &&
+                !aTab.hasAttribute("pending"))
               self.capture(aTab, true);
           }, 2000, this, this._selectedTab);
         }
@@ -735,7 +737,7 @@ var allTabs = {
   },
 
   handleEvent: function allTabs_handleEvent(event) {
-    if (/^Tab/.test(event.type)) {
+    if (event.type.startsWith("Tab")) {
       var tab = event.target;
       if (event.type != "TabOpen")
         var preview = this._getPreview(tab);

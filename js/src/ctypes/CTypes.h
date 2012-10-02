@@ -250,7 +250,7 @@ struct FunctionInfo
 
   // Calling convention of the function. Convert to ffi_abi using GetABI
   // and OBJECT_TO_JSVAL. Stored as a JSObject* for ease of tracing.
-  JSObject* mABI;                
+  JSObject* mABI;
 
   // The CType of the value returned by the function.
   JSObject* mReturnType;
@@ -428,7 +428,7 @@ namespace CType {
   ffi_type* GetFFIType(JSContext* cx, JSObject* obj);
   JSString* GetName(JSContext* cx, JSHandleObject obj);
   JSObject* GetProtoFromCtor(JSObject* obj, CTypeProtoSlot slot);
-  JSObject* GetProtoFromType(JSObject* obj, CTypeProtoSlot slot);
+  JSObject* GetProtoFromType(JSContext* cx, JSObject* obj, CTypeProtoSlot slot);
   JSCTypesCallbacks* GetCallbacksFromType(JSObject* obj);
 }
 

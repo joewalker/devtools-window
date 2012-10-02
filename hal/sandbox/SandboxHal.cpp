@@ -184,7 +184,7 @@ GetLight(hal::LightType light, hal::LightConfiguration* aConfig)
 }
 
 void 
-AdjustSystemClock(int32_t aDeltaMilliseconds)
+AdjustSystemClock(int64_t aDeltaMilliseconds)
 {
   Hal()->SendAdjustSystemClock(aDeltaMilliseconds);
 }
@@ -201,6 +201,18 @@ GetTimezone()
   nsCString timezone;
   Hal()->SendGetTimezone(&timezone);
   return timezone;
+}
+
+void
+EnableSystemTimeChangeNotifications()
+{
+  Hal()->SendEnableSystemTimeChangeNotifications();
+}
+
+void
+DisableSystemTimeChangeNotifications()
+{
+  Hal()->SendDisableSystemTimeChangeNotifications();
 }
 
 void
@@ -362,6 +374,7 @@ class HalParent : public PHalParent
                 , public WakeLockObserver
                 , public ScreenConfigurationObserver
                 , public SwitchObserver
+                , public SystemTimeObserver
 {
 public:
   virtual void
@@ -497,7 +510,7 @@ public:
   virtual bool
   RecvGetScreenEnabled(bool *enabled) MOZ_OVERRIDE
   {
-    if (!AppProcessHasPermission(this, "power")) {
+    if (!AssertAppProcessPermission(this, "power")) {
       return false;
     }
     *enabled = hal::GetScreenEnabled();
@@ -507,7 +520,7 @@ public:
   virtual bool
   RecvSetScreenEnabled(const bool &enabled) MOZ_OVERRIDE
   {
-    if (!AppProcessHasPermission(this, "power")) {
+    if (!AssertAppProcessPermission(this, "power")) {
       return false;
     }
     hal::SetScreenEnabled(enabled);
@@ -517,7 +530,7 @@ public:
   virtual bool
   RecvGetCpuSleepAllowed(bool *allowed) MOZ_OVERRIDE
   {
-    if (!AppProcessHasPermission(this, "power")) {
+    if (!AssertAppProcessPermission(this, "power")) {
       return false;
     }
     *allowed = hal::GetCpuSleepAllowed();
@@ -527,7 +540,7 @@ public:
   virtual bool
   RecvSetCpuSleepAllowed(const bool &allowed) MOZ_OVERRIDE
   {
-    if (!AppProcessHasPermission(this, "power")) {
+    if (!AssertAppProcessPermission(this, "power")) {
       return false;
     }
     hal::SetCpuSleepAllowed(allowed);
@@ -537,7 +550,7 @@ public:
   virtual bool
   RecvGetScreenBrightness(double *brightness) MOZ_OVERRIDE
   {
-    if (!AppProcessHasPermission(this, "power")) {
+    if (!AssertAppProcessPermission(this, "power")) {
       return false;
     }
     *brightness = hal::GetScreenBrightness();
@@ -547,7 +560,7 @@ public:
   virtual bool
   RecvSetScreenBrightness(const double &brightness) MOZ_OVERRIDE
   {
-    if (!AppProcessHasPermission(this, "power")) {
+    if (!AssertAppProcessPermission(this, "power")) {
       return false;
     }
     hal::SetScreenBrightness(brightness);
@@ -561,7 +574,7 @@ public:
     // controlled as a unit.  Those are set through the power API, and
     // there's no other way to poke lights currently, so we require
     // "power" privileges here.
-    if (!AppProcessHasPermission(this, "power")) {
+    if (!AssertAppProcessPermission(this, "power")) {
       return false;
     }
     *status = hal::SetLight(aLight, aConfig);
@@ -571,7 +584,7 @@ public:
   virtual bool
   RecvGetLight(const LightType& aLight, LightConfiguration* aConfig, bool* status) MOZ_OVERRIDE
   {
-    if (!AppProcessHasPermission(this, "power")) {
+    if (!AssertAppProcessPermission(this, "power")) {
       return false;
     }
     *status = hal::GetLight(aLight, aConfig);
@@ -579,9 +592,9 @@ public:
   }
 
   virtual bool
-  RecvAdjustSystemClock(const int32_t &aDeltaMilliseconds) MOZ_OVERRIDE
+  RecvAdjustSystemClock(const int64_t &aDeltaMilliseconds) MOZ_OVERRIDE
   {
-    if (!AppProcessHasPermission(this, "time")) {
+    if (!AssertAppProcessPermission(this, "time")) {
       return false;
     }
     hal::AdjustSystemClock(aDeltaMilliseconds);
@@ -591,7 +604,7 @@ public:
   virtual bool 
   RecvSetTimezone(const nsCString& aTimezoneSpec) MOZ_OVERRIDE
   {
-    if (!AppProcessHasPermission(this, "time")) {
+    if (!AssertAppProcessPermission(this, "time")) {
       return false;
     }
     hal::SetTimezone(aTimezoneSpec);
@@ -601,7 +614,7 @@ public:
   virtual bool
   RecvGetTimezone(nsCString *aTimezoneSpec) MOZ_OVERRIDE
   {
-    if (!AppProcessHasPermission(this, "time")) {
+    if (!AssertAppProcessPermission(this, "time")) {
       return false;
     }
     *aTimezoneSpec = hal::GetTimezone();
@@ -609,9 +622,23 @@ public:
   }
 
   virtual bool
+  RecvEnableSystemTimeChangeNotifications() MOZ_OVERRIDE
+  {
+    hal::RegisterSystemTimeChangeObserver(this);
+    return true;
+  }
+
+  virtual bool
+  RecvDisableSystemTimeChangeNotifications() MOZ_OVERRIDE
+  {
+    hal::UnregisterSystemTimeChangeObserver(this);
+    return true;
+  }
+
+  virtual bool
   RecvReboot() MOZ_OVERRIDE
   {
-    if (!AppProcessHasPermission(this, "power")) {
+    if (!AssertAppProcessPermission(this, "power")) {
       return false;
     }
     hal::Reboot();
@@ -621,7 +648,7 @@ public:
   virtual bool
   RecvPowerOff() MOZ_OVERRIDE
   {
-    if (!AppProcessHasPermission(this, "power")) {
+    if (!AssertAppProcessPermission(this, "power")) {
       return false;
     }
     hal::PowerOff();
@@ -674,7 +701,7 @@ public:
   virtual bool
   RecvGetWakeLockInfo(const nsString &aTopic, WakeLockInformation *aWakeLockInfo) MOZ_OVERRIDE
   {
-    if (!AppProcessHasPermission(this, "power")) {
+    if (!AssertAppProcessPermission(this, "power")) {
       return false;
     }
     hal::GetWakeLockInfo(aTopic, aWakeLockInfo);

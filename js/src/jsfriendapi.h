@@ -397,10 +397,19 @@ GetFunctionNativeReserved(RawObject fun, size_t which);
 JS_FRIEND_API(void)
 SetFunctionNativeReserved(RawObject fun, size_t which, const Value &val);
 
-inline JSObject *
-GetObjectProto(RawObject obj)
+inline bool
+GetObjectProto(JSContext *cx, JSObject *obj, JSObject **proto)
 {
-    return reinterpret_cast<const shadow::Object*>(obj)->type->proto;
+    js::Class *clasp = GetObjectClass(obj);
+    if (clasp == &js::ObjectProxyClass ||
+        clasp == &js::OuterWindowProxyClass ||
+        clasp == &js::FunctionProxyClass)
+    {
+        return JS_GetPrototype(cx, obj, proto);
+    }
+
+    *proto = reinterpret_cast<const shadow::Object*>(obj)->type->proto;
+    return true;
 }
 
 inline void *
@@ -809,6 +818,9 @@ NotifyDidPaint(JSRuntime *rt);
 extern JS_FRIEND_API(bool)
 IsIncrementalGCEnabled(JSRuntime *rt);
 
+JS_FRIEND_API(bool)
+IsIncrementalGCInProgress(JSRuntime *rt);
+
 extern JS_FRIEND_API(void)
 DisableIncrementalGC(JSRuntime *rt);
 
@@ -1024,6 +1036,8 @@ typedef uint32_t JSArrayBufferViewType;
 
 /*
  * Create a new typed array with nelements elements.
+ *
+ * These functions (except the WithBuffer variants) fill in the array with zeros.
  */
 
 extern JS_FRIEND_API(JSObject *)

@@ -333,12 +333,15 @@ AddAnimationsAndTransitionsToLayer(Layer* aLayer, nsDisplayListBuilder* aBuilder
 
   nsIFrame* frame = aItem->GetUnderlyingFrame();
 
-  nsIContent* aContent = frame->GetContent();
+  nsIContent* content = frame->GetContent();
+  if (!content) {
+    return;
+  }
   ElementTransitions* et =
-    nsTransitionManager::GetTransitionsForCompositor(aContent, aProperty);
+    nsTransitionManager::GetTransitionsForCompositor(content, aProperty);
 
   ElementAnimations* ea =
-    nsAnimationManager::GetAnimationsForCompositor(aContent, aProperty);
+    nsAnimationManager::GetAnimationsForCompositor(content, aProperty);
 
   if (!ea && !et) {
     return;
@@ -3150,8 +3153,24 @@ nsIFrame *GetTransformRootFrame(nsIFrame* aFrame)
 }
 
 nsDisplayTransform::nsDisplayTransform(nsDisplayListBuilder* aBuilder, nsIFrame *aFrame,
+                                       nsDisplayList *aList, ComputeTransformFunction aTransformGetter, 
+                                       uint32_t aIndex) 
+  : nsDisplayItem(aBuilder, aFrame)
+  , mStoredList(aBuilder, aFrame, aList)
+  , mTransformGetter(aTransformGetter)
+  , mIndex(aIndex)
+{
+  MOZ_COUNT_CTOR(nsDisplayTransform);
+  NS_ABORT_IF_FALSE(aFrame, "Must have a frame!");
+  NS_ABORT_IF_FALSE(!aFrame->IsTransformed(), "Can't specify a transform getter for a transformed frame!");
+}
+
+nsDisplayTransform::nsDisplayTransform(nsDisplayListBuilder* aBuilder, nsIFrame *aFrame,
                                        nsDisplayList *aList, uint32_t aIndex) 
-  : nsDisplayItem(aBuilder, aFrame), mStoredList(aBuilder, aFrame, aList), mIndex(aIndex)
+  : nsDisplayItem(aBuilder, aFrame)
+  , mStoredList(aBuilder, aFrame, aList)
+  , mTransformGetter(nullptr)
+  , mIndex(aIndex)
 {
   MOZ_COUNT_CTOR(nsDisplayTransform);
   NS_ABORT_IF_FALSE(aFrame, "Must have a frame!");
@@ -3162,7 +3181,10 @@ nsDisplayTransform::nsDisplayTransform(nsDisplayListBuilder* aBuilder, nsIFrame 
 
 nsDisplayTransform::nsDisplayTransform(nsDisplayListBuilder* aBuilder, nsIFrame *aFrame,
                                        nsDisplayItem *aItem, uint32_t aIndex) 
-  : nsDisplayItem(aBuilder, aFrame), mStoredList(aBuilder, aFrame, aItem), mIndex(aIndex)
+  : nsDisplayItem(aBuilder, aFrame)
+  , mStoredList(aBuilder, aFrame, aItem)
+  , mTransformGetter(nullptr)
+  , mIndex(aIndex)
 {
   MOZ_COUNT_CTOR(nsDisplayTransform);
   NS_ABORT_IF_FALSE(aFrame, "Must have a frame!");
@@ -3319,7 +3341,7 @@ nsDisplayTransform::GetResultingTransformMatrix(const nsIFrame* aFrame,
   return GetResultingTransformMatrixInternal(aFrame, aOrigin, aAppUnitsPerPixel,
                                              aBoundsOverride, aTransformOverride,
                                              aToMozOrigin, aToPerspectiveOrigin,
-                                             aChildPerspective, aOutAncestor, false);
+                                             aChildPerspective, aOutAncestor);
 }
 
 gfx3DMatrix
@@ -3331,8 +3353,7 @@ nsDisplayTransform::GetResultingTransformMatrixInternal(const nsIFrame* aFrame,
                                                         gfxPoint3D* aToMozOrigin,
                                                         gfxPoint3D* aToPerspectiveOrigin,
                                                         nscoord* aChildPerspective,
-                                                        nsIFrame** aOutAncestor,
-                                                        bool aRecursing)
+                                                        nsIFrame** aOutAncestor)
 {
   NS_PRECONDITION(aFrame || (aToMozOrigin && aBoundsOverride && aToPerspectiveOrigin &&
                              aTransformOverride && aChildPerspective),
@@ -3426,15 +3447,7 @@ nsDisplayTransform::GetResultingTransformMatrixInternal(const nsIFrame* aFrame,
   gfxPoint3D rounded(hasSVGTransforms ? newOrigin.x : NS_round(newOrigin.x), 
                      hasSVGTransforms ? newOrigin.y : NS_round(newOrigin.y), 
                      0);
-
-  /**
-   * Shift the coorindates to be relative to our reference frame instead of relative to this frame.
-   * When we have preserve-3d, our reference frame is already guaranteed to be an ancestor of the
-   * preserve-3d chain, so we only need to do this once.
-   */
-  if (!aRecursing) {
-    result.Translate(rounded);
-  }
+  
   if (aFrame && aFrame->Preserves3D() && nsLayoutUtils::Are3DTransformsEnabled()) {
       // Include the transform set on our parent
       NS_ASSERTION(aFrame->GetParent() &&
@@ -3445,7 +3458,7 @@ nsDisplayTransform::GetResultingTransformMatrixInternal(const nsIFrame* aFrame,
         GetResultingTransformMatrixInternal(aFrame->GetParent(),
                                             aOrigin - aFrame->GetPosition(),
                                             aAppUnitsPerPixel, nullptr, nullptr, nullptr,
-                                            nullptr, nullptr, aOutAncestor, true);
+                                            nullptr, nullptr, aOutAncestor);
       return nsLayoutUtils::ChangeMatrixBasis(rounded + toMozOrigin, result) * parent;
   }
 
@@ -3541,10 +3554,30 @@ const gfx3DMatrix&
 nsDisplayTransform::GetTransform(float aAppUnitsPerPixel)
 {
   if (mTransform.IsIdentity() || mCachedAppUnitsPerPixel != aAppUnitsPerPixel) {
-    mTransform =
-      GetResultingTransformMatrix(mFrame, ToReferenceFrame(),
-                                  aAppUnitsPerPixel);
-    mCachedAppUnitsPerPixel = aAppUnitsPerPixel;
+    gfxPoint3D newOrigin =
+      gfxPoint3D(NSAppUnitsToFloatPixels(mToReferenceFrame.x, aAppUnitsPerPixel),
+                 NSAppUnitsToFloatPixels(mToReferenceFrame.y, aAppUnitsPerPixel),
+                  0.0f);
+    if (mTransformGetter) {
+      mTransform = mTransformGetter(mFrame, aAppUnitsPerPixel);
+      mTransform = nsLayoutUtils::ChangeMatrixBasis(newOrigin, mTransform);
+    } else {
+      mTransform =
+        GetResultingTransformMatrix(mFrame, ToReferenceFrame(),
+                                    aAppUnitsPerPixel);
+
+      /**
+       * Shift the coorindates to be relative to our reference frame instead of relative to this frame.
+       *  When we have preserve-3d, our reference frame is already guaranteed to be an ancestor of the
+       * preserve-3d chain, so we only need to do this once.
+       */
+      bool hasSVGTransforms = mFrame->IsSVGTransformed();
+      gfxPoint3D rounded(hasSVGTransforms ? newOrigin.x : NS_round(newOrigin.x), 
+                         hasSVGTransforms ? newOrigin.y : NS_round(newOrigin.y), 
+                         0);
+      mTransform.Translate(rounded);
+      mCachedAppUnitsPerPixel = aAppUnitsPerPixel;
+    }
   }
   return mTransform;
 }

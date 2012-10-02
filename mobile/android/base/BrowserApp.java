@@ -51,7 +51,9 @@ abstract public class BrowserApp extends GeckoApp
 
     public static BrowserToolbar mBrowserToolbar;
     private AboutHomeContent mAboutHomeContent;
+    private boolean mAboutHomeShowing;
 
+    private static final int ADDON_MENU_OFFSET = 1000;
     static Vector<MenuItem> sAddonMenuItems = new Vector<MenuItem>();
 
     private PropertyAnimator mMainLayoutAnimator;
@@ -344,7 +346,7 @@ abstract public class BrowserApp extends GeckoApp
         try {
             if (event.equals("Menu:Add")) {
                 final String label = message.getString("name");
-                final int id = message.getInt("id");
+                final int id = message.getInt("id") + ADDON_MENU_OFFSET;
                 String iconRes = null;
                 try { // icon is optional
                     iconRes = message.getString("icon");
@@ -356,7 +358,7 @@ abstract public class BrowserApp extends GeckoApp
                     }
                 });
             } else if (event.equals("Menu:Remove")) {
-                final int id = message.getInt("id");
+                final int id = message.getInt("id") + ADDON_MENU_OFFSET;
                 mMainHandler.post(new Runnable() {
                     public void run() {
                         removeAddonMenuItem(id);
@@ -584,17 +586,25 @@ abstract public class BrowserApp extends GeckoApp
         mAboutHomeContent.update(EnumSet.of(AboutHomeContent.UpdateFlags.TOP_SITES));
     }
 
-    public void showAboutHome() {
+    private void showAboutHome() {
+        if (mAboutHomeShowing)
+            return;
+
+        mAboutHomeShowing = true;
         Runnable r = new AboutHomeRunnable(true);
         mMainHandler.postAtFrontOfQueue(r);
     }
 
-    public void hideAboutHome() {
+    private void hideAboutHome() {
+        if (!mAboutHomeShowing)
+            return;
+
+        mAboutHomeShowing = false;
         Runnable r = new AboutHomeRunnable(false);
         mMainHandler.postAtFrontOfQueue(r);
     }
 
-    public class AboutHomeRunnable implements Runnable {
+    private class AboutHomeRunnable implements Runnable {
         boolean mShow;
         AboutHomeRunnable(boolean show) {
             mShow = show;
