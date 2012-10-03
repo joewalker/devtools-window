@@ -138,6 +138,15 @@ public:
   RemoveAll();
 
   /**
+   * Removes all keys from storage for a specific app.
+   * If aOnlyBrowserElement is true, it will remove only keys with the
+   * browserElement flag set.
+   * aAppId has to be a valid app id. It can't be NO_APP_ID or UNKNOWN_APP_ID.
+   */
+  nsresult
+  RemoveAllForApp(uint32_t aAppId, bool aOnlyBrowserElement);
+
+  /**
     * Returns usage for a storage using its GetQuotaDBKey() as a key.
     */
   nsresult
@@ -173,7 +182,7 @@ public:
     * i.e. reverses the host, appends a dot, appends the schema
     * and a port number.
     */
-  static nsresult CreateScopeDBKey(nsIURI* aUri, nsACString& aKey);
+  static nsresult CreateScopeDBKey(nsIPrincipal* aPrincipal, nsACString& aKey);
 
   /**
     * Turns "http://foo.bar.com" to "moc.rab.oof.",
@@ -187,11 +196,19 @@ public:
     * i.e. extracts eTLD+1 from the host, reverses the result
     * and appends a dot.
     */
-  static nsresult CreateQuotaDBKey(const nsACString& aAsciiDomain,
+  static nsresult CreateQuotaDBKey(nsIPrincipal* aPrincipal,
                                    nsACString& aKey);
 
-  static nsresult GetDomainFromScopeKey(const nsACString& aScope,
-                                        nsACString& aDomain);
+  /**
+    * Turns "foo.bar.com" to "moc.rab.",
+    * i.e. extracts eTLD+1 from the host, reverses the result
+    * and appends a dot.
+    */
+  static nsresult CreateQuotaDBKey(const nsACString& aDomain,
+                                   nsACString& aKey)
+  {
+    return CreateReversedDomain(aDomain, aKey);
+  }
 
   /**
    * Ensures the temp table flush timer is running. This is called when we add

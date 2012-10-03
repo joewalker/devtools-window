@@ -94,6 +94,9 @@ ShadowLayerForwarder::PlatformAllocBuffer(const gfxIntSize& aSize,
                                           uint32_t aCaps,
                                           SurfaceDescriptor* aBuffer)
 {
+  if (!PR_GetEnv("MOZ_LAYERS_ENABLE_XLIB_SURFACES")) {
+      return false;
+  }
   if (!UsingXCompositing()) {
     // If we're not using X compositing, we're probably compositing on
     // the client side, in which case X surfaces would just slow
@@ -174,7 +177,7 @@ ShadowLayerForwarder::PlatformSyncBeforeUpdate()
     // operations on the back buffers before handing them to the
     // parent, otherwise the surface might be used by the parent's
     // Display in between two operations queued by our Display.
-    XSync(DefaultXDisplay(), False);
+    FinishX(DefaultXDisplay());
   }
 }
 

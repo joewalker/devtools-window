@@ -1280,11 +1280,11 @@ window[tabsontop="false"] richlistitem[type~="action"][actiontype="switchtab"][s
   text-decoration: underline;
 }
 
-#editSharePopupText {
+#unsharePopupText {
   height: 48px;
 }
 
-#editSharePopupBottomButtons {
+#unsharePopupBottomButtons {
   margin-top: 1em;
 }
 
@@ -3287,33 +3287,13 @@ html|*#gcli-output-frame {
   text-shadow: 0 0 6px hsl(208,100%,60%);
 }
 
-#developer-toolbar-webconsole {
-  -moz-image-region: rect(0, 16px, 16px, 0);
-}
-
-#developer-toolbar-inspector {
-  -moz-image-region: rect(16px, 16px, 32px, 0);
-}
-
-#developer-toolbar-styleeditor {
-  -moz-image-region: rect(32px, 16px, 48px, 0);
-}
-
-#developer-toolbar-debugger {
-  -moz-image-region: rect(48px, 16px, 64px, 0);
-}
-
-#developer-toolbar-other-tools {
+#developer-toolbar-toolbox-button {
   -moz-image-region: rect(64px, 16px, 80px, 0);
-}
-
-#developer-toolbar-other-tools > .toolbarbutton-menu-dropmarker {
-  display: none;
 }
 
 /* Error counter */
 
-#developer-toolbar-webconsole[error-count]:before {
+#developer-toolbar-toolbox-button[error-count]:before {
   color: #FDF3DE;
   min-width: 16px;
   text-shadow: none;
@@ -3382,7 +3362,6 @@ html|*#gcli-output-frame {
   width: 32px;
   height: 32px;
   margin: 10px;
-  list-style-image: url("chrome://browser/skin/social/social.png");
 }
 
 #social-statusarea-username {
@@ -3391,6 +3370,7 @@ html|*#gcli-output-frame {
   cursor: pointer;
   min-width: 0;
   margin: 0 6px;
+  list-style-image: none;
 }
 
 #social-statusarea-username:hover {
@@ -3452,6 +3432,7 @@ html|*#gcli-output-frame {
   width: 100%;
   margin: 0;
   padding: 2px;
+  -moz-padding-start: 6px;
   border: none;
   border-bottom: 1px solid #404040;
   cursor: pointer;
@@ -3459,6 +3440,10 @@ html|*#gcli-output-frame {
 
 .chat-titlebar[minimized="true"] {
   border-bottom: none;
+}
+
+.chat-titlebar[activity] {
+  background-color: #ceeaff;
 }
 
 .chat-titlebar[selected] {
@@ -3492,6 +3477,14 @@ html|*#gcli-output-frame {
 .chatbar-button > .toolbarbutton-text,
 .chatbar-button > .toolbarbutton-menu-dropmarker {
   display: none;
+}
+
+.chatbar-button[activity] {
+  background-color: #ceeaff;
+}
+
+.chatbar-button > menupopup > menuitem[activity] {
+  font-weight: bold;
 }
 
 .chatbar-innerbox {

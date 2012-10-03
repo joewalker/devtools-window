@@ -312,7 +312,7 @@ class NewObjectCache
     inline JSObject *newObjectFromHit(JSContext *cx, EntryIndex entry);
 
     /* Fill an entry after a cache miss. */
-    inline void fillProto(EntryIndex entry, Class *clasp, JSObject *proto, gc::AllocKind kind, JSObject *obj);
+    inline void fillProto(EntryIndex entry, Class *clasp, js::TaggedProto proto, gc::AllocKind kind, JSObject *obj);
     inline void fillGlobal(EntryIndex entry, Class *clasp, js::GlobalObject *global, gc::AllocKind kind, JSObject *obj);
     inline void fillType(EntryIndex entry, Class *clasp, js::types::TypeObject *type, gc::AllocKind kind, JSObject *obj);
 
@@ -813,6 +813,9 @@ struct JSRuntime : js::RuntimeFriendFields
 
     /* Bookkeeping information for debug scope objects. */
     js::DebugScopes     *debugScopes;
+
+    /* Linked list of live array buffers with >1 view */
+    JSObject            *liveArrayBuffers;
 
     /* Client opaque pointers */
     void                *data;

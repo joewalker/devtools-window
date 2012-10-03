@@ -37,6 +37,8 @@ using mozilla::dom::ContentChild;
 #include "mozilla/Telemetry.h"
 #include "DictionaryHelpers.h"
 #include "GeneratedEvents.h"
+#include "nsIAppsService.h"
+#include "mozIApplication.h"
 
 // calls FlushAndDeleteTemporaryTables(false)
 #define NS_DOMSTORAGE_FLUSH_TIMER_TOPIC "domstorage-flush-timer"
@@ -58,38 +60,6 @@ static const char kPermissionType[] = "cookie";
 static const char kStorageEnabled[] = "dom.storage.enabled";
 static const char kCookiesBehavior[] = "network.cookie.cookieBehavior";
 static const char kCookiesLifetimePolicy[] = "network.cookie.lifetimePolicy";
-
-// The URI returned is the innermost URI that should be used for
-// security-check-like stuff.  aHost is its hostname, correctly canonicalized.
-static nsresult
-GetPrincipalURIAndHost(nsIPrincipal* aPrincipal, nsIURI** aURI, nsCString& aHost)
-{
-  nsresult rv = aPrincipal->GetDomain(aURI);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  if (!*aURI) {
-    rv = aPrincipal->GetURI(aURI);
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  if (!*aURI) {
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIURI> innerURI = NS_GetInnermostURI(*aURI);
-  if (!innerURI) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  rv = innerURI->GetAsciiHost(aHost);
-  if (NS_FAILED(rv)) {
-    return NS_ERROR_DOM_SECURITY_ERR;
-  }
-  
-  innerURI.swap(*aURI);
-
-  return NS_OK;
-}
 
 //
 // Helper that tells us whether the caller is secure or not.
@@ -193,6 +163,8 @@ nsDOMStorageManager::Initialize()
   rv = os->AddObserver(gStorageManager, NS_DOMSTORAGE_FLUSH_TIMER_TOPIC, true);
   NS_ENSURE_SUCCESS(rv, rv);
   rv = os->AddObserver(gStorageManager, "last-pb-context-exited", true);
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = os->AddObserver(gStorageManager, "webapps-uninstall", true);
   NS_ENSURE_SUCCESS(rv, rv);
 
   return NS_OK;
@@ -339,6 +311,23 @@ nsDOMStorageManager::Observe(nsISupports *aSubject,
     if (DOMStorageImpl::gStorageDB) {
       return DOMStorageImpl::gStorageDB->DropPrivateBrowsingStorages();
     }
+  } else if (!strcmp(aTopic, "webapps-uninstall")) {
+    if (!DOMStorageImpl::gStorageDB) {
+      return NS_OK;
+    }
+
+    nsCOMPtr<nsIAppsService> appsService = do_GetService("@mozilla.org/AppsService;1");
+    nsCOMPtr<mozIApplication> app;
+
+    appsService->GetAppFromObserverMessage(nsAutoString(aData), getter_AddRefs(app));
+    NS_ENSURE_TRUE(app, NS_ERROR_UNEXPECTED);
+
+    uint32_t appId;
+    app->GetLocalId(&appId);
+    MOZ_ASSERT(appId != nsIScriptSecurityManager::NO_APP_ID);
+
+    return DOMStorageImpl::gStorageDB->RemoveAllForApp(appId,
+                                                       /* onlyBrowserElements */ false);
   }
 
   return NS_OK;
@@ -459,7 +448,6 @@ DOMStorageBase::DOMStorageBase(DOMStorageBase& aThat)
   : mStorageType(aThat.mStorageType)
   , mUseDB(false) // Clones don't use the DB
   , mSessionOnly(true)
-  , mDomain(aThat.mDomain)
   , mScopeDBKey(aThat.mScopeDBKey)
   , mQuotaDBKey(aThat.mQuotaDBKey)
   , mInPrivateBrowsing(aThat.mInPrivateBrowsing)
@@ -467,15 +455,9 @@ DOMStorageBase::DOMStorageBase(DOMStorageBase& aThat)
 }
 
 void
-DOMStorageBase::InitAsSessionStorage(nsIURI* aDomainURI, bool aPrivate)
+DOMStorageBase::InitAsSessionStorage(nsIPrincipal* aPrincipal, bool aPrivate)
 {
-  // No need to check for a return value. If this would fail we would not get
-  // here as we call GetPrincipalURIAndHost (nsDOMStorage.cpp:88) from
-  // nsDOMStorage::CanUseStorage before we query the storage manager for a new
-  // sessionStorage. It calls GetAsciiHost on innermost URI. If it fails, we
-  // won't get to InitAsSessionStorage.
-  aDomainURI->GetAsciiHost(mDomain);
-
+  MOZ_ASSERT(mQuotaDBKey.IsEmpty());
   mUseDB = false;
   mScopeDBKey.Truncate();
   mStorageType = nsPIDOMStorage::SessionStorage;
@@ -483,18 +465,9 @@ DOMStorageBase::InitAsSessionStorage(nsIURI* aDomainURI, bool aPrivate)
 }
 
 void
-DOMStorageBase::InitAsLocalStorage(nsIURI* aDomainURI,
-                                   bool aPrivate)
+DOMStorageBase::InitAsLocalStorage(nsIPrincipal* aPrincipal, bool aPrivate)
 {
-  // No need to check for a return value. If this would fail we would not get
-  // here as we call GetPrincipalURIAndHost (nsDOMStorage.cpp:88) from
-  // nsDOMStorage::CanUseStorage before we query the storage manager for a new
-  // localStorage. It calls GetAsciiHost on innermost URI. If it fails, we won't
-  // get to InitAsLocalStorage. Actually, mDomain will get replaced with
-  // mPrincipal in bug 455070. It is not even used for localStorage.
-  aDomainURI->GetAsciiHost(mDomain);
-
-  nsDOMStorageDBWrapper::CreateScopeDBKey(aDomainURI, mScopeDBKey);
+  nsDOMStorageDBWrapper::CreateScopeDBKey(aPrincipal, mScopeDBKey);
 
   // XXX Bug 357323, we have to solve the issue how to define
   // origin for file URLs. In that case CreateOriginScopeDBKey
@@ -502,7 +475,7 @@ DOMStorageBase::InitAsLocalStorage(nsIURI* aDomainURI,
   // in that case because it produces broken entries w/o owner.
   mUseDB = !mScopeDBKey.IsEmpty();
 
-  nsDOMStorageDBWrapper::CreateQuotaDBKey(mDomain, mQuotaDBKey);
+  nsDOMStorageDBWrapper::CreateQuotaDBKey(aPrincipal, mQuotaDBKey);
   mStorageType = nsPIDOMStorage::LocalStorage;
   mInPrivateBrowsing = aPrivate;
 }
@@ -589,7 +562,6 @@ DOMStorageImpl::InitDB()
 void
 DOMStorageImpl::InitFromChild(bool aUseDB,
                               bool aSessionOnly, bool aPrivate,
-                              const nsACString& aDomain,
                               const nsACString& aScopeDBKey,
                               const nsACString& aQuotaDBKey,
                               uint32_t aStorageType)
@@ -597,7 +569,6 @@ DOMStorageImpl::InitFromChild(bool aUseDB,
   mUseDB = aUseDB;
   mSessionOnly = aSessionOnly;
   mInPrivateBrowsing = aPrivate;
-  mDomain = aDomain;
   mScopeDBKey = aScopeDBKey;
   mQuotaDBKey = aQuotaDBKey;
   mStorageType = static_cast<nsPIDOMStorage::nsDOMStorageType>(aStorageType);
@@ -607,19 +578,6 @@ void
 DOMStorageImpl::SetSessionOnly(bool aSessionOnly)
 {
   mSessionOnly = aSessionOnly;
-}
-
-void
-DOMStorageImpl::InitAsSessionStorage(nsIURI* aDomainURI, bool aPrivate)
-{
-  DOMStorageBase::InitAsSessionStorage(aDomainURI, aPrivate);
-}
-
-void
-DOMStorageImpl::InitAsLocalStorage(nsIURI* aDomainURI,
-                                   bool aPrivate)
-{
-  DOMStorageBase::InitAsLocalStorage(aDomainURI, aPrivate);
 }
 
 bool
@@ -1122,49 +1080,24 @@ nsDOMStorage::~nsDOMStorage()
 {
 }
 
-static
-nsresult
-GetDomainURI(nsIPrincipal *aPrincipal, bool aIncludeDomain, nsIURI **_domain)
-{
-  nsCOMPtr<nsIURI> uri;
-
-  if (aIncludeDomain) {
-    nsresult rv = aPrincipal->GetDomain(getter_AddRefs(uri));
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  if (!uri) {
-    nsresult rv = aPrincipal->GetURI(getter_AddRefs(uri));
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-
-  // Check if we really got any URI. System principal doesn't return a URI
-  // instance and we would crash in NS_GetInnermostURI below.
-  if (!uri)
-    return NS_ERROR_NOT_AVAILABLE;
-
-  nsCOMPtr<nsIURI> innerURI = NS_GetInnermostURI(uri);
-  if (!innerURI)
-    return NS_ERROR_UNEXPECTED;
-  innerURI.forget(_domain);
-
-  return NS_OK;
-}
-
 nsresult
 nsDOMStorage::InitAsSessionStorage(nsIPrincipal *aPrincipal, const nsSubstring &aDocumentURI,
                                    bool aPrivate)
 {
-  nsCOMPtr<nsIURI> domainURI;
-  nsresult rv = GetDomainURI(aPrincipal, true, getter_AddRefs(domainURI));
+  nsCOMPtr<nsIURI> uri;
+  nsresult rv = aPrincipal->GetURI(getter_AddRefs(uri));
   NS_ENSURE_SUCCESS(rv, rv);
+
+  if (!uri) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
 
   mDocumentURI = aDocumentURI;
   mPrincipal = aPrincipal;
 
   mStorageType = SessionStorage;
 
-  mStorageImpl->InitAsSessionStorage(domainURI, aPrivate);
+  mStorageImpl->InitAsSessionStorage(mPrincipal, aPrivate);
   return NS_OK;
 }
 
@@ -1172,16 +1105,20 @@ nsresult
 nsDOMStorage::InitAsLocalStorage(nsIPrincipal *aPrincipal, const nsSubstring &aDocumentURI,
                                  bool aPrivate)
 {
-  nsCOMPtr<nsIURI> domainURI;
-  nsresult rv = GetDomainURI(aPrincipal, false, getter_AddRefs(domainURI));
+  nsCOMPtr<nsIURI> uri;
+  nsresult rv = aPrincipal->GetURI(getter_AddRefs(uri));
   NS_ENSURE_SUCCESS(rv, rv);
+
+  if (!uri) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
 
   mDocumentURI = aDocumentURI;
   mPrincipal = aPrincipal;
 
   mStorageType = LocalStorage;
 
-  mStorageImpl->InitAsLocalStorage(domainURI, aPrivate);
+  mStorageImpl->InitAsLocalStorage(aPrincipal, aPrivate);
   return NS_OK;
 }
 
@@ -1217,21 +1154,14 @@ nsDOMStorage::CanUseStorage(DOMStorageBase* aStorage /* = NULL */)
   // if subjectPrincipal were null we'd have returned after
   // IsCallerChrome().
 
-  nsCOMPtr<nsIURI> subjectURI;
-  nsAutoCString unused;
-  if (NS_FAILED(GetPrincipalURIAndHost(subjectPrincipal,
-                                       getter_AddRefs(subjectURI),
-                                       unused))) {
-    return false;
-  }
-
   nsCOMPtr<nsIPermissionManager> permissionManager =
     do_GetService(NS_PERMISSIONMANAGER_CONTRACTID);
   if (!permissionManager)
     return false;
 
   uint32_t perm;
-  permissionManager->TestPermission(subjectURI, kPermissionType, &perm);
+  permissionManager->TestPermissionFromPrincipal(subjectPrincipal,
+                                                 kPermissionType, &perm);
 
   if (perm == nsIPermissionManager::DENY_ACTION)
     return false;

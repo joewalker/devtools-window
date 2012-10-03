@@ -28,9 +28,6 @@
 
 #include "cairo.h"
 #include <gtk/gtk.h>
-#if (MOZ_WIDGET_GTK == 2)
-#include "gtk2compat.h"
-#endif
 
 #include "gfxImageSurface.h"
 #ifdef MOZ_X11
@@ -732,7 +729,7 @@ gfxPlatformGtk::GetGdkDrawable(gfxASurface *target)
 }
 #endif
 
-RefPtr<ScaledFont>
+TemporaryRef<ScaledFont>
 gfxPlatformGtk::GetScaledFontForFont(DrawTarget* aTarget, gfxFont *aFont)
 {
     NativeFont nativeFont;

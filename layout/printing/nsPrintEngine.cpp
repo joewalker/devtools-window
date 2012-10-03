@@ -1843,7 +1843,7 @@ nsPrintEngine::ReflowDocList(nsPrintObject* aPO, bool aSetPixelScale)
   if (aPO->mParent && aPO->mParent->mPresShell) {
     nsIFrame* frame = aPO->mContent ? aPO->mContent->GetPrimaryFrame() : nullptr;
     if (!frame || !frame->GetStyleVisibility()->IsVisible()) {
-      aPO->mDontPrint = true;
+      SetPrintPO(aPO, false);
       aPO->mInvisible = true;
       return NS_OK;
     }
@@ -2666,6 +2666,9 @@ DocHasPrintCallbackCanvas(nsIDocument* aDoc, void* aData)
     return true;
   }
   Element* root = aDoc->GetRootElement();
+  if (!root) {
+    return true;
+  }
   nsRefPtr<nsContentList> canvases = NS_GetContentList(root,
                                                        kNameSpaceID_XHTML,
                                                        NS_LITERAL_STRING("canvas"));

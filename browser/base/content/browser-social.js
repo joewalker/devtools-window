@@ -10,6 +10,7 @@ let SocialUI = {
     Services.obs.addObserver(this, "social:profile-changed", false);
 
     Services.prefs.addObserver("social.sidebar.open", this, false);
+    Services.prefs.addObserver("social.toast-notifications.enabled", this, false);
 
     gBrowser.addEventListener("ActivateSocialFeature", this._activationEventHandler, true, true);
 
@@ -23,6 +24,7 @@ let SocialUI = {
     Services.obs.removeObserver(this, "social:profile-changed");
 
     Services.prefs.removeObserver("social.sidebar.open", this);
+    Services.prefs.removeObserver("social.toast-notifications.enabled", this);
   },
 
   showProfile: function SocialUI_showProfile() {
@@ -53,9 +55,11 @@ let SocialUI = {
       case "social:profile-changed":
         SocialToolbar.updateProfile();
         SocialShareButton.updateProfileInfo();
+        SocialChatBar.update();
         break;
       case "nsPref:changed":
         SocialSidebar.updateSidebar();
+        SocialToolbar.updateButton();
     }
   },
 
@@ -158,6 +162,10 @@ let SocialUI = {
   undoActivation: function SocialUI_undoActivation() {
     Social.active = false;
     this.notificationPanel.hidePopup();
+  },
+
+  haveLoggedInUser: function SocialUI_haveLoggedInUser() {
+    return !!(Social.provider && Social.provider.profile && Social.provider.profile.userName);
   }
 }
 
@@ -167,6 +175,8 @@ let SocialChatBar = {
   },
   // Whether the chats can be shown for this window.
   get canShow() {
+    if (!SocialUI.haveLoggedInUser())
+      return false;
     let docElem = document.documentElement;
     let chromeless = docElem.getAttribute("disablechrome") ||
                      docElem.getAttribute("chromehidden").indexOf("extrachrome") >= 0;
@@ -184,7 +194,6 @@ let SocialChatBar = {
 
 function sizeSocialPanelToContent(iframe) {
   // FIXME: bug 764787: Maybe we can use nsIDOMWindowUtils.getRootBounds() here?
-  // Need to handle dynamic sizing
   let doc = iframe.contentDocument;
   if (!doc) {
     return;
@@ -192,13 +201,36 @@ function sizeSocialPanelToContent(iframe) {
   // "notif" is an implementation detail that we should get rid of
   // eventually
   let body = doc.getElementById("notif") || doc.body;
-  if (!body || !body.firstChild) {
+  if (!body) {
     return;
   }
-
-  let [height, width] = [body.firstChild.offsetHeight || 300, 330];
-  iframe.style.width = width + "px";
+  // XXX - do we want a max for width and height here?
+  // The 300 and 330 defaults also seem arbitrary, so should be revisited.
+  // BUT - for at least one provider, the scrollWidth/offsetWidth/css width
+  // isn't set appropriately, so the 330 is "fixed" for now...
+  iframe.style.width = "330px";
+  // offsetHeight doesn't include margins, so account for that.
+  let cs = doc.defaultView.getComputedStyle(body);
+  let computedHeight = parseInt(cs.marginTop) + body.offsetHeight + parseInt(cs.marginBottom);
+  let height = computedHeight || 300;
   iframe.style.height = height + "px";
+}
+
+function setupDynamicPanelResizer(iframe) {
+  let doc = iframe.contentDocument;
+  let mo = new iframe.contentWindow.MutationObserver(function(mutations) {
+    sizeSocialPanelToContent(iframe);
+  });
+  // Observe anything that causes the size to change.
+  let config = {attributes: true, characterData: true, childList: true, subtree: true};
+  mo.observe(doc, config);
+  doc.addEventListener("unload", function() {
+    if (mo) {
+      mo.disconnect();
+      mo = null;
+    }
+  }, false);
+  sizeSocialPanelToContent(iframe);
 }
 
 let SocialFlyout = {
@@ -228,6 +260,7 @@ let SocialFlyout = {
 
   unload: function() {
     let panel = this.panel;
+    panel.hidePopup();
     if (!panel.firstChild)
       return
     panel.removeChild(panel.firstChild);
@@ -268,7 +301,7 @@ let SocialFlyout = {
     if (src != aURL) {
       iframe.addEventListener("load", function documentLoaded() {
         iframe.removeEventListener("load", documentLoaded, true);
-        sizeSocialPanelToContent(iframe);
+        setupDynamicPanelResizer(iframe);
         if (aCallback) {
           try {
             aCallback(iframe.contentWindow);
@@ -318,14 +351,14 @@ let SocialShareButton = {
   },
 
   updateProfileInfo: function SSB_updateProfileInfo() {
-    let profileRow = document.getElementById("editSharePopupHeader");
+    let profileRow = document.getElementById("unsharePopupHeader");
     let profile = Social.provider.profile;
     this.promptImages = null;
     this.promptMessages = null;
     if (profile && profile.displayName) {
       profileRow.hidden = false;
       let portrait = document.getElementById("socialUserPortrait");
-      portrait.setAttribute("src", profile.portrait || "chrome://browser/skin/social/social.png");
+      portrait.setAttribute("src", profile.portrait || "chrome://global/skin/icons/information-32.png");
       let displayName = document.getElementById("socialUserDisplayName");
       displayName.setAttribute("label", profile.displayName);
     } else {
@@ -377,7 +410,11 @@ let SocialShareButton = {
       }
       promptImages[sub] = url;
     }
-    for (let sub of ["shareTooltip", "unshareTooltip", "sharedLabel", "unsharedLabel"]) {
+    for (let sub of ["shareTooltip", "unshareTooltip",
+                     "sharedLabel", "unsharedLabel", "unshareLabel",
+                     "portraitLabel", 
+                     "unshareConfirmLabel", "unshareConfirmAccessKey",
+                     "unshareCancelLabel", "unshareCancelAccessKey"]) {
       if (typeof data.messages[sub] != "string" || data.messages[sub].length == 0) {
         return reportError('messages["' + sub + '"] is not a valid string');
       }
@@ -391,19 +428,19 @@ let SocialShareButton = {
   get shareButton() {
     return document.getElementById("share-button");
   },
-  get sharePopup() {
-    return document.getElementById("editSharePopup");
+  get unsharePopup() {
+    return document.getElementById("unsharePopup");
   },
 
-  dismissSharePopup: function SSB_dismissSharePopup() {
-    this.sharePopup.hidePopup();
+  dismissUnsharePopup: function SSB_dismissUnsharePopup() {
+    this.unsharePopup.hidePopup();
   },
 
   updateButtonHiddenState: function SSB_updateButtonHiddenState() {
     let shareButton = this.shareButton;
     if (shareButton)
       shareButton.hidden = !Social.uiVisible || this.promptImages == null ||
-                           !Social.provider.profile || !Social.provider.profile.userName;
+                           !SocialUI.haveLoggedInUser();
   },
 
   onClick: function SSB_onClick(aEvent) {
@@ -417,27 +454,42 @@ let SocialShareButton = {
   },
 
   panelShown: function SSB_panelShown(aEvent) {
-    let sharePopupOkButton = document.getElementById("editSharePopupOkButton");
-    if (sharePopupOkButton)
-      sharePopupOkButton.focus();
+    function updateElement(id, attrs) {
+      let el = document.getElementById(id);
+      Object.keys(attrs).forEach(function(attr) {
+        el.setAttribute(attr, attrs[attr]);
+      });
+    }
+    let continueSharingButton = document.getElementById("unsharePopupContinueSharingButton");
+    continueSharingButton.focus();
+    updateElement("unsharePopupContinueSharingButton",
+                  {label: this.promptMessages.unshareCancelLabel,
+                   accesskey: this.promptMessages.unshareCancelAccessKey});
+    updateElement("unsharePopupStopSharingButton",
+                  {label: this.promptMessages.unshareConfirmLabel,
+                  accesskey: this.promptMessages.unshareConfirmAccessKey});
+    updateElement("socialUserPortrait",
+                  {"aria-label": this.promptMessages.portraitLabel});
+    updateElement("socialUserRecommendedText",
+                  {value: this.promptMessages.unshareLabel});
   },
 
   sharePage: function SSB_sharePage() {
-    this.sharePopup.hidden = false;
+    this.unsharePopup.hidden = false;
 
     let uri = gBrowser.currentURI;
     if (!Social.isPageShared(uri)) {
       Social.sharePage(uri);
       this.updateShareState();
     } else {
-      this.sharePopup.openPopup(this.shareButton, "bottomcenter topright");
+      this.unsharePopup.openPopup(this.shareButton, "bottomcenter topright");
     }
   },
 
   unsharePage: function SSB_unsharePage() {
     Social.unsharePage(gBrowser.currentURI);
     this.updateShareState();
-    this.dismissSharePopup();
+    this.dismissUnsharePopup();
   },
 
   updateShareState: function SSB_updateShareState() {
@@ -499,7 +551,7 @@ var SocialToolbar = {
 
   updateButtonHiddenState: function SocialToolbar_updateButtonHiddenState() {
     this.button.hidden = !Social.uiVisible;
-    if (!Social.provider || !Social.provider.profile || !Social.provider.profile.userName) {
+    if (!SocialUI.haveLoggedInUser()) {
       ["social-notification-box",
        "social-status-iconbox"].forEach(function removeChildren(parentId) {
         let parent = document.getElementById(parentId);
@@ -514,7 +566,7 @@ var SocialToolbar = {
     // response. In that case we'll be called again when it's available, via
     // social:profile-changed
     let profile = Social.provider.profile || {};
-    let userPortrait = profile.portrait || "chrome://browser/skin/social/social.png";
+    let userPortrait = profile.portrait || "chrome://global/skin/icons/information-32.png";
     document.getElementById("social-statusarea-user-portrait").setAttribute("src", userPortrait);
 
     let notLoggedInLabel = document.getElementById("social-statusarea-notloggedin");
@@ -539,6 +591,9 @@ var SocialToolbar = {
     panel.hidden = false;
     let notificationFrames = document.createDocumentFragment();
     let iconContainers = document.createDocumentFragment();
+
+    let command = document.getElementById("Social:ToggleNotifications");
+    command.setAttribute("checked", Services.prefs.getBoolPref("social.toast-notifications.enabled"));
 
     for each(let name in iconNames) {
       let icon = provider.ambientNotificationIcons[name];
@@ -624,13 +679,13 @@ var SocialToolbar = {
       notificationFrame.docShell.isActive = true;
       notificationFrame.docShell.isAppTab = true;
       if (notificationFrame.contentDocument.readyState == "complete") {
-        sizeSocialPanelToContent(notificationFrame);
+        setupDynamicPanelResizer(notificationFrame);
         dispatchPanelEvent("socialFrameShow");
       } else {
         // first time load, wait for load and dispatch after load
         notificationFrame.addEventListener("load", function panelBrowserOnload(e) {
           notificationFrame.removeEventListener("load", panelBrowserOnload, true);
-          sizeSocialPanelToContent(notificationFrame);
+          setupDynamicPanelResizer(notificationFrame);
           setTimeout(function() {
             dispatchPanelEvent("socialFrameShow");
           }, 0);

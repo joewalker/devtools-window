@@ -182,7 +182,7 @@
           if (domain[0] != "[") {
             try {
               baseDomain = Services.eTLD.getBaseDomainFromHost(domain);
-              if (!domain.contains(baseDomain)) {
+              if (!domain.endsWith(baseDomain)) {
                 // getBaseDomainFromHost converts its resultant to ACE.
                 let IDNService = Cc["@mozilla.org/network/idn-service;1"]
                                  .getService(Ci.nsIIDNService);
@@ -645,7 +645,7 @@
       <method name="_parseActionUrl">
         <parameter name="aUrl"/>
         <body><![CDATA[
-          if (!/^moz-action:/.test(aUrl))
+          if (!aUrl.startsWith("moz-action:"))
             return null;
 
           // url is in the format moz-action:ACTION,PARAM
@@ -1615,7 +1615,7 @@
           // otherwise just rely on the panel id for common arrowpanels.
           let type = this._panel.firstChild.getAttribute("popupid") ||
                      this._panel.id;
-          if (/^password-/.test(type))
+          if (type.startsWith("password-"))
             return "passwords";
           if (type == "editBookmarkPanel")
             return "bookmarks";

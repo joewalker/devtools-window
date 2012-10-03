@@ -1967,7 +1967,7 @@ nsDOMWindowUtils::GetParent(const JS::Value& aObject,
     return NS_ERROR_XPC_BAD_CONVERT_JS;
   }
 
-  JS::Rooted<JSObject*> parent(aCx, JS_GetParent(JSVAL_TO_OBJECT(aObject)));
+  js::Rooted<JSObject*> parent(aCx, JS_GetParent(JSVAL_TO_OBJECT(aObject)));
   *aParent = OBJECT_TO_JSVAL(parent);
 
   // Outerize if necessary.
@@ -2322,6 +2322,10 @@ nsDOMWindowUtils::WrapDOMFile(nsIFile *aFile,
 {
   if (!IsUniversalXPConnectCapable()) {
     return NS_ERROR_DOM_SECURITY_ERR;
+  }
+
+  if (!aFile) {
+    return NS_ERROR_FAILURE;
   }
 
   NS_ADDREF(*aDOMFile = new nsDOMFileFile(aFile));

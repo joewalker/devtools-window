@@ -413,6 +413,8 @@ DOMCI_CLASS(MozMobileConnection)
 
 DOMCI_CLASS(USSDReceivedEvent)
 
+DOMCI_CLASS(DataErrorEvent)
+
 // @font-face in CSS
 DOMCI_CLASS(CSSFontFaceRule)
 DOMCI_CLASS(CSSFontFaceStyleDecl)
@@ -459,6 +461,8 @@ DOMCI_CLASS(WebGLExtensionStandardDerivatives)
 DOMCI_CLASS(WebGLExtensionTextureFilterAnisotropic)
 DOMCI_CLASS(WebGLExtensionLoseContext)
 DOMCI_CLASS(WebGLExtensionCompressedTextureS3TC)
+DOMCI_CLASS(WebGLExtensionCompressedTextureATC)
+DOMCI_CLASS(WebGLExtensionCompressedTexturePVRTC)
 DOMCI_CLASS(WebGLExtensionDepthTexture)
 
 DOMCI_CLASS(PaintRequest)

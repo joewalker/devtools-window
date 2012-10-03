@@ -121,7 +121,7 @@ HUD_SERVICE.prototype =
    * @return object
    *         The new HeadsUpDisplay instance.
    */
-  activateHUDForContext: function HS_activateHUDForContext(aTab, aAnimated)
+  activateHUDForContext: function HS_activateHUDForContext(aTab, aAnimated, aIframe)
   {
     let hudId = "hud_" + aTab.linkedPanel;
     if (hudId in this.hudReferences) {
@@ -137,7 +137,7 @@ HUD_SERVICE.prototype =
     gBrowser.tabContainer.addEventListener("TabSelect", this.onTabSelect, false);
     window.addEventListener("unload", this.onWindowUnload, false);
 
-    let hud = new WebConsole(aTab);
+    let hud = new WebConsole(aTab, aIframe);
     this.hudReferences[hudId] = hud;
 
     if (!aAnimated || hud.consolePanel) {
@@ -498,10 +498,13 @@ HUD_SERVICE.prototype =
  *
  * @param nsIDOMElement aTab
  *        The xul:tab for which you want the WebConsole object.
+ * @param nsIDOMElement aIframe
+ *        Optional iframe into which we should create the WebConsole UI.
  */
-function WebConsole(aTab)
+function WebConsole(aTab, aIframe)
 {
   this.tab = aTab;
+  this.iframe = aIframe;
   this._onIframeLoad = this._onIframeLoad.bind(this);
   this._asyncRequests = {};
   this._init();
@@ -599,17 +602,21 @@ WebConsole.prototype = {
    */
   _initUI: function WC__initUI()
   {
-    this.splitter = this.chromeDocument.createElement("splitter");
-    this.splitter.className = "devtools-horizontal-splitter";
+    //this.splitter = this.chromeDocument.createElement("splitter");
+    //this.splitter.className = "devtools-horizontal-splitter";
 
-    this.iframe = this.chromeDocument.createElement("iframe");
-    this.iframe.setAttribute("id", this.hudId);
+    /*
+    if (this.iframe == null) {
+      this.iframe = this.chromeDocument.createElement("iframe");
+      this.iframe.setAttribute("animated", "true");
+      this.iframe.setAttribute("src", UI_IFRAME_URL);
+      this.iframe.setAttribute("id", this.hudId);
+    }
+    */
     this.iframe.className = "web-console-frame";
-    this.iframe.setAttribute("animated", "true");
     this.iframe.setAttribute("tooltip", "aHTMLTooltip");
     this.iframe.style.height = 0;
     this.iframe.addEventListener("load", this._onIframeLoad, true);
-    this.iframe.setAttribute("src", UI_IFRAME_URL);
 
     let position = Services.prefs.getCharPref("devtools.webconsole.position");
     this.positionConsole(position);
@@ -734,7 +741,7 @@ WebConsole.prototype = {
                   this.outputNode.getNumberOfVisibleRows() - 1;
     }
 
-    if (this.splitter.parentNode) {
+    if (this.splitter && this.splitter.parentNode) {
       this.splitter.parentNode.removeChild(this.splitter);
     }
 
@@ -822,19 +829,21 @@ WebConsole.prototype = {
     }
 
     // remove the console and splitter and reposition
-    if (this.splitter.parentNode) {
+    if (this.splitter && this.splitter.parentNode) {
       this.splitter.parentNode.removeChild(this.splitter);
     }
 
     this._beforePositionConsole(aPosition, lastIndex);
 
-    if (aPosition == "below") {
-      nBox.appendChild(this.splitter);
-      nBox.appendChild(this.iframe);
-    }
-    else {
-      nBox.insertBefore(this.splitter, node);
-      nBox.insertBefore(this.iframe, this.splitter);
+    if (this.splitter) {
+      if (aPosition == "below") {
+        //nBox.appendChild(this.splitter);
+        nBox.appendChild(this.iframe);
+      }
+      else {
+        nBox.insertBefore(this.splitter, node);
+        nBox.insertBefore(this.iframe, this.splitter);
+      }
     }
 
     if (this.consolePanel) {
@@ -1088,7 +1097,7 @@ WebConsole.prototype = {
       this.iframe.parentNode.removeChild(this.iframe);
     }
 
-    if (this.splitter.parentNode) {
+    if (this.splitter && this.splitter.parentNode) {
       this.splitter.parentNode.removeChild(this.splitter);
     }
   },
