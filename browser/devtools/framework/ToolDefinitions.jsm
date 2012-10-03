@@ -6,7 +6,7 @@
 
 const EXPORTED_SYMBOLS = [ "defaultTools" ];
 
-Components.utils.import("resource:///modules/WebConsoleToolbox.jsm");
+Components.utils.import("resource:///modules/WebConsolePanel.jsm");
 
 let defaultTools = [
   WebConsoleToolbox.toolSpec,
@@ -19,5 +19,6 @@ let defaultTools = [
       aIFrameWindow.init(aTarget.value.linkedBrowser.contentWindow);
       return aIFrameWindow;
     }
-  }
+  },
+  WebConsoleDefinition,
 ];

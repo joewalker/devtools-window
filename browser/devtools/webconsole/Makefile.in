@@ -16,7 +16,7 @@ EXTRA_JS_MODULES = \
 		NetworkHelper.jsm \
 		NetworkPanel.jsm \
 		AutocompletePopup.jsm \
-		WebConsoleToolbox.jsm \
+		WebConsolePanel.jsm \
 		WebConsoleUtils.jsm \
 		$(NULL)
 

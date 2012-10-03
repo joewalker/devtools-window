@@ -4,7 +4,7 @@
 
 "use strict";
 
-const EXPORTED_SYMBOLS = [ "WebConsoleToolbox" ];
+const EXPORTED_SYMBOLS = [ "WebConsoleDefinition" ];
 
 const Cu = Components.utils;
 
@@ -29,23 +29,21 @@ Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 /**
  * The external API allowing us to be registered with DevTools.jsm
  */
-const WebConsoleToolbox = {
-  toolSpec: {
-    id: "webconsole",
-    killswitch: "devtools.webconsole.enabled", // doesn't currently exist
-    icon: "chrome://browser/skin/devtools/webconsole-tool-icon.png",
-    url: "chrome://browser/content/devtools/webconsole.xul",
-    label: l10n.getStr("ToolboxWebconosle.label"),
-    build: function(aIFrameWindow, aTarget) {
-      return new WebConsoleToolInstance(aIFrameWindow, aTarget);
-    }
+const WebConsoleDefinition = {
+  id: "webconsole",
+  killswitch: "devtools.webconsole.enabled", // doesn't currently exist
+  icon: "chrome://browser/skin/devtools/webconsole-tool-icon.png",
+  url: "chrome://browser/content/devtools/webconsole.xul",
+  label: l10n.getStr("ToolboxWebconosle.label"),
+  build: function(aIFrameWindow, aTarget) {
+    return new WebConsolePanel(aIFrameWindow, aTarget);
   }
 };
 
 /**
- * A DevToolInstance that controls the Web Console.
+ * A DevToolPanel that controls the Web Console.
  */
-function WebConsoleToolInstance(aIFrameWindow, aTarget) {
+function WebConsolePanel(aIFrameWindow, aTarget) {
   this._frameWindow = aIFrameWindow;
   this._target = aTarget;
 
@@ -59,7 +57,7 @@ function WebConsoleToolInstance(aIFrameWindow, aTarget) {
   this.hud = HUDService.activateHUDForContext(tab, false, iframe);
 }
 
-WebConsoleToolInstance.prototype = {
+WebConsolePanel.prototype = {
   get target() this._target,
 
   destroy: function WCTI_destroy()

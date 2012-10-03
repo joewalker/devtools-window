@@ -22,7 +22,7 @@
         width="800" height="280"
         persist="screenX screenY width height sizemode">
 <xul:script type="application/javascript" src="chrome://global/content/globalOverlay.js"/>
-<xul:script type="application/javascript" src="SE_DevToolsInstance.js"/>
+<xul:script type="application/javascript" src="StyleEditorPanel.js"/>
 
 <xul:popupset id="style-editor-popups">
   <xul:menupopup id="sourceEditorContextMenu"

@@ -1,6 +1,6 @@
 Components.utils.import("resource:///modules/devtools/StyleEditorChrome.jsm");
 
-// DevTools Instance API:
+// DevTools Panel API:
 
 window.init = function(aContentWindow) {
   let chromeRoot = document.getElementById("style-editor-chrome");
