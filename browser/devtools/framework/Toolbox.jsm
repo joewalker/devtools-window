@@ -46,8 +46,8 @@ function Toolbox(target, hostType, selectedTool) {
 
   new EventEmitter(this);
 
-  this.on("tool-registered", this._handleEvent);
-  this.on("tool-unregistered", this._handleEvent);
+  gDevTools.on("tool-registered", this._handleEvent);
+  gDevTools.on("tool-unregistered", this._handleEvent);
 }
 
 Toolbox.prototype = {
@@ -392,8 +392,8 @@ Toolbox.prototype = {
   destroy: function TBOX_destroy() {
     this._host.destroyUI();
 
-    this.off("tool-registered", this._handleEvent);
-    this.off("tool-unregistered", this._handleEvent);
+    gDevTools.off("tool-registered", this._handleEvent);
+    gDevTools.off("tool-unregistered", this._handleEvent);
 
     this.emit("destroyed");
   }

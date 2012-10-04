@@ -106,9 +106,7 @@ DevTools.prototype = {
       "devtools." + toolId + ".enabled";
     this._tools.set(toolId, aToolDefinition);
 
-    for (let [key, toolbox] of this._toolboxes) {
-      toolbox.emit("tool-registered", toolId);
-    }
+    this.emit("tool-registered", toolId);
   },
 
   /**
@@ -118,9 +116,7 @@ DevTools.prototype = {
   unregisterTool: function DT_unregisterTool(aToolId) {
     this._tools.delete(aToolId);
 
-    for (let [key, toolbox] of this._toolboxes) {
-      toolbox.emit("tool-unregistered", aToolId);
-    }
+    this.emit("tool-unregistered", aToolId);
   },
 
   /**
