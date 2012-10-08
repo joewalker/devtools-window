@@ -13,7 +13,7 @@ const EXPORTED_SYMBOLS = [ "Hosts" ];
 
 let Hosts = {
   "bottom": BottomHost,
-  "right": RightHost,
+  "side": SidebarHost,
   "window": WindowHost
 }
 
@@ -71,21 +71,21 @@ BottomHost.prototype = {
 
 
 /**
- * Host object for the sidebar on the right of the browser
+ * Host object for the in-browser sidebar
  */
-function RightHost(hostTab) {
+function SidebarHost(hostTab) {
   this.hostTab = hostTab;
 
   new EventEmitter(this);
 }
 
-RightHost.prototype = {
-  type: "right",
+SidebarHost.prototype = {
+  type: "side",
 
   widthPref: "devtools.toolbox.sidebar.width",
 
   /**
-   * Create a box at the right side of the host tab and call a callback with
+   * Create a box in the sidebar of the host tab and call a callback with
    * The iframe to populate the toolbox in.
    *
    * @param {function} callback

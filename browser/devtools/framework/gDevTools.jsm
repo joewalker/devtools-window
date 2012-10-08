@@ -65,7 +65,7 @@ DevTools.prototype = {
    */
   HostType: {
     BOTTOM: "bottom",
-    RIGHT: "right",
+    SIDE: "side",
     WINDOW: "window",
     TAB: "tab"
   },

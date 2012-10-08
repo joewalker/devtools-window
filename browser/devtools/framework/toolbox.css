@@ -25,7 +25,7 @@
   background-image: url("chrome://browser/skin/devtools/dock-bottom.png");
 }
 
-#toolbox-dock-right {
+#toolbox-dock-side {
   background-image: url("chrome://browser/skin/devtools/dock-side.png");
 }
 

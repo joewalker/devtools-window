@@ -21,8 +21,8 @@
       <hbox id="toolbox-buttons"/>
       <toolbarbutton checked="true" id="toolbox-dock-bottom" class="toolbox-dock-button"
                      data-position="bottom"></toolbarbutton>
-      <toolbarbutton id="toolbox-dock-right" class="toolbox-dock-button"
-                     data-position="right"></toolbarbutton>
+      <toolbarbutton id="toolbox-dock-side" class="toolbox-dock-button"
+                     data-position="side"></toolbarbutton>
       <toolbarbutton id="toolbox-dock-window" class="toolbox-dock-button"
                      data-position="window"></toolbarbutton>
       <toolbarbutton id="toolbox-close" class="devtools-closebutton"></toolbarbutton>
