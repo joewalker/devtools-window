@@ -14,7 +14,8 @@ const EXPORTED_SYMBOLS = ["DebuggerDefinition"];
 Cu.import("resource://gre/modules/devtools/EventEmitter.jsm");
 Cu.import("resource://gre/modules/devtools/dbg-server.jsm");
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
-XPCOMUtils.defineLazyModuleGetter(this, "gDevTools", "resource:///modules/devtools/gDevTools.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
+                                  "resource:///modules/devtools/gDevTools.jsm");
 
 const DebuggerDefinition = {
   id: "jsdebugger",
@@ -23,8 +24,8 @@ const DebuggerDefinition = {
   url: "chrome://browser/content/debugger.xul",
   label: "Debugger", // FIXME: l10n 
 
-  isTargetSupported: function(aTarget) {
-    switch (aTarget.type) {
+  isTargetSupported: function(target) {
+    switch (target.type) {
       case gDevTools.TargetType.TAB:
         return true;
       case gDevTools.TargetType.REMOTE:
@@ -34,20 +35,20 @@ const DebuggerDefinition = {
     }
   },
 
-  build: function(aIFrameWindow, aTarget) {
-    return new DebuggerPanel(aIFrameWindow, aTarget);
+  build: function(iframeWindow, target) {
+    return new DebuggerPanel(iframeWindow, target);
   }
 };
 
 
-function DebuggerPanel(aWindow, aTarget) {
-  this._target = aTarget;
-  this._controller = aWindow.DebuggerController;
+function DebuggerPanel(iframeWindow, target) {
+  this._target = target;
+  this._controller = iframeWindow.DebuggerController;
   this._bkp = this._controller.Breakpoints;
 
   new EventEmitter(this);
 
-  if (aTarget.type == gDevTools.TargetType.TAB) {
+  if (target.type == gDevTools.TargetType.TAB) {
     this._ensureOnlyOneRunningDebugger();
     if (!DebuggerServer.initialized) {
       // Always allow connections from nsIPipe transports.

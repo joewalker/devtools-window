@@ -4,7 +4,7 @@
 
 "use strict";
 
-const EXPORTED_SYMBOLS = [ "gDevTools" ];
+const EXPORTED_SYMBOLS = [ "gDevTools", "DevTools" ];
 
 const Cu = Components.utils;
 const Ci = Components.interfaces;
@@ -31,53 +31,64 @@ function DevTools() {
   new EventEmitter(this);
 }
 
+/**
+ * Each toolbox has a |target| that indicates what is being debugged/inspected.
+ * A target is an object with this shape:
+ * {
+ *   type: TargetType.[TAB|REMOTE|CHROME],
+ *   value: ...
+ * }
+ *
+ * When type = TAB, then 'value' contains a XUL Tab
+ * When type = REMOTE, then 'value' contains an object with host and port
+ *   properties, for example:
+ *   { type: TargetType.TAB, value: { host: 'localhost', port: 4325 } }
+ * When type = CHROME, then 'value' contains a XUL window
+ */
+DevTools.TargetType = {
+  TAB: "tab",
+  REMOTE: "remote",
+  CHROME: "chrome"
+};
+
+/**
+ * The developer tools can be 'hosted' either embedded in a browser window, or
+ * in a separate tab. Other hosts may be possible here, like a separate XUL
+ * window.
+ *
+ * A Toolbox host is an object with this shape:
+ * {
+ *   type: HostType.[BOTTOM|TAB],
+ *   element: ...
+ * }
+ *
+ * Definition of the 'element' property is left as an exercise to the
+ * implementor.
+ */
+DevTools.HostType = {
+  BOTTOM: "bottom",
+  RIGHT: "right",
+  WINDOW: "window",
+  TAB: "tab"
+};
+
+/**
+ * Event constants.
+ * FIXME: The supported list of events needs finalizing and documenting.
+ */
+DevTools.ToolEvent = {
+  TOOLREADY: "devtools-tool-ready",
+  TOOLHIDE: "devtools-tool-hide",
+  TOOLSHOW: "devtools-tool-show",
+  TOOLCLOSED: "devtools-tool-closed",
+  TOOLBOXREADY: "devtools-toolbox-ready",
+  TOOLBOXCLOSED: "devtools-toolbox-closed",
+};
+
 DevTools.prototype = {
-  /**
-   * A Toolbox target is an object with this shape:
-   * {
-   *   type: TargetType.[TAB|REMOTE|CHROME],
-   *   value: ...
-   * }
-   *
-   * When type = TAB, then 'value' contains a XUL Tab
-   * When type = REMOTE, then 'value' contains an object with host and port
-   *   properties, for example:
-   *   { type: TargetType.TAB, value: { host: 'localhost', port: 4325 } }
-   * When type = CHROME, then 'value' contains a XUL window
-   */
-  TargetType: {
-    TAB: "tab",
-    REMOTE: "remote",
-    CHROME: "chrome"
-  },
-
-  /**
-   * The developer tools can be 'hosted' either embedded in a browser window, or
-   * in a separate tab. Other hosts may be possible here, like a separate XUL
-   * window. A Toolbox host is an object with this shape:
-   * {
-   *   type: HostType.[BOTTOM|TAB],
-   *   element: ...
-   * }
-   *
-   * Definition of the 'element' property is left as an exercise to the
-   * implementor.
-   */
-  HostType: {
-    BOTTOM: "bottom",
-    RIGHT: "right",
-    WINDOW: "window",
-    TAB: "tab"
-  },
-
-  ToolEvent: {
-    TOOLREADY: "devtools-tool-ready",
-    TOOLHIDE: "devtools-tool-hide",
-    TOOLSHOW: "devtools-tool-show",
-    TOOLCLOSED: "devtools-tool-closed",
-    TOOLBOXREADY: "devtools-toolbox-ready",
-    TOOLBOXCLOSED: "devtools-toolbox-closed",
-  },
+  TargetType: DevTools.TargetType,
+  HostType: DevTools.HostType,
+  ToolEvent: DevTools.ToolEvent,
 
   /**
    * Register a new developer tool.
@@ -102,24 +113,24 @@ DevTools.prototype = {
    *          populated with the markup from |url|. And returns an instance of
    *          ToolPanel (function|required)
    */
-  registerTool: function DT_registerTool(aToolDefinition) {
-    let toolId = aToolDefinition.id;
+  registerTool: function DT_registerTool(toolDefinition) {
+    let toolId = toolDefinition.id;
 
-    aToolDefinition.killswitch = aToolDefinition.killswitch ||
+    toolDefinition.killswitch = toolDefinition.killswitch ||
       "devtools." + toolId + ".enabled";
-    this._tools.set(toolId, aToolDefinition);
+    this._tools.set(toolId, toolDefinition);
 
     this.emit("tool-registered", toolId);
   },
 
   /**
-   * Removes all tools that match the given |aToolId|
+   * Removes all tools that match the given |toolId|
    * Needed so that add-ons can remove themselves when they are deactivated
    */
-  unregisterTool: function DT_unregisterTool(aToolId) {
-    this._tools.delete(aToolId);
+  unregisterTool: function DT_unregisterTool(toolId) {
+    this._tools.delete(toolId);
 
-    this.emit("tool-unregistered", aToolId);
+    this.emit("tool-unregistered", toolId);
   },
 
   /**
@@ -146,20 +157,20 @@ DevTools.prototype = {
   },
 
   /**
-   * Create a toolbox to debug aTarget using a window displayed in aHostType
-   * (optionally with aDefaultToolId opened)
+   * Create a toolbox to debug |target| using a window displayed in |hostType|
+   * (optionally with |defaultToolId| opened)
    */
-  openToolbox: function DT_openToolbox(aTarget, aHostType, aDefaultToolId) {
-    if (this._toolboxes.has(aTarget.value)) {
+  openToolbox: function DT_openToolbox(target, hostType, defaultToolId) {
+    if (this._toolboxes.has(target.value)) {
       // only allow one toolbox per target
       return null;
     }
 
-    let tb = new Toolbox(aTarget, aHostType, aDefaultToolId);
+    let tb = new Toolbox(target, hostType, defaultToolId);
 
-    this._toolboxes.set(aTarget.value, tb);
+    this._toolboxes.set(target.value, tb);
     tb.once("destroyed", function() {
-      this._toolboxes.delete(aTarget.value);
+      this._toolboxes.delete(target.value);
     }.bind(this));
 
     tb.open();
@@ -198,12 +209,12 @@ DevTools.prototype = {
   /**
    * Return a tool panel for a target.
    */
-  getPanelForTarget: function(aToolName, aTargetValue) {
-    let toolbox = this.getToolBoxes().get(aTargetValue);
+  getPanelForTarget: function(toolName, targetValue) {
+    let toolbox = this.getToolBoxes().get(targetValue);
     if (!toolbox) {
       return undefined;
     }
-    return toolbox.getToolPanels().get("jsdebugger");
+    return toolbox.getToolPanels().get(toolName);
   },
 
   destroy: function DT_destroy() {

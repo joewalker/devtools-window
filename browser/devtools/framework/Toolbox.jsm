@@ -173,8 +173,7 @@ Toolbox.prototype = {
     this._host.createUI(function (iframe) {
       iframe.addEventListener("DOMContentLoaded", this._onLoad, true);
       iframe.setAttribute("src", this._URL);
-    }
-    .bind(this));
+    }.bind(this));
   },
 
   /**
@@ -215,10 +214,21 @@ Toolbox.prototype = {
   },
 
   _buildButtons: function TBOX_buildButtons(frame) {
+    let window = frame.ownerDocument.defaultView;
+    // FIXME: Once we move the DeveloperToolbar into the Devtools Window we
+    // might not need this check.
+    if (!window.DeveloperToolbar || !window.DeveloperToolbar.display) {
+      return;
+    }
+
+    let requisition = window.DeveloperToolbar.display.requisition;
+
+    let toolbarSpec = getToolbarSpec();
     let doc = frame.contentDocument;
     let container = doc.getElementById("toolbox-buttons");
-    let toolbarSpec = getToolbarSpec();
-    let buttons = createButtons(toolbarSpec, doc, frame.ownerDocument.defaultView);
+
+    let buttons = createButtons(toolbarSpec, doc, requisition);
+
     buttons.forEach(function(button) {
       container.appendChild(button);
     }.bind(this));
@@ -300,8 +310,8 @@ Toolbox.prototype = {
         iframe.removeEventListener("DOMContentLoaded", boundLoad, true);
         let instance = definition.build(iframe.contentWindow, this.target);
         this._toolPanels.set(id, instance);
-      }
-      .bind(this)
+      }.bind(this);
+
       iframe.addEventListener("DOMContentLoaded", boundLoad, true);
       iframe.setAttribute("src", definition.url);
     }
@@ -352,18 +362,16 @@ Toolbox.prototype = {
       Services.prefs.setCharPref(this._prefs.LAST_HOST, this._host.type);
 
       this._setDockButtons();
-    }
-    .bind(this));
+    }.bind(this));
   },
 
   /**
    * Get the most appropriate host tab, either the target or the current tab
    */
   _getHostTab: function TBOX_getHostTab() {
-    if (this._target.TargetType == gDevTools.TargetType.TAB) {
+    if (this._target.type == gDevTools.TargetType.TAB) {
       return this._target.value;
-    }
-    else {
+    } else {
       let win = Services.wm.getMostRecentWindow("navigator:browser");
       return win.gBrowser.selectedTab;
     }
@@ -434,10 +442,8 @@ function getToolbarSpec() {
  * A toolbarSpec is an array of buttonSpecs. A buttonSpec is an array of
  * strings each of which is a GCLI command (including args if needed).
  */
-function createButtons(toolbarSpec, document, window) {
+function createButtons(toolbarSpec, document, requisition) {
   var reply = [];
-  var requisition = window.DeveloperToolbar.display.requisition;
-  // var requisition = new Requisition();
 
   toolbarSpec.forEach(function(buttonSpec) {
     var button = document.createElement("toolbarbutton");

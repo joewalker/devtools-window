@@ -151,15 +151,13 @@ WindowHost.prototype = {
       win.removeEventListener("load", boundLoad, true);
       this.frame = win.document.getElementById("toolbox-iframe");
       callback(this.frame);
-    }
-    .bind(this);
+    }.bind(this);
     win.addEventListener("load", boundLoad, true);
 
     let boundClose = function(event) {
       win.removeEventListener("close", boundClose, true);
       this.emit("window-closed");
-    }
-    .bind(this);
+    }.bind(this);
     win.addEventListener("close", boundClose, true);
 
     win.focus();
