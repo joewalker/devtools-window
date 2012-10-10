@@ -34,7 +34,7 @@ const WebConsoleDefinition = {
   killswitch: "devtools.webconsole.enabled", // doesn't currently exist
   icon: "chrome://browser/skin/devtools/webconsole-tool-icon.png",
   url: "chrome://browser/content/devtools/webconsole.xul",
-  label: l10n.getStr("ToolboxWebconosle.label"),
+  label: l10n.getStr("ToolboxWebconsole.label"),
   build: function(aIFrameWindow, aTarget) {
     return new WebConsolePanel(aIFrameWindow, aTarget);
   }
