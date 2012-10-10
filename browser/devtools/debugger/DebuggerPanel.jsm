@@ -22,7 +22,7 @@ const DebuggerDefinition = {
   killswitch: "devtools.debugger.enabled",
   icon: "chrome://browser/skin/devtools/tools-icons-small.png",
   url: "chrome://browser/content/debugger.xul",
-  label: "Debugger", // FIXME: l10n 
+  label: "Debugger", // FIXME: l10n
 
   isTargetSupported: function(target) {
     switch (target.type) {
