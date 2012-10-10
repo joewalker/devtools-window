@@ -317,7 +317,7 @@ Toolbox.prototype = {
 
       let boundLoad = function() {
         iframe.removeEventListener("DOMContentLoaded", boundLoad, true);
-        let instance = definition.build(iframe.contentWindow, this.target);
+        let instance = definition.build(iframe.contentWindow, this);
         this._toolPanels.set(id, instance);
       }.bind(this);
 
@@ -401,6 +401,16 @@ Toolbox.prototype = {
         button.checked = false;
       }
     }
+  },
+
+  /**
+   * Get the toolbox's notification box
+   *
+   * @return The notification box element.
+   */
+  getNotificationBox: function TBOX_getNotificationBox() {
+    let doc = this._host.frame.contentDocument;
+    return doc.getElementById("toolbox-notificationbox");
   },
 
   /**

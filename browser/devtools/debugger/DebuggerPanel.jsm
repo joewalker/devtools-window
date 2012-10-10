@@ -35,20 +35,20 @@ const DebuggerDefinition = {
     }
   },
 
-  build: function(iframeWindow, target) {
-    return new DebuggerPanel(iframeWindow, target);
+  build: function(iframeWindow, toolbox) {
+    return new DebuggerPanel(iframeWindow, toolbox);
   }
 };
 
 
-function DebuggerPanel(iframeWindow, target) {
-  this._target = target;
+function DebuggerPanel(iframeWindow, toolbox) {
+  this._toolbox = toolbox;
   this._controller = iframeWindow.DebuggerController;
   this._bkp = this._controller.Breakpoints;
 
   new EventEmitter(this);
 
-  if (target.type == gDevTools.TargetType.TAB) {
+  if (this.target.type == gDevTools.TargetType.TAB) {
     this._ensureOnlyOneRunningDebugger();
     if (!DebuggerServer.initialized) {
       // Always allow connections from nsIPipe transports.
@@ -63,11 +63,7 @@ function DebuggerPanel(iframeWindow, target) {
 DebuggerPanel.prototype = {
   // DevToolPanel API
   get target() {
-    return this._target;
-  },
-
-  set target(aNewTarget) {
-    // FIXME
+    return this._toolbox.target;
   },
 
   destroy: function() {
