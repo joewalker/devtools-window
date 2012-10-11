@@ -7,17 +7,21 @@
 const EXPORTED_SYMBOLS = [ "StyleEditorDefinition" ];
 
 const Cu = Components.utils;
+const STRINGS_URI = "chrome://browser/locale/devtools/styleeditor.properties";
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource:///modules/devtools/StyleEditorChrome.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
+
+XPCOMUtils.defineLazyGetter(this, "_strings",
+  function() Services.strings.createBundle(STRINGS_URI));
 
 /**
  * The external API allowing us to be registered with DevTools.jsm
  */
 const StyleEditorDefinition = {
   id: "styleeditor",
-  // FIXME: l10n
-  label: "Style Editor",
+  label: l10n("ToolboxStyleEditor.label"),
   url: "chrome://browser/content/styleeditor.xul",
   build: function(iframeWindow, toolbox) {
     let target = toolbox.target;
@@ -29,3 +33,18 @@ const StyleEditorDefinition = {
     return iframeWindow;
   }
 };
+
+/**
+ * Lookup l10n string from a string bundle.
+ * @param {string} aName The key to lookup.
+ * @returns A localized version of the given key.
+ */
+function l10n(aName)
+{
+  try {
+    return _strings.GetStringFromName(aName);
+  } catch (ex) {
+    Services.console.logStringMessage("Error reading '" + aName + "'");
+    throw new Error("l10n error with " + aName);
+  }
+}
