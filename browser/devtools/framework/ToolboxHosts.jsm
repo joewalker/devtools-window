@@ -47,6 +47,7 @@ BottomHost.prototype = {
     this._splitter.setAttribute("class", "devtools-horizontal-splitter");
 
     this.frame = ownerDocument.createElement("iframe");
+    this.frame.id = "devtools-toolbox-bottom-iframe";
     this.frame.height = Services.prefs.getIntPref(this.heightPref);
 
     this._nbox = gBrowser.getNotificationBox(this.hostTab.linkedBrowser);
@@ -100,6 +101,7 @@ SidebarHost.prototype = {
     this._splitter.setAttribute("class", "devtools-side-splitter");
 
     this.frame = ownerDocument.createElement("iframe");
+    this.frame.id = "devtools-toolbox-side-iframe";
     this.frame.width = Services.prefs.getIntPref(this.widthPref);
 
     this._sidebar = gBrowser.getSidebarContainer(this.hostTab.linkedBrowser);
