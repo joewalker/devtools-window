@@ -27,7 +27,7 @@ const WebConsoleDefinition = {
   id: "webconsole",
   icon: "chrome://browser/skin/devtools/webconsole-tool-icon.png",
   url: "chrome://browser/content/devtools/webconsole.xul",
-  label: l10n.getStr("ToolboxWebconosle.label"),
+  label: l10n.getStr("ToolboxWebconsole.label"),
   build: function(iframeWindow, toolbox) {
     return new WebConsolePanel(iframeWindow, toolbox);
   }

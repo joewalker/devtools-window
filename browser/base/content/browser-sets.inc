@@ -186,7 +186,7 @@
 
     <!-- DevTools broadcasters -->
     <broadcaster id="devtoolsMenuBroadcaster_DevToolbox"
-                 label="Open Tools"
+                 label="&devToolbarToolsButton.label;"
                  type="checkbox" autocheck="false"
                  command="Tools:DevToolbox"/>
     <broadcaster id="devtoolsMenuBroadcaster_DevToolbar"

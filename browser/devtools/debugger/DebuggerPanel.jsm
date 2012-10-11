@@ -11,18 +11,23 @@ const Cu = Components.utils;
 
 const EXPORTED_SYMBOLS = ["DebuggerDefinition"];
 
+const STRINGS_URI = "chrome://browser/locale/devtools/debugger.properties";
+
 Cu.import("resource://gre/modules/devtools/EventEmitter.jsm");
 Cu.import("resource://gre/modules/devtools/dbg-server.jsm");
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
+Cu.import("resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
                                   "resource:///modules/devtools/gDevTools.jsm");
+XPCOMUtils.defineLazyGetter(this, "_strings",
+  function() Services.strings.createBundle(STRINGS_URI));
 
 const DebuggerDefinition = {
   id: "jsdebugger",
   killswitch: "devtools.debugger.enabled",
   icon: "chrome://browser/skin/devtools/tools-icons-small.png",
   url: "chrome://browser/content/debugger.xul",
-  label: "Debugger", // FIXME: l10n 
+  label: l10n("ToolboxDebugger.label"),
 
   isTargetSupported: function(target) {
     switch (target.type) {
@@ -92,4 +97,19 @@ DebuggerPanel.prototype = {
   _ensureOnlyOneRunningDebugger: function() {
     // FIXME
   },
+};
+
+/**
+ * Lookup l10n string from a string bundle.
+ * @param {string} aName The key to lookup.
+ * @returns A localized version of the given key.
+ */
+function l10n(aName)
+{
+  try {
+    return _strings.GetStringFromName(aName);
+  } catch (ex) {
+    Services.console.logStringMessage("Error reading '" + aName + "'");
+    throw new Error("l10n error with " + aName);
+  }
 }
