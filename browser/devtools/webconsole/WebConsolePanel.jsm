@@ -28,34 +28,34 @@ const WebConsoleDefinition = {
   icon: "chrome://browser/skin/devtools/webconsole-tool-icon.png",
   url: "chrome://browser/content/devtools/webconsole.xul",
   label: l10n.getStr("ToolboxWebconosle.label"),
-  build: function(iframeWindow, target) {
-    return new WebConsolePanel(iframeWindow, target);
+  build: function(iframeWindow, toolbox) {
+    return new WebConsolePanel(iframeWindow, toolbox);
   }
 };
 
 /**
  * A DevToolPanel that controls the Web Console.
  */
-function WebConsolePanel(iframeWindow, target) {
+function WebConsolePanel(iframeWindow, toolbox) {
   this._frameWindow = iframeWindow;
-  this._target = target;
+  this._toolbox = toolbox;
 
-  if (this._target.type !== DevTools.TargetType.TAB) {
-    throw new Error("Unsupported tab type: " + this._target.type);
+  if (this.target.type !== DevTools.TargetType.TAB) {
+    throw new Error("Unsupported tab type: " + this.target.type);
   }
 
-  let tab = this._target.value;
+  let tab = this.target.value;
   let parentDoc = iframeWindow.document.defaultView.parent.document;
   let iframe = parentDoc.querySelector('#toolbox-panel-iframe-webconsole');
   this.hud = HUDService.activateHUDForContext(tab, false, iframe);
 }
 
 WebConsolePanel.prototype = {
-  get target() this._target,
+  get target() this._toolbox.target,
 
   destroy: function WCTI_destroy()
   {
-    let tab = this._target.value;
+    let tab = this.target.value;
     HUDService.deactivateHUDForContext(tab, false);
   },
 };

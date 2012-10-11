@@ -3268,25 +3268,13 @@ html|*#gcli-output-frame {
   background: rgba(0,0,0,.4);
 }
 
-#developer-toolbar-webconsole {
-  -moz-image-region: rect(0, 16px, 16px, 0);
-}
-
-#developer-toolbar-inspector {
-  -moz-image-region: rect(16px, 16px, 32px, 0);
-}
-
-#developer-toolbar-other-tools {
+#developer-toolbar-toolbox-button {
   -moz-image-region: rect(64px, 16px, 80px, 0);
-}
-
-#developer-toolbar-other-tools > .toolbarbutton-menu-dropmarker {
-  display: none;
 }
 
 /* Error counter */
 
-#developer-toolbar-webconsole[error-count]:before {
+#developer-toolbar-toolbox-button[error-count]:before {
   color: #FDF3DE;
   min-width: 16px;
   text-shadow: none;

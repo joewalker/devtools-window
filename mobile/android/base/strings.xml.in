@@ -125,6 +125,7 @@
   <string name="downloads">&downloads;</string>
   <string name="apps">&apps;</string>
   <string name="char_encoding">&char_encoding;</string>
+  <string name="new_pb_tab">&new_pb_tab;</string>
   <!-- This string only appears in developer builds, which
        is why it is not localizable. -->
   <string name="toggle_profiling">Toggle Profiling</string>
@@ -222,16 +223,16 @@
   <string name="searchable_description">&searchable_description;</string>
 
   <!-- Updater notifications -->
-  <string name="updater_start_title">&updater_start_title;</string>
-  <string name="updater_start_select">&updater_start_select;</string>
-
-  <string name="updater_downloading_title">&updater_downloading_title;</string>
-  <string name="updater_downloading_title_failed">&updater_downloading_title_failed;</string>
-  <string name="updater_downloading_select">&updater_downloading_select;</string>
-  <string name="updater_downloading_retry">&updater_downloading_retry;</string>
-  
-  <string name="updater_apply_title">&updater_apply_title;</string>
-  <string name="updater_apply_select">&updater_apply_select;</string>
+  <string name="updater_start_title">&updater_start_title2;</string>
+  <string name="updater_start_select">&updater_start_select2;</string>
+ 
+  <string name="updater_downloading_title">&updater_downloading_title2;</string>
+  <string name="updater_downloading_title_failed">&updater_downloading_title_failed2;</string>
+  <string name="updater_downloading_select">&updater_downloading_select2;</string>
+  <string name="updater_downloading_retry">&updater_downloading_retry2;</string>
+   
+  <string name="updater_apply_title">&updater_apply_title2;</string>
+  <string name="updater_apply_select">&updater_apply_select2;</string>
 
   <!-- Search suggestions opt-in -->
   <string name="suggestions_prompt">&suggestions_prompt;</string>

@@ -19,9 +19,10 @@ const StyleEditorDefinition = {
   // FIXME: l10n
   label: "Style Editor",
   url: "chrome://browser/content/styleeditor.xul",
-  build: function(iframeWindow, target) {
+  build: function(iframeWindow, toolbox) {
+    let target = toolbox.target;
     if (target.type !== "tab") {
-      throw new Error("Unsupported tab type: " + this._target.type);
+      throw new Error("Unsupported target type: " + target.type);
     }
 
     iframeWindow.init(target.value.linkedBrowser.contentWindow);
