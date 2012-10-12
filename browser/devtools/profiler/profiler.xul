@@ -5,9 +5,19 @@
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 
 <?xml-stylesheet href="chrome://browser/skin/" type="text/css"?>
+<?xml-stylesheet href="chrome://browser/skin/devtools/common.css" type="text/css"?>
 
 <window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
-  <vbox>
-    <label value="Hello, World!"/>
+  <vbox flex="1">
+    <toolbar class="devtools-toolbar" mode="full">
+      <toolbarbutton id="profiler-toggle"
+                     class="devtools-toolbarbutton"
+                     label="Start"/>
+    </toolbar>
+
+    <vbox flex="1">
+      <iframe id="profiler-cleo"
+          src="chrome://browser/content/cleopatra.html" flex="1"></iframe>
+    </vbox>
   </vbox>
 </window>
