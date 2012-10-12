@@ -371,6 +371,8 @@ Toolbox.prototype = {
       Services.prefs.setCharPref(this._prefs.LAST_HOST, this._host.type);
 
       this._setDockButtons();
+
+      this.emit("host-changed");
     }.bind(this));
   },
 
@@ -417,6 +419,10 @@ Toolbox.prototype = {
    * Remove all UI elements, detach from target and clear up
    */
   destroy: function TBOX_destroy() {
+    for (let [id, panel] of this._toolPanels) {
+      panel.destroy();
+    }
+
     this._host.destroyUI();
 
     gDevTools.off("tool-registered", this._handleEvent);
