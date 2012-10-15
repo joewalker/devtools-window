@@ -10,8 +10,15 @@ const EXPORTED_SYMBOLS = ["ProfilerDefinition"];
 
 Cu.import("resource:///modules/devtools/ProfilerController.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
+
 XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
   "resource:///modules/devtools/gDevTools.jsm");
+
+XPCOMUtils.defineLazyGetter(this, "DebuggerServer", function () {
+  Cu.import("resource://gre/modules/devtools/dbg-server.jsm");
+  return DebuggerServer;
+});
 
 const ProfilerDefinition = {
   id: "jsprofiler",
@@ -43,8 +50,11 @@ function ProfilerPanel(frame, toolbox) {
   this.target = toolbox.target;
   this.controller = new ProfilerController();
 
-  let toggle = this.document.getElementById("profiler-toggle");
-  toggle.addEventListener("click", this.onToggle.bind(this), false);
+  this.controller.connect(function onConnect() {
+    let toggle = this.document.getElementById("profiler-toggle");
+    toggle.addEventListener("click", this.onToggle.bind(this), false);
+    toggle.removeAttribute("disabled");
+  }.bind(this));
 }
 
 ProfilerPanel.prototype = {
@@ -53,19 +63,39 @@ ProfilerPanel.prototype = {
 
   onToggle: function PP_onToggle() {
     let el = this.document.getElementById("profiler-toggle");
+    let iframe = this.document.getElementById("profiler-cleo");
 
-    if (this.controller.isRunning) {
-      let profileData = this.controller.stop();
-      let iframe = this.document.getElementById("profiler-cleo");
-      iframe.contentWindow.postMessage(JSON.stringify({
-        task: "receiveProfileData",
-        rawProfile: profileData
-      }), "*");
-      el.setAttribute("label", "Start");
-      return;
-    }
+    this.controller.isActive(function (err, isActive) {
+      if (err) {
+        dump("[LOG] Error on profiler isActive: " + err.message + "\n");
+      }
 
-    this.controller.start();
-    el.setAttribute("label", "Stop");
+      if (isActive) {
+        this.controller.stop(function (err, data) {
+          if (err) {
+            dump("[LOG] Error on profiler stop: " + err.message + "\n");
+            return; // TODO
+          }
+
+          iframe.contentWindow.postMessage(JSON.stringify({
+            task: "receiveProfileData",
+            rawProfile: data
+          }), "*");
+
+          el.setAttribute("label", "Start");
+        });
+
+        return;
+      }
+
+      this.controller.start(function (err) {
+        if (err) {
+          dump("[LOG] Error on profiler start: " + err.message + "\n");
+          return; // TODO
+        }
+
+        el.setAttribute("label", "Stop");
+      });
+    }.bind(this));
   }
 };

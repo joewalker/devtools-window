@@ -12,7 +12,8 @@
     <toolbar class="devtools-toolbar" mode="full">
       <toolbarbutton id="profiler-toggle"
                      class="devtools-toolbarbutton"
-                     label="Start"/>
+                     label="Start"
+                     disabled="true"/>
     </toolbar>
 
     <vbox flex="1">
