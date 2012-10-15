@@ -84,7 +84,7 @@ DocAccessible::
   mVirtualCursor(nullptr),
   mPresShell(aPresShell)
 {
-  mFlags |= eDocAccessible;
+  mFlags |= eDocAccessible | eNotNodeMapEntry;
   if (mPresShell)
     mPresShell->SetAccDocument(this);
 
@@ -271,10 +271,11 @@ DocAccessible::Description(nsString& aDescription)
   if (mParent)
     mParent->Description(aDescription);
 
-  if (aDescription.IsEmpty())
+  if (HasOwnContent() && aDescription.IsEmpty()) {
     nsTextEquivUtils::
       GetTextEquivFromIDRefs(this, nsGkAtoms::aria_describedby,
                              aDescription);
+  }
 }
 
 // Accessible public method
@@ -1390,7 +1391,7 @@ DocAccessible::BindToDocument(Accessible* aAccessible,
     return false;
 
   // Put into DOM node cache.
-  if (aAccessible->IsPrimaryForNode())
+  if (aAccessible->IsNodeMapEntry())
     mNodeToAccessibleMap.Put(aAccessible->GetNode(), aAccessible);
 
   // Put into unique ID cache.
@@ -1423,7 +1424,7 @@ DocAccessible::UnbindFromDocument(Accessible* aAccessible)
   }
 
   // Remove an accessible from node-to-accessible map if it exists there.
-  if (aAccessible->IsPrimaryForNode() &&
+  if (aAccessible->IsNodeMapEntry() &&
       mNodeToAccessibleMap.Get(aAccessible->GetNode()) == aAccessible)
     mNodeToAccessibleMap.Remove(aAccessible->GetNode());
 
@@ -1469,6 +1470,14 @@ DocAccessible::ContentRemoved(nsIContent* aContainerNode,
 void
 DocAccessible::RecreateAccessible(nsIContent* aContent)
 {
+#ifdef A11Y_LOG
+  if (logging::IsEnabled(logging::eTree)) {
+    logging::MsgBegin("TREE", "accessible recreated");
+    logging::Node("content", aContent);
+    logging::MsgEnd();
+  }
+#endif
+
   // XXX: we shouldn't recreate whole accessible subtree, instead we should
   // subclass hide and show events to handle them separately and implement their
   // coalescence with normal hide and show events. Note, in this case they
@@ -1578,6 +1587,11 @@ void
 DocAccessible::ProcessLoad()
 {
   mLoadState |= eCompletelyLoaded;
+
+#ifdef A11Y_LOG
+  if (logging::IsEnabled(logging::eDocLoad))
+    logging::DocCompleteLoad(this, IsLoadEventTarget());
+#endif
 
   // Do not fire document complete/stop events for root chrome document
   // accessibles and for frame/iframe documents because
@@ -2034,7 +2048,7 @@ DocAccessible::UncacheChildrenInSubtree(Accessible* aRoot)
   for (uint32_t idx = 0; idx < count; idx++)
     UncacheChildrenInSubtree(aRoot->ContentChildAt(idx));
 
-  if (aRoot->IsPrimaryForNode() &&
+  if (aRoot->IsNodeMapEntry() &&
       mNodeToAccessibleMap.Get(aRoot->GetNode()) == aRoot)
     mNodeToAccessibleMap.Remove(aRoot->GetNode());
 }
@@ -2064,25 +2078,31 @@ bool
 DocAccessible::IsLoadEventTarget() const
 {
   nsCOMPtr<nsISupports> container = mDocument->GetContainer();
-  nsCOMPtr<nsIDocShellTreeItem> docShellTreeItem =
-    do_QueryInterface(container);
-  NS_ASSERTION(docShellTreeItem, "No document shell for document!");
+  nsCOMPtr<nsIDocShellTreeItem> treeItem = do_QueryInterface(container);
+  NS_ASSERTION(treeItem, "No document shell for document!");
 
   nsCOMPtr<nsIDocShellTreeItem> parentTreeItem;
-  docShellTreeItem->GetParent(getter_AddRefs(parentTreeItem));
+  treeItem->GetParent(getter_AddRefs(parentTreeItem));
 
-  // Return true if it's not a root document (either tab document or
-  // frame/iframe document) and its parent document is not in loading state.
-  // Note: we can get notifications while document is loading (and thus
-  // while there's no parent document yet).
+  // Not a root document.
   if (parentTreeItem) {
+    // Return true if it's either:
+    // a) tab document;
+    nsCOMPtr<nsIDocShellTreeItem> rootTreeItem;
+    treeItem->GetRootTreeItem(getter_AddRefs(rootTreeItem));
+    if (parentTreeItem == rootTreeItem)
+      return true;
+
+    // b) frame/iframe document and its parent document is not in loading state
+    // Note: we can get notifications while document is loading (and thus
+    // while there's no parent document yet).
     DocAccessible* parentDoc = ParentDocument();
     return parentDoc && parentDoc->HasLoadState(eCompletelyLoaded);
   }
 
   // It's content (not chrome) root document.
   int32_t contentType;
-  docShellTreeItem->GetItemType(&contentType);
+  treeItem->GetItemType(&contentType);
   return (contentType == nsIDocShellTreeItem::typeContent);
 }
 

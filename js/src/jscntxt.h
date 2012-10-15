@@ -471,6 +471,9 @@ struct JSRuntime : js::RuntimeFriendFields
 
     bool initSelfHosting(JSContext *cx);
     void markSelfHostedGlobal(JSTracer *trc);
+    bool isSelfHostedGlobal(js::HandleObject global) {
+        return global == selfHostedGlobal_;
+    }
     JSFunction *getSelfHostedFunction(JSContext *cx, const char *name);
     bool cloneSelfHostedValueById(JSContext *cx, js::HandleId id, js::HandleObject holder,
                                   js::MutableHandleValue vp);
@@ -810,6 +813,12 @@ struct JSRuntime : js::RuntimeFriendFields
      * thread, if any, or a thread that is in a request and holds gcLock.
      */
     JSCList             debuggerList;
+
+    /*
+     * Head of circular list of all enabled Debuggers that have
+     * onNewGlobalObject handler methods established.
+     */
+    JSCList             onNewGlobalObjectWatchers;
 
     /* Bookkeeping information for debug scope objects. */
     js::DebugScopes     *debugScopes;
@@ -1971,12 +1980,6 @@ namespace mjit {
 #endif
 
 } /* namespace js */
-
-/* How much expansion of inlined frames to do when inspecting the stack. */
-enum FrameExpandKind {
-    FRAME_EXPAND_NONE = 0,
-    FRAME_EXPAND_ALL = 1
-};
 
 namespace js {
 

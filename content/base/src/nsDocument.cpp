@@ -1337,9 +1337,10 @@ nsDOMImplementation::HasFeature(const nsAString& aFeature,
                                 const nsAString& aVersion,
                                 bool* aReturn)
 {
-  return nsGenericElement::InternalIsSupported(
+  *aReturn = nsContentUtils::InternalIsSupported(
            static_cast<nsIDOMDOMImplementation*>(this),
-           aFeature, aVersion, aReturn);
+           aFeature, aVersion);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2859,8 +2860,8 @@ nsDocument::GetActiveElement(nsIDOMElement **aElement)
                                            getter_AddRefs(focusedWindow));
     // be safe and make sure the element is from this document
     if (focusedContent && focusedContent->OwnerDoc() == this) {
-      if (focusedContent->IsInNativeAnonymousSubtree()) {
-        focusedContent = focusedContent->FindFirstNonNativeAnonymous();
+      if (focusedContent->ChromeOnlyAccess()) {
+        focusedContent = focusedContent->FindFirstNonChromeOnlyAccessContent();
       }
       if (focusedContent) {
         CallQueryInterface(focusedContent, aElement);
@@ -4940,6 +4941,7 @@ NS_IMETHODIMP
 nsDocument::GetCharacterSet(nsAString& aCharacterSet)
 {
   CopyASCIItoUTF16(GetDocumentCharacterSet(), aCharacterSet);
+  ToLowerCase(aCharacterSet);
   return NS_OK;
 }
 
@@ -5969,8 +5971,9 @@ NS_IMETHODIMP
 nsDocument::IsSupported(const nsAString& aFeature, const nsAString& aVersion,
                         bool* aReturn)
 {
-  return nsGenericElement::InternalIsSupported(static_cast<nsIDOMDocument*>(this),
-                                               aFeature, aVersion, aReturn);
+  *aReturn = nsContentUtils::InternalIsSupported(static_cast<nsIDOMDocument*>(this),
+                                                 aFeature, aVersion);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -6073,7 +6076,35 @@ nsDocument::GetDocumentURI(nsAString& aDocumentURI)
     mDocumentURI->GetSpec(uri);
     CopyUTF8toUTF16(uri, aDocumentURI);
   } else {
-    SetDOMStringToNull(aDocumentURI);
+    aDocumentURI.Truncate();
+  }
+
+  return NS_OK;
+}
+
+// Alias of above
+NS_IMETHODIMP
+nsDocument::GetURL(nsAString& aURL)
+{
+  return GetDocumentURI(aURL);
+}
+
+// readonly attribute DOMString compatMode;
+// Returns "BackCompat" if we are in quirks mode, "CSS1Compat" if we are
+// in almost standards or full standards mode. See bug 105640.  This was
+// implemented to match MSIE's compatMode property.
+NS_IMETHODIMP
+nsDocument::GetCompatMode(nsAString& aCompatMode)
+{
+  NS_ASSERTION(mCompatMode == eCompatibility_NavQuirks ||
+               mCompatMode == eCompatibility_AlmostStandards ||
+               mCompatMode == eCompatibility_FullStandards,
+               "mCompatMode is neither quirks nor strict for this document");
+
+  if (mCompatMode == eCompatibility_NavQuirks) {
+    aCompatMode.AssignLiteral("BackCompat");
+  } else {
+    aCompatMode.AssignLiteral("CSS1Compat");
   }
 
   return NS_OK;
@@ -6874,9 +6905,7 @@ nsDocument::RetrieveRelevantHeaders(nsIChannel *aChannel)
         rv = file->GetLastModifiedTime(&msecs);
 
         if (NS_SUCCEEDED(rv)) {
-          int64_t intermediateValue;
-          LL_I2L(intermediateValue, PR_USEC_PER_MSEC);
-          modDate = msecs * intermediateValue;
+          modDate = msecs * int64_t(PR_USEC_PER_MSEC);
         }
       }
     } else {
@@ -7583,7 +7612,7 @@ nsDocument::MutationEventDispatched(nsINode* aTarget)
     for (int32_t i = 0; i < count; ++i) {
       nsINode* possibleTarget = mSubtreeModifiedTargets[i];
       nsCOMPtr<nsIContent> content = do_QueryInterface(possibleTarget);
-      if (content && content->IsInNativeAnonymousSubtree()) {
+      if (content && content->ChromeOnlyAccess()) {
         continue;
       }
 

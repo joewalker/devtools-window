@@ -93,11 +93,16 @@ def DOMClass(descriptor):
         protoList.extend(['prototypes::id::_ID_Count'] * (descriptor.config.maxProtoChainLength - len(protoList)))
         prototypeChainString = ', '.join(protoList)
         nativeHooks = "NULL" if descriptor.workers else "&NativeHooks"
+        if descriptor.workers or descriptor.nativeOwnership != 'refcounted':
+            participant = "nullptr"
+        else:
+            participant = "NS_CYCLE_COLLECTION_PARTICIPANT(%s)" % descriptor.nativeType
         return """{
   { %s },
-  %s, %s
+  %s, %s, %s
 }""" % (prototypeChainString, toStringBool(descriptor.nativeOwnership == 'nsisupports'),
-          nativeHooks)
+        nativeHooks,
+        participant)
 
 class CGDOMJSClass(CGThing):
     """
@@ -633,12 +638,13 @@ class CGAddPropertyHook(CGAbstractClassHook):
                                      'JSBool', args)
 
     def generate_code(self):
-        # FIXME https://bugzilla.mozilla.org/show_bug.cgi?id=774279
-        # Using a real trace hook might enable us to deal with non-nsISupports
-        # wrappercached things here.
-        assert self.descriptor.nativeOwnership == 'nsisupports'
-        return """  nsContentUtils::PreserveWrapper(reinterpret_cast<nsISupports*>(self), self);
-  return true;"""
+        assert not self.descriptor.workers and self.descriptor.wrapperCache
+        if self.descriptor.nativeOwnership == 'nsisupports':
+            preserveArgs = "reinterpret_cast<nsISupports*>(self), self"
+        else:
+            preserveArgs = "self, self, NS_CYCLE_COLLECTION_PARTICIPANT(%s)" % self.descriptor.nativeType
+        return """  nsContentUtils::PreserveWrapper(%s);
+  return true;""" % preserveArgs
 
 def DeferredFinalizeSmartPtr(descriptor):
     if descriptor.nativeOwnership == 'owned':
@@ -860,9 +866,8 @@ class PropertyDefiner:
 
     Subclasses should implement generateArray to generate the actual arrays of
     things we're defining.  They should also set self.chrome to the list of
-    things exposed to chrome and self.regular to the list of things exposed to
-    web pages.  self.chrome must be a superset of self.regular but also include
-    all the ChromeOnly stuff.
+    things only exposed to chrome and self.regular to the list of things exposed
+    to both chrome and web pages.
     """
     def __init__(self, descriptor, name):
         self.descriptor = descriptor
@@ -872,33 +877,31 @@ class PropertyDefiner:
         # in as needed.
         self.prefCacheData = []
     def hasChromeOnly(self):
-        return len(self.chrome) > len(self.regular)
+        return len(self.chrome) > 0
     def hasNonChromeOnly(self):
         return len(self.regular) > 0
     def variableName(self, chrome):
-        if chrome and self.hasChromeOnly():
-            return "sChrome" + self.name
-        if self.hasNonChromeOnly():
-            return "s" + self.name
-        return "NULL"
-    def usedForXrays(self, chrome):
-        # We only need Xrays for methods, attributes and constants.  And we only
-        # need them for the non-chrome ones if we have no chromeonly things.
-        # Otherwise (we have chromeonly attributes) we need Xrays for the chrome
-        # methods/attributes/constants.  Finally, in workers there are no Xrays.
-        return ((self.name is "Methods" or self.name is "Attributes" or
-                 self.name is "Constants") and
-                chrome == self.hasChromeOnly() and
-                not self.descriptor.workers)
+        if chrome:
+            if self.hasChromeOnly():
+                return "sChrome" + self.name
+        else:
+            if self.hasNonChromeOnly():
+                return "s" + self.name
+        return "nullptr"
+    def usedForXrays(self):
+        # We only need Xrays for methods, attributes and constants, but in
+        # workers there are no Xrays.
+        return (self.name is "Methods" or self.name is "Attributes" or
+                self.name is "Constants") and not self.descriptor.workers
 
     def __str__(self):
         # We only need to generate id arrays for things that will end
         # up used via ResolveProperty or EnumerateProperties.
         str = self.generateArray(self.regular, self.variableName(False),
-                                 self.usedForXrays(False))
+                                 self.usedForXrays())
         if self.hasChromeOnly():
             str += self.generateArray(self.chrome, self.variableName(True),
-                                      self.usedForXrays(True))
+                                      self.usedForXrays())
         return str
 
     @staticmethod
@@ -1012,7 +1015,7 @@ class MethodDefiner(PropertyDefiner):
                         "length": methodLength(m),
                         "flags": "JSPROP_ENUMERATE",
                         "pref": PropertyDefiner.getControllingPref(m) }
-                       for m in methods]
+                       for m in methods if isChromeOnly(m)]
         self.regular = [{"name": m.identifier.name,
                          "length": methodLength(m),
                          "flags": "JSPROP_ENUMERATE",
@@ -1021,12 +1024,6 @@ class MethodDefiner(PropertyDefiner):
 
         # FIXME Check for an existing iterator on the interface first.
         if any(m.isGetter() and m.isIndexed() for m in methods):
-            self.chrome.append({"name": 'iterator',
-                                "methodInfo": False,
-                                "nativeName": "JS_ArrayIterator",
-                                "length": 0,
-                                "flags": "JSPROP_ENUMERATE",
-                                "pref": None })
             self.regular.append({"name": 'iterator',
                                  "methodInfo": False,
                                  "nativeName": "JS_ArrayIterator",
@@ -1077,8 +1074,9 @@ class AttrDefiner(PropertyDefiner):
     def __init__(self, descriptor, name):
         PropertyDefiner.__init__(self, descriptor, name)
         self.name = name
-        self.chrome = [m for m in descriptor.interface.members if m.isAttr()]
-        self.regular = [m for m in self.chrome if not isChromeOnly(m)]
+        attributes = [m for m in descriptor.interface.members if m.isAttr()]
+        self.chrome = [m for m in attributes if isChromeOnly(m)]
+        self.regular = [m for m in attributes if not isChromeOnly(m)]
 
     def generateArray(self, array, name, doIdArrays):
         if len(array) == 0:
@@ -1121,8 +1119,9 @@ class ConstDefiner(PropertyDefiner):
     def __init__(self, descriptor, name):
         PropertyDefiner.__init__(self, descriptor, name)
         self.name = name
-        self.chrome = [m for m in descriptor.interface.members if m.isConst()]
-        self.regular = [m for m in self.chrome if not isChromeOnly(m)]
+        constants = [m for m in descriptor.interface.members if m.isConst()]
+        self.chrome = [m for m in constants if isChromeOnly(m)]
+        self.regular = [m for m in constants if not isChromeOnly(m)]
 
     def generateArray(self, array, name, doIdArrays):
         if len(array) == 0:
@@ -1155,18 +1154,48 @@ class PropertyArrays():
         return [ "methods", "attrs", "consts" ]
 
     def hasChromeOnly(self):
-        return reduce(lambda b, a: b or getattr(self, a).hasChromeOnly(),
-                      self.arrayNames(), False)
-    def variableNames(self, chrome):
-        names = {}
-        for array in self.arrayNames():
-            names[array] = getattr(self, array).variableName(chrome)
-        return names
+        return any(getattr(self, a).hasChromeOnly() for a in self.arrayNames())
+    def hasNonChromeOnly(self):
+        return any(getattr(self, a).hasNonChromeOnly() for a in self.arrayNames())
     def __str__(self):
         define = ""
         for array in self.arrayNames():
             define += str(getattr(self, array))
         return define
+
+class CGNativeProperties(CGList):
+    def __init__(self, descriptor, properties):
+        def generateNativeProperties(name, chrome):
+            def check(p):
+                return p.hasChromeOnly() if chrome else p.hasNonChromeOnly()
+
+            nativeProps = []
+            for array in properties.arrayNames():
+                propertyArray = getattr(properties, array)
+                if check(propertyArray):
+                    if descriptor.workers:
+                        props = "%(name)s, nullptr, %(name)s_specs"
+                    else:
+                        if propertyArray.usedForXrays():
+                            ids = "%(name)s_ids"
+                        else:
+                            ids = "nullptr"
+                        props = "%(name)s, " + ids + ", %(name)s_specs"
+                    props = (props %
+                             { 'name': propertyArray.variableName(chrome) })
+                else:
+                    props = "nullptr, nullptr, nullptr"
+                nativeProps.append(CGGeneric(props))
+            return CGWrapper(CGIndenter(CGList(nativeProps, ",\n")),
+                             pre="static const NativeProperties %s = {\n" % name,
+                             post="\n};")
+        
+        regular = generateNativeProperties("sNativeProperties", False)
+        chrome = generateNativeProperties("sChromeOnlyNativeProperties", True)
+        CGList.__init__(self, [regular, chrome], "\n\n")
+
+    def declare(self):
+        return ""
 
 class CGCreateInterfaceObjectsMethod(CGAbstractMethod):
     """
@@ -1203,7 +1232,7 @@ class CGCreateInterfaceObjectsMethod(CGAbstractMethod):
                 # We only have non-chrome ids to init if we have no chrome ids.
                 if props.hasChromeOnly():
                     idsToInit.append(props.variableName(True))
-                elif props.hasNonChromeOnly():
+                if props.hasNonChromeOnly():
                     idsToInit.append(props.variableName(False))
         if len(idsToInit) > 0:
             initIds = CGList(
@@ -1264,32 +1293,34 @@ class CGCreateInterfaceObjectsMethod(CGAbstractMethod):
         else:
             domClass = "nullptr"
 
+        if self.properties.hasNonChromeOnly():
+            properties = "&sNativeProperties"
+        else:
+            properties = "nullptr"
+        if self.properties.hasChromeOnly():
+            if self.descriptor.workers:
+                accessCheck = "mozilla::dom::workers::GetWorkerPrivateFromContext(aCx)->IsChromeWorker()"
+            else:
+                accessCheck = "xpc::AccessCheck::isChrome(aGlobal)"
+            chromeProperties = accessCheck + " ? &sChromeOnlyNativeProperties : nullptr"
+        else:
+            chromeProperties = "nullptr"
         call = """return dom::CreateInterfaceObjects(aCx, aGlobal, aReceiver, parentProto,
                                    %s, %s, %s, %d,
                                    %s,
-                                   %%(methods)s, %%(attrs)s,
-                                   %%(consts)s, %%(staticMethods)s,
+                                   %s,
+                                   %s,
                                    %s);""" % (
             "&PrototypeClass" if needInterfacePrototypeObject else "NULL",
             "&InterfaceObjectClass" if needInterfaceObjectClass else "NULL",
             constructHook if needConstructor else "NULL",
             constructArgs,
             domClass,
+            properties,
+            chromeProperties,
             '"' + self.descriptor.interface.identifier.name + '"' if needInterfaceObject else "NULL")
-        if self.properties.hasChromeOnly():
-            if self.descriptor.workers:
-                accessCheck = "mozilla::dom::workers::GetWorkerPrivateFromContext(aCx)->IsChromeWorker()"
-            else:
-                accessCheck = "xpc::AccessCheck::isChrome(js::GetObjectCompartment(aGlobal))"
-            chrome = CGIfWrapper(CGGeneric(call % self.properties.variableNames(True)),
-                                 accessCheck)
-            chrome = CGWrapper(chrome, pre="\n\n")
-        else:
-            chrome = None
-
         functionBody = CGList(
-            [CGGeneric(getParentProto), initIds, prefCache, chrome,
-             CGGeneric(call % self.properties.variableNames(False))],
+            [CGGeneric(getParentProto), initIds, prefCache, CGGeneric(call)],
             "\n\n")
         return CGIndenter(functionBody).define()
 
@@ -1770,6 +1801,10 @@ def getJSToNativeConversionTemplate(type, descriptorProvider, failureCode=None,
         return CGWrapper(CGGeneric(
                 failureCode or
                 'return ThrowErrorMessage(cx, MSG_DOES_NOT_IMPLEMENT_INTERFACE, "%s");' % typeName), post="\n")
+    def onFailureNotCallable(failureCode):
+        return CGWrapper(CGGeneric(
+                failureCode or
+                'return ThrowErrorMessage(cx, MSG_NOT_CALLABLE);'), post="\n")
 
     # A helper function for handling default values.  Takes a template
     # body and the C++ code to set the default value and wraps the
@@ -2393,23 +2428,41 @@ for (uint32_t i = 0; i < length; ++i) {
 
     if type.isCallback():
         assert not isEnforceRange and not isClamp
+        assert not type.treatNonCallableAsNull() or type.nullable()
 
         if isMember:
             raise TypeError("Can't handle member callbacks; need to sort out "
                             "rooting issues")
-        # XXXbz we're going to assume that callback types are always
-        # nullable and always have [TreatNonCallableAsNull] for now.
-        haveCallable = "${val}.isObject() && JS_ObjectIsCallable(cx, &${val}.toObject())"
-        if defaultValue is not None:
-            assert(isinstance(defaultValue, IDLNullValue))
-            haveCallable = "${haveValue} && " + haveCallable
-        return (
-            "if (%s) {\n"
-            "  ${declName} = &${val}.toObject();\n"
-            "} else {\n"
-            "  ${declName} = NULL;\n"
-            "}" % haveCallable,
-            CGGeneric("JSObject*"), None, isOptional)
+
+        if type.nullable():
+            declType = CGGeneric("JSObject*")
+        else:
+            declType = CGGeneric("NonNull<JSObject>")
+
+        if type.treatNonCallableAsNull():
+            haveCallable = "JS_ObjectIsCallable(cx, &${val}.toObject())"
+            if not isDefinitelyObject:
+                haveCallable = "${val}.isObject() && " + haveCallable
+            if defaultValue is not None:
+                assert(isinstance(defaultValue, IDLNullValue))
+                haveCallable = "${haveValue} && " + haveCallable
+            template = (
+                "if (%s) {\n"
+                "  ${declName} = &${val}.toObject();\n"
+                "} else {\n"
+                "  ${declName} = nullptr;\n"
+                "}" % haveCallable)
+        else:
+            template = wrapObjectTemplate(
+                "if (JS_ObjectIsCallable(cx, &${val}.toObject())) {\n"
+                "  ${declName} = &${val}.toObject();\n"
+                "} else {\n"
+                "%s"
+                "}" % CGIndenter(onFailureNotCallable(failureCode)).define(),
+                isDefinitelyObject, type,
+                "${declName} = nullptr",
+                failureCode)
+        return (template, declType, None, isOptional)
 
     if type.isAny():
         assert not isEnforceRange and not isClamp
@@ -2749,16 +2802,13 @@ if (%s.IsNull()) {
             type.inner, descriptorProvider,
             {
                 'result' :  "%s[i]" % result,
-                'successCode': ("if (!JS_DefineElement(cx, returnArray, i, tmp,\n"
-                                "                      NULL, NULL, JSPROP_ENUMERATE)) {\n"
-                                "  return false;\n"
-                                "}"),
+                'successCode': "break;",
                 'jsvalRef': "tmp",
                 'jsvalPtr': "&tmp",
                 'isCreator': isCreator
                 }
             )
-        innerTemplate = CGIndenter(CGGeneric(innerTemplate)).define()
+        innerTemplate = CGIndenter(CGGeneric(innerTemplate), 4).define()
         return (("""
 uint32_t length = %s.Length();
 JSObject *returnArray = JS_NewArrayObject(cx, length, NULL);
@@ -2767,7 +2817,15 @@ if (!returnArray) {
 }
 jsval tmp;
 for (uint32_t i = 0; i < length; ++i) {
+  // Control block to let us common up the JS_DefineElement calls when there
+  // are different ways to succeed at wrapping the object.
+  do {
 %s
+  } while (0);
+  if (!JS_DefineElement(cx, returnArray, i, tmp,
+                        nullptr, nullptr, JSPROP_ENUMERATE)) {
+    return false;
+  }
 }\n""" % (result, innerTemplate)) + setValue("JS::ObjectValue(*returnArray)"), False)
 
     if type.isGeckoInterface():
@@ -2778,8 +2836,11 @@ for (uint32_t i = 0; i < length; ++i) {
                             "}\n")
         else:
             wrappingCode = ""
-        if (not descriptor.interface.isExternal() and
-            not descriptor.interface.isCallback()):
+
+        if descriptor.interface.isCallback():
+            wrap = "WrapCallbackInterface(cx, obj, %s, ${jsvalPtr})" % result
+            failed = None
+        elif not descriptor.interface.isExternal():
             if descriptor.wrapperCache:
                 wrapMethod = "WrapNewBindingObject"
             else:
@@ -2802,14 +2863,15 @@ for (uint32_t i = 0; i < length; ++i) {
                                     descriptor.interface.identifier.name)
                 # Try old-style wrapping for bindings which might be preffed off.
                 failed = wrapAndSetPtr("HandleNewBindingWrappingFailure(cx, ${obj}, %s, ${jsvalPtr})" % result)
-            wrappingCode += wrapAndSetPtr(wrap, failed)
         else:
             if descriptor.notflattened:
                 getIID = "&NS_GET_IID(%s), " % descriptor.nativeType
             else:
                 getIID = ""
             wrap = "WrapObject(cx, ${obj}, %s, %s${jsvalPtr})" % (result, getIID)
-            wrappingCode += wrapAndSetPtr(wrap)
+            failed = None
+
+        wrappingCode += wrapAndSetPtr(wrap, failed)
         return (wrappingCode, False)
 
     if type.isString():
@@ -3849,7 +3911,9 @@ def getUnionAccessorSignatureType(type, descriptorProvider):
         return CGGeneric(type.inner.identifier.name)
 
     if type.isCallback():
-        return CGGeneric("JSObject*")
+        if type.nullable():
+            return CGGeneric("JSObject*")
+        return CGGeneric("JSObject&")
 
     if type.isAny():
         return CGGeneric("JS::Value")
@@ -4502,36 +4566,20 @@ class CGXrayHelper(CGAbstractMethod):
         self.properties = properties
 
     def definition_body(self):
-        varNames = self.properties.variableNames(True)
-
-        methods = self.properties.methods
-        if methods.hasNonChromeOnly() or methods.hasChromeOnly():
-            methodArgs = """// %(methods)s has an end-of-list marker at the end that we ignore
-%(methods)s, %(methods)s_ids, %(methods)s_specs, ArrayLength(%(methods)s) - 1""" % varNames
-        else:
-            methodArgs = "NULL, NULL, NULL, 0"
-        methodArgs = CGGeneric(methodArgs)
-
-        attrs = self.properties.attrs
-        if attrs.hasNonChromeOnly() or attrs.hasChromeOnly():
-            attrArgs = """// %(attrs)s has an end-of-list marker at the end that we ignore
-%(attrs)s, %(attrs)s_ids, %(attrs)s_specs, ArrayLength(%(attrs)s) - 1""" % varNames
-        else:
-            attrArgs = "NULL, NULL, NULL, 0"
-        attrArgs = CGGeneric(attrArgs)
-
-        consts = self.properties.consts
-        if consts.hasNonChromeOnly() or consts.hasChromeOnly():
-            constArgs = """// %(consts)s has an end-of-list marker at the end that we ignore
-%(consts)s, %(consts)s_ids, %(consts)s_specs, ArrayLength(%(consts)s) - 1""" % varNames
-        else:
-            constArgs = "NULL, NULL, NULL, 0"
-        constArgs = CGGeneric(constArgs)
-
         prefixArgs = CGGeneric(self.getPrefixArgs())
+        if self.properties.hasNonChromeOnly():
+            regular = "&sNativeProperties"
+        else:
+            regular = "nullptr"
+        regular = CGGeneric(regular)
+        if self.properties.hasChromeOnly():
+            chrome = "&sChromeOnlyNativeProperties"
+        else:
+            chrome = "nullptr"
+        chrome = CGGeneric(chrome)
 
         return CGIndenter(
-            CGWrapper(CGList([prefixArgs, methodArgs, attrArgs, constArgs], ",\n"),
+            CGWrapper(CGList([prefixArgs, regular, chrome], ",\n"),
                       pre=("return Xray%s(" % self.name),
                       post=");",
                       reindent=True)).define()
@@ -4556,7 +4604,7 @@ class CGEnumerateProperties(CGXrayHelper):
                               properties)
 
     def getPrefixArgs(self):
-        return "props"
+        return "wrapper, props"
 
 class CGPrototypeTraitsClass(CGClass):
     def __init__(self, descriptor, indent=''):
@@ -5209,6 +5257,7 @@ class CGDescriptor(CGThing):
 
         properties = PropertyArrays(descriptor)
         cgThings.append(CGGeneric(define=str(properties)))
+        cgThings.append(CGNativeProperties(descriptor, properties))
         cgThings.append(CGCreateInterfaceObjectsMethod(descriptor, properties))
         if descriptor.interface.hasInterfacePrototypeObject():
             cgThings.append(CGGetProtoObjectMethod(descriptor))

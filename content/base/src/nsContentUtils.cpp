@@ -51,7 +51,7 @@
 #include "nsIForm.h"
 #include "nsIFormControl.h"
 #include "nsGkAtoms.h"
-#include "imgIDecoderObserver.h"
+#include "imgINotificationObserver.h"
 #include "imgIRequest.h"
 #include "imgIContainer.h"
 #include "imgILoader.h"
@@ -171,6 +171,7 @@ static NS_DEFINE_CID(kXTFServiceCID, NS_XTFSERVICE_CID);
 #include "nsIParserService.h"
 #include "nsIDOMScriptObjectFactory.h"
 #include "nsSandboxFlags.h"
+#include "nsSVGFeatures.h"
 
 #include "nsWrapperCacheInlines.h"
 
@@ -277,7 +278,7 @@ public:
     NS_ASSERTION(!mListenerManager, "caller must release and disconnect ELM");
   }
 
-private:
+protected:          // declared protected to silence clang warnings
   const void *mKey; // must be first, to look like PLDHashEntryStub
 
 public:
@@ -2734,7 +2735,7 @@ nsContentUtils::IsImageInCache(nsIURI* aURI, nsIDocument* aDocument)
 nsresult
 nsContentUtils::LoadImage(nsIURI* aURI, nsIDocument* aLoadingDocument,
                           nsIPrincipal* aLoadingPrincipal, nsIURI* aReferrer,
-                          imgIDecoderObserver* aObserver, int32_t aLoadFlags,
+                          imgINotificationObserver* aObserver, int32_t aLoadFlags,
                           imgIRequest** aRequest)
 {
   NS_PRECONDITION(aURI, "Must have a URI");
@@ -2777,7 +2778,7 @@ nsContentUtils::LoadImage(nsIURI* aURI, nsIDocument* aLoadingDocument,
                               aReferrer,            /* referrer */
                               aLoadingPrincipal,    /* loading principal */
                               loadGroup,            /* loadgroup */
-                              aObserver,            /* imgIDecoderObserver */
+                              aObserver,            /* imgINotificationObserver */
                               aLoadingDocument,     /* uniquification key */
                               aLoadFlags,           /* load flags */
                               nullptr,               /* cache key */
@@ -3826,7 +3827,7 @@ nsContentUtils::HasMutationListeners(nsINode* aNode,
   }
 
   if (aNode->IsNodeOfType(nsINode::eCONTENT) &&
-      static_cast<nsIContent*>(aNode)->IsInNativeAnonymousSubtree()) {
+      static_cast<nsIContent*>(aNode)->ChromeOnlyAccess()) {
     return false;
   }
 
@@ -6053,47 +6054,26 @@ nsContentTypeParser::GetParameter(const char* aParameterName, nsAString& aResult
 bool
 nsContentUtils::CanAccessNativeAnon()
 {
-  JSContext* cx = nullptr;
-  sThreadJSContextStack->Peek(&cx);
+  JSContext* cx = GetCurrentJSContext();
   if (!cx) {
     return true;
   }
-  JSStackFrame* fp;
-  nsIPrincipal* principal =
-    sSecurityManager->GetCxSubjectPrincipalAndFrame(cx, &fp);
-  NS_ENSURE_TRUE(principal, false);
 
-  JSScript *script = nullptr;
-  if (fp) {
-    script = JS_GetFrameScript(cx, fp);
-  } else {
-    if (!JS_DescribeScriptedCaller(cx, &script, nullptr)) {
-      // No code at all is running. So we must be arriving here as the result
-      // of C++ code asking us to do something. Allow access.
-      return true;
-    }
-  }
-
-  bool privileged;
-  if (NS_SUCCEEDED(sSecurityManager->IsSystemPrincipal(principal, &privileged)) &&
-      privileged) {
-    // Chrome things are allowed to touch us.
+  if (IsCallerChrome()) {
     return true;
   }
 
-  // XXX HACK EWW! Allow chrome://global/ access to these things, even
-  // if they've been cloned into less privileged contexts.
+  // Allow any code loaded from chrome://global/ to touch us, even if it was
+  // cloned into a less privileged context.
+  JSScript *script;
+  if (!JS_DescribeScriptedCaller(cx, &script, nullptr) || !script) {
+    return false;
+  }
   static const char prefix[] = "chrome://global/";
   const char *filename;
-  if (script &&
-      (filename = JS_GetScriptFilename(cx, script)) &&
-      !strncmp(filename, prefix, ArrayLength(prefix) - 1)) {
-    return true;
-  }
-
-  // Before we throw, check for UniversalXPConnect.
-  nsresult rv = sSecurityManager->IsCapabilityEnabled("UniversalXPConnect", &privileged);
-  if (NS_SUCCEEDED(rv) && privileged) {
+  if ((filename = JS_GetScriptFilename(cx, script)) &&
+      !strncmp(filename, prefix, ArrayLength(prefix) - 1))
+  {
     return true;
   }
 
@@ -6415,26 +6395,24 @@ DebugWrapperTraceCallback(void *p, const char *name, void *closure)
 
 // static
 void
-nsContentUtils::CheckCCWrapperTraversal(nsISupports* aScriptObjectHolder,
-                                        nsWrapperCache* aCache)
+nsContentUtils::CheckCCWrapperTraversal(void* aScriptObjectHolder,
+                                        nsWrapperCache* aCache,
+                                        nsScriptObjectTracer* aTracer)
 {
   JSObject* wrapper = aCache->GetWrapper();
   if (!wrapper) {
     return;
   }
 
-  nsXPCOMCycleCollectionParticipant* participant;
-  CallQueryInterface(aScriptObjectHolder, &participant);
-
   DebugWrapperTraversalCallback callback(wrapper);
 
-  participant->Traverse(aScriptObjectHolder, callback);
+  aTracer->Traverse(aScriptObjectHolder, callback);
   NS_ASSERTION(callback.mFound,
                "Cycle collection participant didn't traverse to preserved "
                "wrapper! This will probably crash.");
 
   callback.mFound = false;
-  participant->Trace(aScriptObjectHolder, DebugWrapperTraceCallback, &callback);
+  aTracer->Trace(aScriptObjectHolder, DebugWrapperTraceCallback, &callback);
   NS_ASSERTION(callback.mFound,
                "Cycle collection participant didn't trace preserved wrapper! "
                "This will probably crash.");
@@ -6953,7 +6931,7 @@ nsContentUtils::GetRootDocument(nsIDocument* aDoc)
 
 // static
 void
-nsContentUtils::ReleaseWrapper(nsISupports* aScriptObjectHolder,
+nsContentUtils::ReleaseWrapper(void* aScriptObjectHolder,
                                nsWrapperCache* aCache)
 {
   if (aCache->PreservingWrapper()) {
@@ -7145,4 +7123,64 @@ nsContentUtils::GetHTMLEditor(nsPresContext* aPresContext)
   nsCOMPtr<nsIEditor> editor;
   editorDocShell->GetEditor(getter_AddRefs(editor));
   return editor;
+}
+
+bool
+nsContentUtils::InternalIsSupported(nsISupports* aObject,
+                                    const nsAString& aFeature,
+                                    const nsAString& aVersion)
+{
+  // Convert the incoming UTF16 strings to raw char*'s to save us some
+  // code when doing all those string compares.
+  NS_ConvertUTF16toUTF8 feature(aFeature);
+  NS_ConvertUTF16toUTF8 version(aVersion);
+
+  const char *f = feature.get();
+  const char *v = version.get();
+
+  if (PL_strcasecmp(f, "XML") == 0 ||
+      PL_strcasecmp(f, "HTML") == 0) {
+    if (aVersion.IsEmpty() ||
+        PL_strcmp(v, "1.0") == 0 ||
+        PL_strcmp(v, "2.0") == 0) {
+      return true;
+    }
+  } else if (PL_strcasecmp(f, "Views") == 0 ||
+             PL_strcasecmp(f, "StyleSheets") == 0 ||
+             PL_strcasecmp(f, "Core") == 0 ||
+             PL_strcasecmp(f, "CSS") == 0 ||
+             PL_strcasecmp(f, "CSS2") == 0 ||
+             PL_strcasecmp(f, "Events") == 0 ||
+             PL_strcasecmp(f, "UIEvents") == 0 ||
+             PL_strcasecmp(f, "MouseEvents") == 0 ||
+             // Non-standard!
+             PL_strcasecmp(f, "MouseScrollEvents") == 0 ||
+             PL_strcasecmp(f, "HTMLEvents") == 0 ||
+             PL_strcasecmp(f, "Range") == 0 ||
+             PL_strcasecmp(f, "XHTML") == 0) {
+    if (aVersion.IsEmpty() ||
+        PL_strcmp(v, "2.0") == 0) {
+      return true;
+    }
+  } else if (PL_strcasecmp(f, "XPath") == 0) {
+    if (aVersion.IsEmpty() ||
+        PL_strcmp(v, "3.0") == 0) {
+      return true;
+    }
+  } else if (PL_strcasecmp(f, "SVGEvents") == 0 ||
+             PL_strcasecmp(f, "SVGZoomEvents") == 0 ||
+             nsSVGFeatures::HasFeature(aObject, aFeature)) {
+    if (aVersion.IsEmpty() ||
+        PL_strcmp(v, "1.0") == 0 ||
+        PL_strcmp(v, "1.1") == 0) {
+      return true;
+    }
+  }
+  else if (NS_SMILEnabled() && PL_strcasecmp(f, "TimeControl") == 0) {
+    if (aVersion.IsEmpty() || PL_strcmp(v, "1.0") == 0) {
+      return true;
+    }
+  }
+
+  return false;
 }

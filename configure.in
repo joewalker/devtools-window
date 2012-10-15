@@ -1486,13 +1486,11 @@ if test "$GNU_CXX"; then
     # -Werror=return-type - catches missing returns, zero false positives
     # -Wtype-limits - catches overflow bugs, few false positives
     # -Wempty-body - catches bugs, e.g. "if (c); foo();", few false positives
-    # -Werror=conversion-null - catches conversions between NULL and non-pointer types
     #
     _WARNINGS_CXXFLAGS="${_WARNINGS_CXXFLAGS} -Wall -Wpointer-arith -Woverloaded-virtual"
     MOZ_CXX_SUPPORTS_WARNING(-W, error=return-type, ac_cxx_has_werror_return_type)
     MOZ_CXX_SUPPORTS_WARNING(-W, type-limits, ac_cxx_has_wtype_limits)
     MOZ_CXX_SUPPORTS_WARNING(-W, empty-body, ac_cxx_has_wempty_body)
-    MOZ_CXX_SUPPORTS_WARNING(-W, error=conversion-null, ac_cxx_has_werror_conversion_null)
 
     # Turn off the following warnings that -Wall/-pedantic turn on:
     # -Wno-ctor-dtor-privacy - ???
@@ -3786,13 +3784,6 @@ AC_CHECK_FUNCS(strndup posix_memalign memalign valloc)
 
 dnl See if compiler supports some gcc-style attributes
 
-AC_CACHE_CHECK(for __attribute__((always_inline)),
-               ac_cv_attribute_always_inline,
-               [AC_TRY_COMPILE([inline void f(void) __attribute__((always_inline));],
-                               [],
-                               ac_cv_attribute_always_inline=yes,
-                               ac_cv_attribute_always_inline=no)])
-
 AC_CACHE_CHECK(for __attribute__((malloc)),
                ac_cv_attribute_malloc,
                [AC_TRY_COMPILE([void* f(int) __attribute__((malloc));],
@@ -3844,12 +3835,6 @@ dnl are defined in build/autoconf/altoptions.m4.
 
 dnl If the compiler supports these attributes, define them as
 dnl convenience macros.
-if test "$ac_cv_attribute_always_inline" = yes ; then
-  AC_DEFINE(NS_ALWAYS_INLINE, [__attribute__((always_inline))])
-else
-  AC_DEFINE(NS_ALWAYS_INLINE,)
-fi
-
 if test "$ac_cv_attribute_malloc" = yes ; then
   AC_DEFINE(NS_ATTR_MALLOC, [__attribute__((malloc))])
 else
@@ -4321,7 +4306,11 @@ case "${target}" in
         fi
 
         NSS_DISABLE_DBM=1
-        NECKO_WIFI=
+        if test -z "$gonkdir"; then
+          NECKO_WIFI=
+        else
+          NECKO_WIFI=1
+        fi
         MOZ_THEME_FASTSTRIPE=1
         MOZ_TREE_FREETYPE=1
         MOZ_MEMORY=1
@@ -7150,6 +7139,8 @@ if test -n "$_WRAP_MALLOC"; then
         dnl Wrap operator new and operator delete on Android.
         if test "$OS_TARGET" = "Android"; then
             WRAP_LDFLAGS="${WRAP_LDFLAGS} -Wl,--wrap=_Znwj,--wrap=_Znaj,--wrap=_ZdlPv,--wrap=_ZdaPv"
+            dnl Wrap the nothrow variants too.
+            WRAP_LDFLAGS="${WRAP_LDFLAGS} -Wl,--wrap=_ZnwjRKSt9nothrow_t,--wrap=_ZnajRKSt9nothrow_t,--wrap=_ZdlPvRKSt9nothrow_t,--wrap=_ZdaPvRKSt9nothrow_t"
         fi
     else
         AC_MSG_ERROR([--enable-wrap-malloc is not supported for non-GNU toolchains])
@@ -8194,14 +8185,6 @@ if test "$NECKO_WIFI" -a \
   AC_MSG_ERROR([Necko WiFi scanning not supported on your platform, use --disable-necko-wifi])
 fi
 
-if test -z "$SKIP_LIBRARY_CHECKS" -a "$NECKO_WIFI" -a "$OS_ARCH" = "Linux"
-then
-  MOZ_CHECK_HEADER([iwlib.h])
-  if test "$ac_cv_header_iwlib_h" != "yes"; then
-    AC_MSG_ERROR([Can't find header iwlib.h for Necko WiFi scanning (might be in package libiw-dev (Ubuntu) or wireless-tools-devel (Fedora) or libiw-devel (openSUSE)); use --disable-necko-wifi to disable])
-  fi
-fi
-
 if test "$NECKO_WIFI"; then
   AC_DEFINE(NECKO_WIFI)
   _NON_GLOBAL_ACDEFINES="$_NON_GLOBAL_ACDEFINES NECKO_WIFI"
@@ -8242,6 +8225,18 @@ dnl Build Apps in the Cloud (AITC) if required
 AC_SUBST(MOZ_SERVICES_AITC)
 if test -n "$MOZ_SERVICES_AITC"; then
   AC_DEFINE(MOZ_SERVICES_AITC)
+fi
+
+dnl Build Common JS modules provided by services.
+AC_SUBST(MOZ_SERVICES_COMMON)
+if test -n "$MOZ_SERVICES_COMMON"; then
+  AC_DEFINE(MOZ_SERVICES_COMMON)
+fi
+
+dnl Build Services crypto component (used by Sync)
+AC_SUBST(MOZ_SERVICES_CRYPTO)
+if test -n "$MOZ_SERVICES_CRYPTO"; then
+  AC_DEFINE(MOZ_SERVICES_CRYPTO)
 fi
 
 dnl Build Notifications if required
@@ -8860,7 +8855,9 @@ fi
 if test -n "$MOZ_WEBRTC"; then
    AC_MSG_RESULT("generating WebRTC Makefiles...")
 
-   WEBRTC_CONFIG="-D build_with_mozilla=1 --include ${srcdir}/media/webrtc/webrtc_config.gypi"
+dnl Any --include files must also appear in -D FORCED_INCLUDE_FILE= entries
+dnl so that regeneration via dependencies works correctly
+   WEBRTC_CONFIG="-D build_with_mozilla=1 --include ${srcdir}/media/webrtc/webrtc_config.gypi -D FORCED_INCLUDE_FILE=${srcdir}/media/webrtc/webrtc_config.gypi"
 
    GYP_WEBRTC_OPTIONS="--format=mozmake ${WEBRTC_CONFIG} ${EXTRA_GYP_DEFINES} --depth=${srcdir}/media/webrtc/trunk --toplevel-dir=${srcdir} -G OBJDIR=${_objdir}"
 

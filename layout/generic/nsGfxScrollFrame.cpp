@@ -1783,13 +1783,6 @@ void nsGfxScrollFrameInner::MarkActive()
 
 void nsGfxScrollFrameInner::ScrollVisual(nsPoint aOldScrolledFramePos)
 {
-  nsRootPresContext* rootPresContext = mOuter->PresContext()->GetRootPresContext();
-  if (!rootPresContext) {
-    return;
-  }
-
-  rootPresContext->RequestUpdatePluginGeometry();
-
   AdjustViews(mScrolledFrame);
   // We need to call this after fixing up the view positions
   // to be consistent with the frame hierarchy.
@@ -3054,14 +3047,11 @@ nsXULScrollFrame::LayoutScrollArea(nsBoxLayoutState& aState,
                             mInner.mScrollPort.Size());
   int32_t flags = NS_FRAME_NO_MOVE_VIEW;
 
-  nsRect originalRect = mInner.mScrolledFrame->GetRect();
-  nsRect originalVisOverflow = mInner.mScrolledFrame->GetVisualOverflowRect();
-
   nsSize minSize = mInner.mScrolledFrame->GetMinSize(aState);
-  
+
   if (minSize.height > childRect.height)
     childRect.height = minSize.height;
-  
+
   if (minSize.width > childRect.width)
     childRect.width = minSize.width;
 

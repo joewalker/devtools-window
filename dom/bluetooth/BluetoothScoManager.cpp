@@ -208,3 +208,18 @@ BluetoothScoManager::SetConnected(bool aConnected)
 {
   mConnected = aConnected;
 }
+
+void
+BluetoothScoManager::OnConnectSuccess()
+{
+}
+
+void
+BluetoothScoManager::OnConnectError()
+{
+}
+
+void
+BluetoothScoManager::OnDisconnect()
+{
+}

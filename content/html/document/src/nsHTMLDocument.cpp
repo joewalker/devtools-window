@@ -110,7 +110,6 @@ using namespace mozilla::dom;
 
 #define NS_MAX_DOCUMENT_WRITE_DEPTH 20
 
-#include "prmem.h"
 #include "prtime.h"
 
 // Find/Search Includes
@@ -633,8 +632,6 @@ nsHTMLDocument::StartDocumentLoad(const char* aCommand,
     NS_ENSURE_SUCCESS(rv, rv);
   }
 
-  int32_t textType = GET_BIDI_OPTION_TEXTTYPE(GetBidiOptions());
-
   // Look for the parent document.  Note that at this point we don't have our
   // content viewer set up yet, and therefore do not have a useful
   // mParentDocument.
@@ -788,13 +785,6 @@ nsHTMLDocument::StartDocumentLoad(const char* aCommand,
     } else {
       parserCharset = charset;
       parserCharsetSource = charsetSource;
-    }
-
-    // ahmed
-    // Check if 864 but in Implicit mode !
-    if ((textType == IBMBIDI_TEXTTYPE_LOGICAL) &&
-        (charset.LowerCaseEqualsLiteral("ibm864"))) {
-      charset.AssignLiteral("IBM864i");
     }
   }
 
@@ -1010,20 +1000,6 @@ nsHTMLDocument::SetDomain(const nsAString& aDomain)
   }
 
   return NodePrincipal()->SetDomain(newURI);
-}
-
-NS_IMETHODIMP
-nsHTMLDocument::GetURL(nsAString& aURL)
-{
-  nsAutoCString str;
-
-  if (mDocumentURI) {
-    mDocumentURI->GetSpec(str);
-  }
-
-  CopyUTF8toUTF16(str, aURL);
-
-  return NS_OK;
 }
 
 nsIContent*
@@ -2053,27 +2029,6 @@ NS_IMETHODIMP
 nsHTMLDocument::RouteEvent(nsIDOMEvent* aEvt)
 {
   ReportUseOfDeprecatedMethod(this, "UseOfRouteEventWarning");
-  return NS_OK;
-}
-
-// readonly attribute DOMString compatMode;
-// Returns "BackCompat" if we are in quirks mode, "CSS1Compat" if we are
-// in almost standards or full standards mode. See bug 105640.  This was
-// implemented to match MSIE's compatMode property
-NS_IMETHODIMP
-nsHTMLDocument::GetCompatMode(nsAString& aCompatMode)
-{
-  NS_ASSERTION(mCompatMode == eCompatibility_NavQuirks ||
-               mCompatMode == eCompatibility_AlmostStandards ||
-               mCompatMode == eCompatibility_FullStandards,
-               "mCompatMode is neither quirks nor strict for this document");
-
-  if (mCompatMode == eCompatibility_NavQuirks) {
-    aCompatMode.AssignLiteral("BackCompat");
-  } else {
-    aCompatMode.AssignLiteral("CSS1Compat");
-  }
-
   return NS_OK;
 }
 

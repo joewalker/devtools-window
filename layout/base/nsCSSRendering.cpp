@@ -1233,20 +1233,23 @@ nsCSSRendering::PaintBoxShadowOuter(nsPresContext* aPresContext,
     shadowGfxRectPlusBlur.RoundOut();
 
     gfxContext* renderContext = aRenderingContext.ThebesContext();
-    nsRefPtr<gfxContext> shadowContext;
     nsContextBoxBlur blurringArea;
 
     // When getting the widget shape from the native theme, we're going
     // to draw the widget into the shadow surface to create a mask.
     // We need to ensure that there actually *is* a shadow surface
     // and that we're not going to draw directly into renderContext.
-    shadowContext = 
+    gfxContext* shadowContext =
       blurringArea.Init(shadowRect, pixelSpreadRadius,
                         blurRadius, twipsPerPixel, renderContext, aDirtyRect,
                         useSkipGfxRect ? &skipGfxRect : nullptr,
                         nativeTheme ? nsContextBoxBlur::FORCE_MASK : 0);
     if (!shadowContext)
       continue;
+
+    // shadowContext is owned by either blurringArea or aRenderingContext.
+    MOZ_ASSERT(shadowContext == renderContext ||
+               shadowContext == blurringArea.GetContext());
 
     // Set the shadow color; if not specified, use the foreground color
     nscolor shadowColor;
@@ -1955,6 +1958,7 @@ ComputeRadialGradientLine(nsPresContext* aPresContext,
     break;
   }
   default:
+    radiusX = radiusY = 0;
     NS_ABORT_IF_FALSE(false, "unknown radial gradient sizing method");
   }
   *aRadiusX = radiusX;
@@ -2403,7 +2407,8 @@ nsCSSRendering::PaintBackgroundWithSC(nsPresContext* aPresContext,
   // If we're not drawing the back-most layer, we don't want to draw the
   // background color.
   const nsStyleBackground *bg = aBackgroundSC->GetStyleBackground();
-  if (drawBackgroundColor && aLayer >= 0 && aLayer != bg->mImageCount - 1) {
+  if (drawBackgroundColor && aLayer >= 0 &&
+      static_cast<uint32_t>(aLayer) != bg->mImageCount - 1) {
     drawBackgroundColor = false;
   }
 
@@ -4012,19 +4017,25 @@ nsImageRenderer::~nsImageRenderer()
 bool
 nsImageRenderer::PrepareImage()
 {
-  if (mImage->IsEmpty() || !mImage->IsComplete()) {
-    // Make sure the image is actually decoding
-    mImage->RequestDecode();
+  if (mImage->IsEmpty())
+    return false;
 
-    // We can not prepare the image for rendering if it is not fully loaded.
-    //
-    // Special case: If we requested a sync decode and we have an image, push
-    // on through
-    nsCOMPtr<imgIContainer> img;
-    if (!((mFlags & FLAG_SYNC_DECODE_IMAGES) &&
-          (mType == eStyleImageType_Image) &&
-          (NS_SUCCEEDED(mImage->GetImageData()->GetImage(getter_AddRefs(img))) && img)))
-      return false;
+  if (!mImage->IsComplete()) {
+    // Make sure the image is actually decoding
+    mImage->StartDecoding();
+
+    // check again to see if we finished
+    if (!mImage->IsComplete()) {
+      // We can not prepare the image for rendering if it is not fully loaded.
+      //
+      // Special case: If we requested a sync decode and we have an image, push
+      // on through because the Draw() will do a sync decode then
+      nsCOMPtr<imgIContainer> img;
+      if (!((mFlags & FLAG_SYNC_DECODE_IMAGES) &&
+            (mType == eStyleImageType_Image) &&
+            (NS_SUCCEEDED(mImage->GetImageData()->GetImage(getter_AddRefs(img))) && img)))
+        return false;
+    }
   }
 
   switch (mType) {

@@ -113,7 +113,6 @@
 
 #include "prprf.h"
 #include "nsDOMMutationObserver.h"
-#include "nsSVGFeatures.h"
 #include "nsWrapperCacheInlines.h"
 #include "nsCycleCollector.h"
 #include "xpcpublic.h"
@@ -135,12 +134,12 @@ bool nsIContent::sTabFocusModelAppliesToXUL = false;
 uint32_t nsMutationGuard::sMutationCount = 0;
 
 nsIContent*
-nsIContent::FindFirstNonNativeAnonymous() const
+nsIContent::FindFirstNonChromeOnlyAccessContent() const
 {
   // This handles also nested native anonymous content.
   for (const nsIContent *content = this; content;
        content = content->GetBindingParent()) {
-    if (!content->IsInNativeAnonymousSubtree()) {
+    if (!content->ChromeOnlyAccess()) {
       // Oops, this function signature allows casting const to
       // non-const.  (Then again, so does GetChildAt(0)->GetParent().)
       return const_cast<nsIContent*>(content);
@@ -690,76 +689,13 @@ FragmentOrElement::GetPrefix(nsAString& aPrefix)
   return NS_OK;
 }
 
-nsresult
-FragmentOrElement::InternalIsSupported(nsISupports* aObject,
-                                      const nsAString& aFeature,
-                                      const nsAString& aVersion,
-                                      bool* aReturn)
-{
-  NS_ENSURE_ARG_POINTER(aReturn);
-  *aReturn = false;
-
-  // Convert the incoming UTF16 strings to raw char*'s to save us some
-  // code when doing all those string compares.
-  NS_ConvertUTF16toUTF8 feature(aFeature);
-  NS_ConvertUTF16toUTF8 version(aVersion);
-
-  const char *f = feature.get();
-  const char *v = version.get();
-
-  if (PL_strcasecmp(f, "XML") == 0 ||
-      PL_strcasecmp(f, "HTML") == 0) {
-    if (aVersion.IsEmpty() ||
-        PL_strcmp(v, "1.0") == 0 ||
-        PL_strcmp(v, "2.0") == 0) {
-      *aReturn = true;
-    }
-  } else if (PL_strcasecmp(f, "Views") == 0 ||
-             PL_strcasecmp(f, "StyleSheets") == 0 ||
-             PL_strcasecmp(f, "Core") == 0 ||
-             PL_strcasecmp(f, "CSS") == 0 ||
-             PL_strcasecmp(f, "CSS2") == 0 ||
-             PL_strcasecmp(f, "Events") == 0 ||
-             PL_strcasecmp(f, "UIEvents") == 0 ||
-             PL_strcasecmp(f, "MouseEvents") == 0 ||
-             // Non-standard!
-             PL_strcasecmp(f, "MouseScrollEvents") == 0 ||
-             PL_strcasecmp(f, "HTMLEvents") == 0 ||
-             PL_strcasecmp(f, "Range") == 0 ||
-             PL_strcasecmp(f, "XHTML") == 0) {
-    if (aVersion.IsEmpty() ||
-        PL_strcmp(v, "2.0") == 0) {
-      *aReturn = true;
-    }
-  } else if (PL_strcasecmp(f, "XPath") == 0) {
-    if (aVersion.IsEmpty() ||
-        PL_strcmp(v, "3.0") == 0) {
-      *aReturn = true;
-    }
-  } else if (PL_strcasecmp(f, "SVGEvents") == 0 ||
-             PL_strcasecmp(f, "SVGZoomEvents") == 0 ||
-             nsSVGFeatures::HasFeature(aObject, aFeature)) {
-    if (aVersion.IsEmpty() ||
-        PL_strcmp(v, "1.0") == 0 ||
-        PL_strcmp(v, "1.1") == 0) {
-      *aReturn = true;
-    }
-  }
-  else if (NS_SMILEnabled() && PL_strcasecmp(f, "TimeControl") == 0) {
-    if (aVersion.IsEmpty() || PL_strcmp(v, "1.0") == 0) {
-      *aReturn = true;
-    }
-  }
-
-  return NS_OK;
-}
-
 NS_IMETHODIMP
 FragmentOrElement::IsSupported(const nsAString& aFeature,
                                const nsAString& aVersion,
                                bool* aReturn)
 {
-  return InternalIsSupported(this, aFeature, aVersion, aReturn);
+  *aReturn = nsContentUtils::InternalIsSupported(this, aFeature, aVersion);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -851,12 +787,12 @@ FragmentOrElement::GetChildren(uint32_t aFilter)
 }
 
 static nsIContent*
-FindNativeAnonymousSubtreeOwner(nsIContent* aContent)
+FindChromeAccessOnlySubtreeOwner(nsIContent* aContent)
 {
-  if (aContent->IsInNativeAnonymousSubtree()) {
-    bool isNativeAnon = false;
-    while (aContent && !isNativeAnon) {
-      isNativeAnon = aContent->IsRootOfNativeAnonymousSubtree();
+  if (aContent->ChromeOnlyAccess()) {
+    bool chromeAccessOnly = false;
+    while (aContent && !chromeAccessOnly) {
+      chromeAccessOnly = aContent->IsRootOfChromeAccessOnlySubtree();
       aContent = aContent->GetParent();
     }
   }
@@ -871,15 +807,15 @@ nsIContent::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
   aVisitor.mMayHaveListenerManager = HasListenerManager();
 
   // Don't propagate mouseover and mouseout events when mouse is moving
-  // inside native anonymous content.
-  bool isAnonForEvents = IsRootOfNativeAnonymousSubtree();
+  // inside chrome access only content.
+  bool isAnonForEvents = IsRootOfChromeAccessOnlySubtree();
   if ((aVisitor.mEvent->message == NS_MOUSE_ENTER_SYNTH ||
        aVisitor.mEvent->message == NS_MOUSE_EXIT_SYNTH) &&
       // Check if we should stop event propagation when event has just been
       // dispatched or when we're about to propagate from
-      // native anonymous subtree.
+      // chrome access only subtree.
       ((this == aVisitor.mEvent->originalTarget &&
-        !IsInNativeAnonymousSubtree()) || isAnonForEvents)) {
+        !ChromeOnlyAccess()) || isAnonForEvents)) {
      nsCOMPtr<nsIContent> relatedTarget =
        do_QueryInterface(static_cast<nsMouseEvent*>
                                     (aVisitor.mEvent)->relatedTarget);
@@ -894,19 +830,19 @@ nsIContent::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
       if (isAnonForEvents || aVisitor.mRelatedTargetIsInAnon ||
           (aVisitor.mEvent->originalTarget == this &&
            (aVisitor.mRelatedTargetIsInAnon =
-            relatedTarget->IsInNativeAnonymousSubtree()))) {
-        nsIContent* anonOwner = FindNativeAnonymousSubtreeOwner(this);
+            relatedTarget->ChromeOnlyAccess()))) {
+        nsIContent* anonOwner = FindChromeAccessOnlySubtreeOwner(this);
         if (anonOwner) {
           nsIContent* anonOwnerRelated =
-            FindNativeAnonymousSubtreeOwner(relatedTarget);
+            FindChromeAccessOnlySubtreeOwner(relatedTarget);
           if (anonOwnerRelated) {
             // Note, anonOwnerRelated may still be inside some other
             // native anonymous subtree. The case where anonOwner is still
             // inside native anonymous subtree will be handled when event
             // propagates up in the DOM tree.
             while (anonOwner != anonOwnerRelated &&
-                   anonOwnerRelated->IsInNativeAnonymousSubtree()) {
-              anonOwnerRelated = FindNativeAnonymousSubtreeOwner(anonOwnerRelated);
+                   anonOwnerRelated->ChromeOnlyAccess()) {
+              anonOwnerRelated = FindChromeAccessOnlySubtreeOwner(anonOwnerRelated);
             }
             if (anonOwner == anonOwnerRelated) {
 #ifdef DEBUG_smaug
@@ -927,13 +863,14 @@ nsIContent::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
                      NS_ConvertUTF16toUTF8(ct).get(),
                      isAnonForEvents
                        ? "(is native anonymous)"
-                       : (IsInNativeAnonymousSubtree()
+                       : (ChromeOnlyAccess()
                            ? "(is in native anonymous subtree)" : ""),
                      NS_ConvertUTF16toUTF8(rt).get(),
-                     relatedTarget->IsInNativeAnonymousSubtree()
+                     relatedTarget->ChromeOnlyAccess()
                        ? "(is in native anonymous subtree)" : "",
-                     (originalTarget && relatedTarget->FindFirstNonNativeAnonymous() ==
-                       originalTarget->FindFirstNonNativeAnonymous())
+                     (originalTarget &&
+                      relatedTarget->FindFirstNonChromeOnlyAccessContent() ==
+                        originalTarget->FindFirstNonChromeOnlyAccessContent())
                        ? "" : "Wrong event propagation!?!\n");
 #endif
               aVisitor.mParentTarget = nullptr;

@@ -5,7 +5,7 @@
 import os
 from setuptools import setup
 
-PACKAGE_VERSION = '0.9'
+PACKAGE_VERSION = '0.11'
 
 # take description from README
 here = os.path.dirname(os.path.abspath(__file__))
@@ -33,6 +33,6 @@ setup(name='mozdevice',
       entry_points="""
       # -*- Entry points: -*-
       [console_scripts]
-      sut = mozdevice.sutcli:cli
+      dm = mozdevice.dmcli:cli
       """,
       )

@@ -318,12 +318,14 @@ pref("gfx.color_management.mode", 0);
 
 // 0=fixed margin, 1=velocity bias, 2=dynamic resolution, 3=no margins, 4=prediction bias
 pref("gfx.displayport.strategy", 1);
+
 // all of the following displayport strategy prefs will be divided by 1000
 // to obtain some multiplier which is then used in the strategy.
 // fixed margin strategy options
 pref("gfx.displayport.strategy_fm.multiplier", -1); // displayport dimension multiplier
 pref("gfx.displayport.strategy_fm.danger_x", -1); // danger zone on x-axis when multiplied by viewport width
 pref("gfx.displayport.strategy_fm.danger_y", -1); // danger zone on y-axis when multiplied by viewport height
+
 // velocity bias strategy options
 pref("gfx.displayport.strategy_vb.multiplier", -1); // displayport dimension multiplier
 pref("gfx.displayport.strategy_vb.threshold", -1); // velocity threshold in inches/frame
@@ -332,8 +334,11 @@ pref("gfx.displayport.strategy_vb.danger_x_base", -1); // danger zone on x-axis 
 pref("gfx.displayport.strategy_vb.danger_y_base", -1); // danger zone on y-axis when multiplied by viewport height
 pref("gfx.displayport.strategy_vb.danger_x_incr", -1); // additional danger zone on x-axis when multiplied by viewport width and velocity
 pref("gfx.displayport.strategy_vb.danger_y_incr", -1); // additional danger zone on y-axis when multiplied by viewport height and velocity
+
 // prediction bias strategy options
 pref("gfx.displayport.strategy_pb.threshold", -1); // velocity threshold in inches/frame
+
+pref("gfx.java.screenshot.enabled", true);
 
 // don't allow JS to move and resize existing windows
 pref("dom.disable_window_move_resize", true);
@@ -604,9 +609,6 @@ pref("gfx.show_checkerboard_pattern", true);
 pref("ui.scrolling.friction_slow", -1);
 // This fraction in 1000ths of velocity remains after every animation frame when the velocity is high.
 pref("ui.scrolling.friction_fast", -1);
-// Below this velocity (in pixels per frame), the friction starts increasing from friction_fast
-// to friction_slow.
-pref("ui.scrolling.velocity_threshold", -1);
 // The maximum velocity change factor between events, per ms, in 1000ths.
 // Direction changes are excluded.
 pref("ui.scrolling.max_event_acceleration", -1);
@@ -617,9 +619,6 @@ pref("ui.scrolling.overscroll_snap_limit", -1);
 // The minimum amount of space that must be present for an axis to be considered scrollable,
 // in 1/1000ths of pixels.
 pref("ui.scrolling.min_scrollable_distance", -1);
-// A comma-separated list of float values in the range [0.0, 1.0) that are used as
-// interpolation frames for zoom animations.
-pref("ui.zooming.animation_frames", "");
 
 // Enable accessibility mode if platform accessibility is enabled.
 pref("accessibility.accessfu.activate", 2);

@@ -148,8 +148,9 @@ nsGenericDOMDataNode::IsSupported(const nsAString& aFeature,
                                   const nsAString& aVersion,
                                   bool* aReturn)
 {
-  return nsGenericElement::InternalIsSupported(static_cast<nsIContent*>(this),
-                                               aFeature, aVersion, aReturn);
+  *aReturn = nsContentUtils::InternalIsSupported(static_cast<nsIContent*>(this),
+                                                 aFeature, aVersion);
+  return NS_OK;
 }
 
 //----------------------------------------------------------------------
@@ -466,6 +467,9 @@ nsGenericDOMDataNode::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
     DataSlots()->mBindingParent = aBindingParent; // Weak, so no addref happens.
     if (aParent->IsInNativeAnonymousSubtree()) {
       SetFlags(NODE_IS_IN_ANONYMOUS_SUBTREE);
+    }
+    if (aParent->HasFlag(NODE_CHROME_ONLY_ACCESS)) {
+      SetFlags(NODE_CHROME_ONLY_ACCESS);
     }
   }
 

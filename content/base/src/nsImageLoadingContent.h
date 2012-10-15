@@ -13,8 +13,7 @@
 #ifndef nsImageLoadingContent_h__
 #define nsImageLoadingContent_h__
 
-#include "imgIContainerObserver.h"
-#include "imgIDecoderObserver.h"
+#include "imgINotificationObserver.h"
 #include "imgIOnloadBlocker.h"
 #include "mozilla/CORSMode.h"
 #include "nsCOMPtr.h"
@@ -36,8 +35,7 @@ public:
   nsImageLoadingContent();
   virtual ~nsImageLoadingContent();
 
-  NS_DECL_IMGICONTAINEROBSERVER
-  NS_DECL_IMGIDECODEROBSERVER
+  NS_DECL_IMGINOTIFICATIONOBSERVER
   NS_DECL_NSIIMAGELOADINGCONTENT
   NS_DECL_IMGIONLOADBLOCKER
 
@@ -161,12 +159,15 @@ protected:
                   nsIContent* aBindingParent, bool aCompileEventHandlers);
   void UnbindFromTree(bool aDeep, bool aNullParent);
 
+  nsresult OnStopRequest(imgIRequest* aRequest, nsresult aStatus);
+  nsresult OnImageIsAnimated(imgIRequest *aRequest);
+
 private:
   /**
    * Struct used to manage the image observers.
    */
   struct ImageObserver {
-    ImageObserver(imgIDecoderObserver* aObserver) :
+    ImageObserver(imgINotificationObserver* aObserver) :
       mObserver(aObserver),
       mNext(nullptr)
     {
@@ -178,7 +179,7 @@ private:
       NS_CONTENT_DELETE_LIST_MEMBER(ImageObserver, this, mNext);
     }
 
-    nsCOMPtr<imgIDecoderObserver> mObserver;
+    nsCOMPtr<imgINotificationObserver> mObserver;
     ImageObserver* mNext;
   };
 
@@ -325,7 +326,9 @@ protected:
     REQUEST_NEEDS_ANIMATION_RESET = 0x00000001U,
     // Set if the request should be tracked.  This is true if the request is
     // not tracked iff this node is not in the document.
-    REQUEST_SHOULD_BE_TRACKED = 0x00000002U
+    REQUEST_SHOULD_BE_TRACKED = 0x00000002U,
+    // Set if the request is blocking onload.
+    REQUEST_BLOCKS_ONLOAD = 0x00000004U
   };
 
   // If the image was blocked or if there was an error loading, it's nice to

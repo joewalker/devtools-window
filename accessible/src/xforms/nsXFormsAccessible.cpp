@@ -158,11 +158,12 @@ nsXFormsAccessible::NativelyUnavailable() const
   return !isRelevant;
 }
 
-nsresult
-nsXFormsAccessible::GetNameInternal(nsAString& aName)
+ENameValueFlag
+nsXFormsAccessible::NativeName(nsString& aName)
 {
   // search the xforms:label element
-  return GetBoundChildElementValue(NS_LITERAL_STRING("label"), aName);
+  GetBoundChildElementValue(NS_LITERAL_STRING("label"), aName);
+  return eNameOK;
 }
 
 void
@@ -271,7 +272,7 @@ nsXFormsEditableAccessible::GetEditor() const
 
 nsXFormsSelectableAccessible::
   nsXFormsSelectableAccessible(nsIContent* aContent, DocAccessible* aDoc) :
-  nsXFormsEditableAccessible(aContent, aDoc), mIsSelect1Element(nullptr)
+  nsXFormsEditableAccessible(aContent, aDoc), mIsSelect1Element(false)
 {
   mIsSelect1Element =
     mContent->NodeInfo()->Equals(nsGkAtoms::select1);

@@ -152,27 +152,25 @@ HTMLAreaAccessible::
   HTMLAreaAccessible(nsIContent* aContent, DocAccessible* aDoc) :
   HTMLLinkAccessible(aContent, aDoc)
 {
-  // Make HTML area DOM element not accessible. HTML image map accessible			
+  // Make HTML area DOM element not accessible. HTML image map accessible
   // manages its tree itself.
-  mFlags |= eSharedNode;
+  mFlags |= eNotNodeMapEntry;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // HTMLAreaAccessible: nsIAccessible
 
-nsresult
-HTMLAreaAccessible::GetNameInternal(nsAString& aName)
+ENameValueFlag
+HTMLAreaAccessible::NativeName(nsString& aName)
 {
-  nsresult rv = Accessible::GetNameInternal(aName);
-  NS_ENSURE_SUCCESS(rv, rv);
-
+  Accessible::NativeName(aName);
   if (!aName.IsEmpty())
-    return NS_OK;
+    return eNameOK;
 
   if (!mContent->GetAttr(kNameSpaceID_None, nsGkAtoms::alt, aName))
-    return GetValue(aName);
+    GetValue(aName);
 
-  return NS_OK;
+  return eNameOK;
 }
 
 void

@@ -12,7 +12,7 @@
 #includesubst @BOOKMARKSPATH@
 <resources>
   <string name="moz_app_displayname">@MOZ_APP_DISPLAYNAME@</string>
-#include ../sync/strings.xml.in
+#include ../services/strings.xml.in
   <string name="splash_settingup">&splash_settingup;</string>
   <string name="splash_bookmarks_history">&splash_bookmarks_history;</string>
   <string name="no_space_to_start_error">&no_space_to_start_error;</string>
@@ -180,9 +180,9 @@
   <string name="abouthome_top_sites_title">&abouthome_top_sites_title;</string>
   <string name="abouthome_top_sites_browse">&abouthome_top_sites_browse;</string>
   <string name="abouthome_about_sync">&abouthome_about_sync3;</string>
-  <string name="abouthome_about_apps">&abouthome_about_apps2;</string>
+  <string name="abouthome_about_apps">&abouthome_about_apps3;</string>
   <string name="abouthome_sync_bold_name">&abouthome_sync_bold_name;</string>
-  <string name="abouthome_apps_bold_name">&abouthome_apps_bold_name;</string>
+  <string name="abouthome_apps_bold_name">&abouthome_apps_bold_name2;</string>
 
   <string name="filepicker_title">&filepicker_title;</string>
   <string name="filepicker_audio_title">&filepicker_audio_title;</string>

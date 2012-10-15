@@ -323,7 +323,7 @@ ParseContext::generateFunctionBindings(JSContext *cx, InternalHandle<Bindings*> 
 }
 
 Parser::Parser(JSContext *cx, const CompileOptions &options,
-               const jschar *chars, size_t length, bool foldConstants)
+               StableCharPtr chars, size_t length, bool foldConstants)
   : AutoGCRooter(cx, PARSER),
     context(cx),
     strictModeGetter(thisForCtor()),
@@ -1857,7 +1857,13 @@ Parser::processDirectives(ParseNode *stmts)
         bool isDirective = IsEscapeFreeStringLiteral(directive);
         JSAtom *atom = directive.atom();
         TokenKind next = tokenStream.peekTokenSameLine();
-        if (next != TOK_EOF && next != TOK_EOL && next != TOK_SEMI && next != TOK_RC) {
+
+        // We need to check whether the directive ends explicitly or implicitly
+        // due to ASI. In the latter case, the expression must not continue on
+        // the next line.
+        if (next != TOK_EOF && next != TOK_SEMI && next != TOK_RC &&
+           (next != TOK_EOL || TokenContinuesStringExpression(tokenStream.peekToken())))
+        {
             freeTree(stringNode);
             if (next == TOK_ERROR)
                 return false;
@@ -6941,8 +6947,8 @@ Parser::primaryExpr(TokenKind tt, bool afterDoubleDot)
         if (!pn)
             return NULL;
 
-        const jschar *chars = tokenStream.getTokenbuf().begin();
         size_t length = tokenStream.getTokenbuf().length();
+        const StableCharPtr chars(tokenStream.getTokenbuf().begin(), length);
         RegExpFlag flags = tokenStream.currentToken().regExpFlags();
         RegExpStatics *res = context->regExpStatics();
 

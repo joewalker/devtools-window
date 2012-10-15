@@ -1002,7 +1002,7 @@ SourceCompressorThread::waitOnCompression(SourceCompressionToken *userTok)
 {
     JS_ASSERT(userTok == tok);
     PR_Lock(lock);
-    if (state == COMPRESSING)
+    while (state == COMPRESSING)
         PR_WaitCondVar(done, PR_INTERVAL_NO_TIMEOUT);
     JS_ASSERT(state == IDLE);
     SourceCompressionToken *saveTok = tok;
@@ -1128,7 +1128,7 @@ ScriptSource::substring(JSContext *cx, uint32_t start, uint32_t stop)
             }
             cx->runtime->sourceDataCache.put(this, cached);
         }
-        chars = cached->chars();
+        chars = cached->chars().get();
         JS_ASSERT(chars);
     } else {
         chars = data.source;
@@ -1140,7 +1140,7 @@ ScriptSource::substring(JSContext *cx, uint32_t start, uint32_t stop)
 }
 
 bool
-ScriptSource::setSourceCopy(JSContext *cx, const jschar *src, uint32_t length,
+ScriptSource::setSourceCopy(JSContext *cx, StableCharPtr src, uint32_t length,
                             bool argumentsNotIncluded, SourceCompressionToken *tok)
 {
     JS_ASSERT(!hasSourceData());
@@ -1157,12 +1157,12 @@ ScriptSource::setSourceCopy(JSContext *cx, const jschar *src, uint32_t length,
         ready_ = false;
 #endif
         tok->ss = this;
-        tok->chars = src;
+        tok->chars = src.get();
         cx->runtime->sourceCompressorThread.compress(tok);
     } else
 #endif
     {
-        PodCopy(data.source, src, length_);
+        PodCopy(data.source, src.get(), length_);
     }
 
     return true;
@@ -2128,7 +2128,7 @@ js::CloneScript(JSContext *cx, HandleObject enclosingScope, HandleFunction fun, 
                     enclosingScope = fun;
 
                 clone = CloneStaticBlockObject(cx, enclosingScope, innerBlock);
-            } else {
+            } else if (obj->isFunction()) {
                 RootedFunction innerFun(cx, obj->toFunction());
 
                 StaticScopeIter ssi(innerFun->script()->enclosingStaticScope());
@@ -2139,6 +2139,14 @@ js::CloneScript(JSContext *cx, HandleObject enclosingScope, HandleFunction fun, 
                     enclosingScope = fun;
 
                 clone = CloneInterpretedFunction(cx, enclosingScope, innerFun);
+            } else {
+                /*
+                 * Clone object literals emitted for the JSOP_NEWOBJECT opcode. We only emit that
+                 * instead of the less-optimized JSOP_NEWINIT for self-hosted code or code compiled
+                 * with JSOPTION_COMPILE_N_GO set. As we don't clone the latter type of code, this
+                 * case should only ever be hit when cloning objects from self-hosted code.
+                 */
+                clone = CloneObjectLiteral(cx, cx->global(), obj);
             }
             if (!clone || !objects.append(clone))
                 return NULL;
@@ -2572,8 +2580,19 @@ JSScript::argumentsOptimizationFailed(JSContext *cx, HandleScript script)
      *  - type inference data for the script assuming script->needsArgsObj; and
      */
     for (AllFramesIter i(cx->stack.space()); !i.done(); ++i) {
-        StackFrame *fp = i.fp();
-        if (fp->isFunctionFrame() && !fp->runningInIon() && fp->script() == script) {
+        /*
+         * We cannot reliably create an arguments object for Ion activations of
+         * this script.  To maintain the invariant that "script->needsArgsObj
+         * implies fp->hasArgsObj", the Ion bail mechanism will create an
+         * arguments object right after restoring the StackFrame and before
+         * entering the interpreter (in ion::ThunkToInterpreter).  This delay is
+         * safe since the engine avoids any observation of a StackFrame when it
+         * beginsIonActivation (see StackIter::interpFrame comment).
+         */
+        if (i.isIon())
+            continue;
+        StackFrame *fp = i.interpFrame();
+        if (fp->isFunctionFrame() && fp->script() == script) {
             ArgumentsObject *argsobj = ArgumentsObject::createExpected(cx, fp);
             if (!argsobj) {
                 /*

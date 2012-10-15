@@ -540,6 +540,8 @@ BluetoothHfpManager::Connect(const nsAString& aDeviceObjectPath,
     return false;
   }
 
+  CloseSocket();
+
   BluetoothService* bs = BluetoothService::Get();
   if (!bs) {
     NS_WARNING("BluetoothService not available!");
@@ -556,7 +558,7 @@ BluetoothHfpManager::Connect(const nsAString& aDeviceObjectPath,
 
   nsCOMPtr<nsIRILContentHelper> ril =
     do_GetService("@mozilla.org/ril/content-helper;1");
-  NS_ENSURE_TRUE(ril, NS_ERROR_UNEXPECTED);
+  NS_ENSURE_TRUE(ril, false);
   ril->EnumerateCalls(mListener->GetCallback());
 
   nsRefPtr<BluetoothReplyRunnable> runnable = aRunnable;
@@ -583,6 +585,8 @@ BluetoothHfpManager::Listen()
     return false;
   }
 
+  CloseSocket();
+
   BluetoothService* bs = BluetoothService::Get();
   if (!bs) {
     NS_WARNING("BluetoothService not available!");
@@ -605,6 +609,7 @@ BluetoothHfpManager::Disconnect()
   mCall = 0;
   mCallSetup = 0;
   mCallHeld = 0;
+  Listen();
 }
 
 bool
@@ -764,4 +769,23 @@ BluetoothHfpManager::CallStateChanged(int aCallIndex, int aCallState,
 
   mCurrentCallIndex = aCallIndex;
   mCurrentCallState = aCallState;
+}
+
+void
+BluetoothHfpManager::OnConnectSuccess()
+{
+}
+
+void
+BluetoothHfpManager::OnConnectError()
+{
+  CloseSocket();
+  // If connecting for some reason didn't work, restart listening
+  Listen();
+}
+
+void
+BluetoothHfpManager::OnDisconnect()
+{
+  NS_WARNING("GOT DISCONNECT!");
 }

@@ -3826,9 +3826,11 @@ nsXMLHttpRequest::GetInterface(const nsIID & aIID, void **aResult)
 
     // If authentication fails, XMLHttpRequest origin and
     // the request URL are same origin, ...
+    /* Disabled - bug: 799540
     if (mState & XML_HTTP_REQUEST_USE_XSITE_AC) {
       showPrompt = false;
     }
+    */
 
     // ... Authorization is not in the list of author request headers, ...
     if (showPrompt) {
@@ -4108,7 +4110,7 @@ NS_IMETHODIMP nsXMLHttpProgressEvent::GetPosition(uint32_t *aPosition)
 {
   WarnAboutLSProgressEvent(nsIDocument::ePosition);
   // XXX can we change the iface?
-  LL_L2UI(*aPosition, mCurProgress);
+  *aPosition = uint32_t(mCurProgress);
   return NS_OK;
 }
 
@@ -4116,7 +4118,7 @@ NS_IMETHODIMP nsXMLHttpProgressEvent::GetTotalSize(uint32_t *aTotalSize)
 {
   WarnAboutLSProgressEvent(nsIDocument::eTotalSize);
   // XXX can we change the iface?
-  LL_L2UI(*aTotalSize, mMaxProgress);
+  *aTotalSize = uint32_t(mMaxProgress);
   return NS_OK;
 }
 

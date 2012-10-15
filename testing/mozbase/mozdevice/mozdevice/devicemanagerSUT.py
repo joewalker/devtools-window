@@ -26,11 +26,12 @@ class DeviceManagerSUT(DeviceManager):
     agentErrorRE = re.compile('^##AGENT-WARNING##\ ?(.*)')
     default_timeout = 300
 
-    def __init__(self, host, port = 20701, retrylimit = 5, deviceRoot = None):
+    def __init__(self, host, port = 20701, retrylimit = 5, deviceRoot = None, **kwargs):
         self.host = host
         self.port = port
         self.retrylimit = retrylimit
         self._sock = None
+        self._everConnected = False
         self.deviceRoot = deviceRoot
 
         # Initialize device root
@@ -119,7 +120,7 @@ class DeviceManagerSUT(DeviceManager):
                 # couldn't execute it). retry otherwise
                 if err.fatal:
                     raise err
-                if self.debug >= 2:
+                if self.debug >= 4:
                     print err
                 retries += 1
                 # if we lost the connection or failed to establish one, wait a bit
@@ -150,7 +151,7 @@ class DeviceManagerSUT(DeviceManager):
 
         if not self._sock:
             try:
-                if self.debug >= 1:
+                if self.debug >= 1 and self._everConnected:
                     print "reconnecting socket"
                 self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             except socket.error, msg:
@@ -164,6 +165,7 @@ class DeviceManagerSUT(DeviceManager):
                 else:
                     raise DMError("Remote Device Error: Timeout in connecting", fatal=True)
                     return False
+                self._everConnected = True
             except socket.error, msg:
                 self._sock.close()
                 self._sock = None
@@ -445,16 +447,16 @@ class DeviceManagerSUT(DeviceManager):
         """
         data = self._runCmds([{ 'cmd': 'ps' }])
 
-        files = []
+        processTuples = []
         for line in data.splitlines():
             if line:
                 pidproc = line.strip().split()
                 if (len(pidproc) == 2):
-                    files += [[pidproc[0], pidproc[1]]]
+                    processTuples += [[pidproc[0], pidproc[1]]]
                 elif (len(pidproc) == 3):
                     #android returns <userID> <procID> <procName>
-                    files += [[pidproc[1], pidproc[2], pidproc[0]]]
-        return files
+                    processTuples += [[int(pidproc[1]), pidproc[2], int(pidproc[0])]]
+        return processTuples
 
     def fireProcess(self, appname, failIfRunning=False):
         """

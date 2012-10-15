@@ -1838,8 +1838,11 @@ nsIFrame::BuildDisplayListForStackingContext(nsDisplayListBuilder* aBuilder,
   nsRect clipPropClip;
   const nsStyleDisplay* disp = GetStyleDisplay();
   // We can stop right away if this is a zero-opacity stacking context and
-  // we're painting, and we're not animating opacity.
+  // we're painting, and we're not animating opacity. Don't do this
+  // if we're going to compute plugin geometry, since opacity-0 plugins
+  // need to have display items built for them.
   if (disp->mOpacity == 0.0 && aBuilder->IsForPainting() &&
+      !aBuilder->WillComputePluginGeometry() &&
       !nsLayoutUtils::HasAnimationsForCompositor(mContent,
                                                  eCSSProperty_opacity)) {
     return NS_OK;
@@ -8164,6 +8167,16 @@ nsFrame::InitBoxMetrics(bool aClear)
   nsFrame::MarkIntrinsicWidthsDirty();
   metrics->mBlockAscent = 0;
   metrics->mLastSize.SizeTo(0, 0);
+}
+
+void
+nsIFrame::CreateOwnLayerIfNeeded(nsDisplayListBuilder* aBuilder, 
+                                 nsDisplayList* aList)
+{
+  if (GetContent()->HasAttr(kNameSpaceID_None, nsGkAtoms::layer)) {
+    aList->AppendNewToTop(new (aBuilder) 
+        nsDisplayOwnLayer(aBuilder, this, aList));
+  }
 }
 
 // Box layout debugging

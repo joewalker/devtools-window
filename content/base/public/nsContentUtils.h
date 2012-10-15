@@ -64,7 +64,7 @@ class nsIParserService;
 class nsIIOService;
 class nsIURI;
 class imgIContainer;
-class imgIDecoderObserver;
+class imgINotificationObserver;
 class imgIRequest;
 class imgILoader;
 class imgICache;
@@ -661,7 +661,7 @@ public:
                             nsIDocument* aLoadingDocument,
                             nsIPrincipal* aLoadingPrincipal,
                             nsIURI* aReferrer,
-                            imgIDecoderObserver* aObserver,
+                            imgINotificationObserver* aObserver,
                             int32_t aLoadFlags,
                             imgIRequest** aRequest);
 
@@ -1295,8 +1295,9 @@ public:
 #ifdef DEBUG
   static bool AreJSObjectsHeld(void* aScriptObjectHolder); 
 
-  static void CheckCCWrapperTraversal(nsISupports* aScriptObjectHolder,
-                                      nsWrapperCache* aCache);
+  static void CheckCCWrapperTraversal(void* aScriptObjectHolder,
+                                      nsWrapperCache* aCache,
+                                      nsScriptObjectTracer* aTracer);
 #endif
 
   static void PreserveWrapper(nsISupports* aScriptObjectHolder,
@@ -1309,15 +1310,23 @@ public:
       MOZ_ASSERT(ccISupports);
       nsXPCOMCycleCollectionParticipant* participant;
       CallQueryInterface(ccISupports, &participant);
-      HoldJSObjects(ccISupports, participant);
+      PreserveWrapper(ccISupports, aCache, participant);
+    }
+  }
+  static void PreserveWrapper(void* aScriptObjectHolder,
+                              nsWrapperCache* aCache,
+                              nsScriptObjectTracer* aTracer)
+  {
+    if (!aCache->PreservingWrapper()) {
+      HoldJSObjects(aScriptObjectHolder, aTracer);
       aCache->SetPreservingWrapper(true);
 #ifdef DEBUG
       // Make sure the cycle collector will be able to traverse to the wrapper.
-      CheckCCWrapperTraversal(ccISupports, aCache);
+      CheckCCWrapperTraversal(aScriptObjectHolder, aCache, aTracer);
 #endif
     }
   }
-  static void ReleaseWrapper(nsISupports* aScriptObjectHolder,
+  static void ReleaseWrapper(void* aScriptObjectHolder,
                              nsWrapperCache* aCache);
   static void TraceWrapper(nsWrapperCache* aCache, TraceCallback aCallback,
                            void *aClosure);
@@ -2125,6 +2134,18 @@ public:
 
   static bool GetSVGGlyphExtents(Element *aElement, const gfxMatrix& aSVGToAppSpace,
                                  gfxRect *aResult);
+
+  /**
+   * Check whether a spec feature/version is supported.
+   * @param aObject the object, which should support the feature,
+   *        for example nsIDOMNode or nsIDOMDOMImplementation
+   * @param aFeature the feature ("Views", "Core", "HTML", "Range" ...)
+   * @param aVersion the version ("1.0", "2.0", ...)
+   * @return whether the feature is supported or not
+   */
+  static bool InternalIsSupported(nsISupports* aObject,
+                                  const nsAString& aFeature,
+                                  const nsAString& aVersion);
 
 private:
   static bool InitializeEventTable();

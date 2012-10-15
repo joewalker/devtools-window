@@ -793,6 +793,7 @@ Evaluate(JSContext *cx, unsigned argc, jsval *vp)
     jschar *sourceMapURL = NULL;
     unsigned lineNumber = 1;
     RootedObject global(cx, NULL);
+    bool catchTermination = false;
 
     global = JS_GetGlobalForObject(cx, &args.callee());
     if (!global)
@@ -878,6 +879,15 @@ Evaluate(JSContext *cx, unsigned argc, jsval *vp)
                 return false;
             }
         }
+
+        if (!JS_GetProperty(cx, options, "catchTermination", &v))
+            return false;
+        if (!JSVAL_IS_VOID(v)) {
+            JSBool b;
+            if (!JS_ValueToBoolean(cx, v, &b))
+                return false;
+            catchTermination = b;
+        }
     }
 
     RootedString code(cx, args[0].toString());
@@ -913,8 +923,13 @@ Evaluate(JSContext *cx, unsigned argc, jsval *vp)
             if (!script->scriptSource()->setSourceMap(cx, sourceMapURL, script->filename))
                 return false;
         }
-        if (!JS_ExecuteScript(cx, global, script, vp))
+        if (!JS_ExecuteScript(cx, global, script, vp)) {
+            if (catchTermination && !JS_IsExceptionPending(cx)) {
+                *vp = StringValue(JS_NewStringCopyZ(cx, "terminated"));
+                return true;
+            }
             return false;
+        }
     }
 
     return JS_WrapValue(cx, vp);
@@ -1382,7 +1397,8 @@ TrapHandler(JSContext *cx, JSScript *, jsbytecode *pc, jsval *rval,
     ScriptFrameIter iter(cx);
     JS_ASSERT(!iter.done());
 
-    JSStackFrame *caller = Jsvalify(iter.fp());
+    /* Debug-mode currently disables Ion compilation. */
+    JSStackFrame *caller = Jsvalify(iter.interpFrame());
     JSScript *script = iter.script();
 
     size_t length;
@@ -2504,9 +2520,10 @@ EvalInFrame(JSContext *cx, unsigned argc, jsval *vp)
 
     JS_ASSERT(cx->hasfp());
 
+    /* Debug-mode currently disables Ion compilation. */
     ScriptFrameIter fi(cx);
     for (uint32_t i = 0; i < upCount; ++i, ++fi) {
-        if (!fi.fp()->prev())
+        if (!fi.interpFrame()->prev())
             break;
     }
 
@@ -2519,7 +2536,7 @@ EvalInFrame(JSContext *cx, unsigned argc, jsval *vp)
     if (!chars)
         return false;
 
-    StackFrame *fp = fi.fp();
+    StackFrame *fp = fi.interpFrame();
     bool ok = !!JS_EvaluateUCInStackFrame(cx, Jsvalify(fp), chars, length,
                                           fp->script()->filename,
                                           JS_PCToLineNumber(cx, fp->script(),
@@ -3091,7 +3108,9 @@ Parse(JSContext *cx, unsigned argc, jsval *vp)
     options.setFileAndLine("<string>", 1)
            .setCompileAndGo(false);
     Parser parser(cx, options,
-                  JS_GetStringCharsZ(cx, scriptContents), JS_GetStringLength(scriptContents),
+                  JS::StableCharPtr(JS_GetStringCharsZ(cx, scriptContents),
+                                    JS_GetStringLength(scriptContents)),
+                  JS_GetStringLength(scriptContents),
                   /* foldConstants = */ true);
     if (!parser.init())
         return false;
@@ -3367,7 +3386,8 @@ ParseLegacyJSON(JSContext *cx, unsigned argc, jsval *vp)
         return false;
 
     RootedValue value(cx, NullValue());
-    return js::ParseJSONWithReviver(cx, chars, length, value, args.rval(), LEGACY);
+    return js::ParseJSONWithReviver(cx, StableCharPtr(chars, length), length,
+                                    value, args.rval(), LEGACY);
 }
 
 static JSBool
@@ -3436,7 +3456,10 @@ static JSFunctionSpecWithHelp shell_functions[] = {
 "      fileName: filename for error messages and debug info\n"
 "      lineNumber: starting line number for error messages and debug info\n"
 "      global: global in which to execute the code\n"
-"      newContext: if true, create and use a new cx (default: false)\n"),
+"      newContext: if true, create and use a new cx (default: false)\n"
+"      catchTermination: if true, catch termination (failure without\n"
+"         an exception value, as for slow scripts or out-of-memory)\n"
+"          and return 'terminated'\n"),
 
     JS_FN_HELP("run", Run, 1, 0,
 "run('foo.js')",
