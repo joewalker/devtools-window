@@ -74,6 +74,7 @@ Toolbox.prototype = {
         let tool = defs.get(toolId);
 
         this._buildTabForTool(tool);
+        this._addToolToMenu(tool);
         break;
 
       /**
@@ -164,6 +165,17 @@ Toolbox.prototype = {
 
   set currentToolId(aValue) {
     this._currentToolId = aValue;
+  },
+
+  /**
+   * Get/alter the default tool.
+   */
+  get defaultToolId() {
+    return this._defaultToolId;
+  },
+
+  set defaultToolId(aValue) {
+    this._defaultToolId = aValue;
   },
 
   /**
