@@ -4,8 +4,7 @@
 
 "use strict";
 
-const Cu = Components.utils;
-const Ci = Components.interfaces;
+const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
@@ -14,6 +13,8 @@ Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 
 XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
                                   "resource:///modules/devtools/gDevTools.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "CommandUtils",
+                                  "resource:///modules/devtools/DeveloperToolbar.jsm");
 
 const EXPORTED_SYMBOLS = [ "Toolbox" ];
 
@@ -222,6 +223,9 @@ Toolbox.prototype = {
     }
   },
 
+  /**
+   * Add buttons to the UI as specified in the devtools.window.toolbarspec pref
+   */
   _buildButtons: function TBOX_buildButtons(frame) {
     let window = frame.ownerDocument.defaultView;
     // FIXME: Once we move the DeveloperToolbar into the Devtools Window we
@@ -230,14 +234,13 @@ Toolbox.prototype = {
       return;
     }
 
+    let toolbarSpec = CommandUtils.getCommandbarSpec("devtools.toolbox.toolbarspec");
+    let doc = frame.contentDocument;
     let requisition = window.DeveloperToolbar.display.requisition;
 
-    let toolbarSpec = getToolbarSpec();
-    let doc = frame.contentDocument;
+    let buttons = CommandUtils.createButtons(toolbarSpec, doc, requisition);
+
     let container = doc.getElementById("toolbox-buttons");
-
-    let buttons = createButtons(toolbarSpec, doc, requisition);
-
     buttons.forEach(function(button) {
       container.appendChild(button);
     }.bind(this));
@@ -434,95 +437,3 @@ Toolbox.prototype = {
     this.emit("destroyed");
   }
 };
-
-
-
-//------------------------------------------------------------------------------
-
-Components.utils.import('resource://gre/modules/XPCOMUtils.jsm');
-Components.utils.import("resource:///modules/devtools/gcli.jsm");
-Components.utils.import("resource://gre/modules/devtools/Require.jsm");
-Components.utils.import("resource://gre/modules/devtools/Console.jsm");
-
-var Requisition = require("gcli/cli").Requisition;
-
-XPCOMUtils.defineLazyGetter(this, "prefBranch", function() {
-  var prefService = Components.classes["@mozilla.org/preferences-service;1"]
-          .getService(Components.interfaces.nsIPrefService);
-  return prefService.getBranch(null)
-          .QueryInterface(Components.interfaces.nsIPrefBranch2);
-});
-
-/**
- * Read a toolbarSpec from preferences
- */
-function getToolbarSpec() {
-  try {
-    var value = prefBranch.getComplexValue("devtools.window.toolbarspec", Ci.nsISupportsString).data;
-    return JSON.parse(value);
-  }
-  catch (ex) {
-    return [ "tilt toggle", "scratchpad open", "screenshot" ];
-  }
-}
-
-/**
- * A toolbarSpec is an array of buttonSpecs. A buttonSpec is an array of
- * strings each of which is a GCLI command (including args if needed).
- */
-function createButtons(toolbarSpec, document, requisition) {
-  var reply = [];
-
-  toolbarSpec.forEach(function(buttonSpec) {
-    var button = document.createElement("toolbarbutton");
-    reply.push(button);
-
-    if (typeof buttonSpec == "string") {
-      buttonSpec = { typed: buttonSpec };
-    }
-    // Ask GCLI to parse the typed string (doesn't execute it)
-    requisition.update(buttonSpec.typed);
-
-    // Ignore invalid commands
-    var command = requisition.commandAssignment.value;
-    if (command == null) {
-      // TODO: Have a broken icon
-      // button.icon = 'Broken';
-      button.setAttribute("label", "💩");
-      button.setAttribute("tooltip", "Unknown command: " + buttonSpec.typed);
-      button.setAttribute("disabled", "true");
-    }
-    else {
-      button.setAttribute("icon", "command.icon");
-      button.setAttribute("tooltip", "command.manual");
-      button.setAttribute("label", buttonSpec.typed.substring(0, 1));
-
-      button.addEventListener("click", function() {
-        requisition.update(buttonSpec.typed);
-        //if (requisition.getStatus() == Status.VALID) {
-          requisition.exec();
-        /*
-        }
-        else {
-          console.error('incomplete commands not yet supported');
-        }
-        */
-      }, false);
-
-      // Allow the command button to be toggleable
-      /*
-      if (command.checkedState) {
-        button.setAttribute("type", "checkbox");
-        button.setAttribute("checked", command.checkedState.get() ? "true" : "false");
-        command.checkedState.on("change", function() {
-          button.checked = command.checkedState.get();
-        });
-      }
-      */
-    }
-  });
-
-  requisition.update('');
-
-  return reply;
-}
