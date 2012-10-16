@@ -59,7 +59,6 @@ function checkOpen() {
 
   // The web console opens synchronously, but closes asynchronously.
   let hud = imported.HUDService.getHudByWindow(content);
-  imported.HUDService.disableAnimation(hud.hudId);
 
   document.getElementById("Tools:WebConsole").doCommand();
 
