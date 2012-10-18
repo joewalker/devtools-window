@@ -26,6 +26,7 @@ Cu.import("resource:///modules/source-editor.jsm");
 Cu.import("resource:///modules/devtools/LayoutHelpers.jsm");
 Cu.import("resource:///modules/devtools/scratchpad-manager.jsm");
 Cu.import("resource://gre/modules/jsdebugger.jsm");
+Cu.import("resource:///modules/devtools/gDevTools.jsm");
 
 const SCRATCHPAD_CONTEXT_CONTENT = 1;
 const SCRATCHPAD_CONTEXT_BROWSER = 2;
@@ -225,7 +226,7 @@ var Scratchpad = {
         this._previousLocation != this.gBrowser.contentWindow.location.href) {
       let contentWindow = this.gBrowser.selectedBrowser.contentWindow;
       this._contentSandbox = new Cu.Sandbox(contentWindow,
-        { sandboxPrototype: contentWindow, wantXrays: false, 
+        { sandboxPrototype: contentWindow, wantXrays: false,
           sandboxName: 'scratchpad-content'});
       this._contentSandbox.__SCRATCHPAD__ = this;
 
@@ -260,7 +261,7 @@ var Scratchpad = {
     if (!this._chromeSandbox ||
         this.browserWindow != this._previousBrowserWindow) {
       this._chromeSandbox = new Cu.Sandbox(this.browserWindow,
-        { sandboxPrototype: this.browserWindow, wantXrays: false, 
+        { sandboxPrototype: this.browserWindow, wantXrays: false,
           sandboxName: 'scratchpad-chrome'});
       this._chromeSandbox.__SCRATCHPAD__ = this;
       addDebuggerToGlobal(this._chromeSandbox);
@@ -1001,9 +1002,7 @@ var Scratchpad = {
    */
   openWebConsole: function SP_openWebConsole()
   {
-    if (!this.browserWindow.HUDConsoleUI.getOpenHUD()) {
-      this.browserWindow.HUDConsoleUI.toggleHUD();
-    }
+    gDevTools.openDefaultToolbox(this.gBrowser.selectedTab, "webconsole");
     this.browserWindow.focus();
   },
 
@@ -1217,8 +1216,13 @@ var Scratchpad = {
     }
 
     this.resetContext();
-    this.gBrowser.selectedBrowser.removeEventListener("load",
-        this._reloadAndRunEvent, true);
+
+    // This event is created only after user uses 'reload and run' feature.
+    if (this._reloadAndRunEvent) {
+      this.gBrowser.selectedBrowser.removeEventListener("load",
+          this._reloadAndRunEvent, true);
+    }
+
     this.editor.removeEventListener(SourceEditor.EVENTS.DIRTY_CHANGED,
                                     this._onDirtyChanged);
     PreferenceObserver.uninit();

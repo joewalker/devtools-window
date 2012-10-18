@@ -1008,6 +1008,7 @@ pref("devtools.toolbox.footer.height", 250);
 pref("devtools.toolbox.sidebar.width", 500);
 pref("devtools.toolbox.host", "bottom");
 pref("devtools.toolbox.selectedTool", "webconsole");
+pref("devtools.toolbox.toolbarspec", '["tilt toggle","scratchpad open","screenshot"]');
 
 // Enable the Inspector
 pref("devtools.inspector.enabled", true);
@@ -1076,17 +1077,6 @@ pref("devtools.gcli.eagerHelper", 2);
 
 // Do we allow the 'pref set' command
 pref("devtools.gcli.allowSet", false);
-
-// The last Web Console height. This is initially 0 which means that the Web
-// Console will use the default height next time it shows.
-// Change to -1 if you do not want the Web Console to remember its last height.
-pref("devtools.hud.height", 0);
-
-// Remember the Web Console position. Possible values:
-//   above - above the web page,
-//   below - below the web page,
-//   window - in a separate window/popup panel.
-pref("devtools.webconsole.position", "below");
 
 // Remember the Web Console filters
 pref("devtools.webconsole.filter.network", true);
