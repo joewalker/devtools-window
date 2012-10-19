@@ -6,16 +6,12 @@ const URL = "data:text/html;charset=utf8,<p>JavaScript Profiler test</p>";
 function test() {
   waitForExplicitFinish();
 
-  loadTab(URL, function onTabLoad(tab, browser) {
-    openProfiler(tab, function onProfilerOpen() {
-      let panel = gDevTools.getPanelForTarget("jsprofiler", tab);
-      ok(panel, "JS Profiler exists and active");
+  setUp(URL, function onSetUp(tab, browser, panel) {
+    ok(panel, "JS Profiler exists and active");
 
-      closeProfiler(tab, function onProfilerClose() {
-        let panel = gDevTools.getPanelForTarget("jsprofiler", tab);
-        ok(!panel, "JS Profiler is destroyed");
-        tearDown();
-      });
+    tearDown(tab, function onTearDown() {
+      let panel = gDevTools.getPanelForTarget("jsprofiler", tab);
+      ok(!panel, "JS Profiler is destroyed");
     });
   });
 }

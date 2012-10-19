@@ -40,10 +40,23 @@ function closeProfiler(tab, callback) {
   gDevTools.closeToolbox(tab);
 }
 
-function tearDown() {
-  while (gBrowser.tabs.length > 1) {
-    gBrowser.removeCurrentTab();
-  }
+function setUp(url, callback) {
+  loadTab(url, function onTabLoad(tab, browser) {
+    openProfiler(tab, function onProfilerOpen() {
+      let panel = gDevTools.getPanelForTarget("jsprofiler", tab);
+      callback(tab, browser, panel);
+    });
+  });
+}
 
-  finish();
+function tearDown(tab, callback=function(){}) {
+  closeProfiler(tab, function onProfilerClose() {
+    callback();
+
+    while (gBrowser.tabs.length > 1) {
+      gBrowser.removeCurrentTab();
+    }
+
+    finish();
+  });
 }
