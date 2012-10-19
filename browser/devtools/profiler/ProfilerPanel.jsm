@@ -54,11 +54,13 @@ function ProfilerPanel(frame, toolbox) {
     let toggle = this.document.getElementById("profiler-toggle");
     toggle.addEventListener("click", this.onToggle.bind(this), false);
     toggle.removeAttribute("disabled");
+    Services.obs.notifyObservers(null, "jsprofiler-created", null);
   }.bind(this));
 }
 
 ProfilerPanel.prototype = {
   destroy: function PP_destroy() {
+    Services.obs.notifyObservers(null, "jsprofiler-destroyed", null);
   },
 
   onToggle: function PP_onToggle() {
