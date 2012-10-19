@@ -21,7 +21,7 @@ function bucketsBySplittingArray(array, maxItemsPerBucket) {
   return buckets;
 }
 
-var gParserWorker = new Worker("devtools/profiler/cleopatra/js/parserWorker.js");
+var gParserWorker = new Worker("profiler/cleopatra/js/parserWorker.js");
 gParserWorker.nextRequestID = 0;
 
 function WorkerRequest(worker) {

@@ -18,7 +18,7 @@
 
     <vbox flex="1">
       <iframe id="profiler-cleo"
-          src="chrome://browser/content/cleopatra.html" flex="1"></iframe>
+        src="devtools/cleopatra.html" flex="1"></iframe>
     </vbox>
   </vbox>
 </window>
