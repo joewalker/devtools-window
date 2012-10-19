@@ -55,7 +55,7 @@ Toolbox.prototype = {
   _URL: "chrome://browser/content/devtools/framework/toolbox.xul",
 
   _prefs: {
-    LAST_HOST:  "devtools.toolbox.host",
+    LAST_HOST: "devtools.toolbox.host",
     LAST_TOOL: "devtools.toolbox.selectedTool"
   },
 

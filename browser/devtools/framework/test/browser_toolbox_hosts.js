@@ -15,23 +15,20 @@ function test()
   gBrowser.selectedTab = gBrowser.addTab();
   gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
     gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
-    openToolbox();
+    openToolbox(testBottomHost);
   }, true);
 
   content.location = "data:text/html,test for opening toolbox in different hosts";
 }
 
-function openToolbox()
+function openToolbox(callback)
 {
-  let target = {
-    type: gDevTools.TargetType.TAB,
-    value: gBrowser.selectedTab
-  }
-  toolbox = gDevTools.openToolbox(target);
+  let tab = gBrowser.selectedTab;
+  gDevTools.toggleToolboxForTab(tab);
 
-  toolbox.once("load", testBottomHost);
+  toolbox = gDevTools.getToolboxForTarget(tab);
+  toolbox.once("load", callback);
 }
-
 
 function testBottomHost()
 {
@@ -83,13 +80,7 @@ function testWindowHost()
 
 function toolboxDestroyed()
 {
-  let target = {
-    type: gDevTools.TargetType.TAB,
-    value: gBrowser.selectedTab
-  }
-  toolbox = gDevTools.openToolbox(target);
-
-  toolbox.once("load", testRememberHost);
+  openToolbox(testRememberHost);
 }
 
 function testRememberHost()
