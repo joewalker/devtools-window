@@ -128,6 +128,8 @@ SidebarHost.prototype = {
  * Host object for the toolbox in a separate window
  */
 function WindowHost() {
+  this._boundUnload = this._boundUnload.bind(this);
+
   new EventEmitter(this);
 }
 
@@ -155,12 +157,7 @@ WindowHost.prototype = {
       callback(this.frame);
     }.bind(this);
     win.addEventListener("load", boundLoad, true);
-
-    let boundClose = function(event) {
-      win.removeEventListener("close", boundClose, true);
-      this.emit("window-closed");
-    }.bind(this);
-    win.addEventListener("close", boundClose, true);
+    win.addEventListener("unload", this._boundUnload);
 
     win.focus();
 
@@ -168,9 +165,22 @@ WindowHost.prototype = {
   },
 
   /**
+   * Catch the user closing the window.
+   */
+  _boundUnload: function(event) {
+    if (event.target.location != this.WINDOW_URL) {
+      return;
+    }
+    this._window.removeEventListener("unload", this._boundUnload);
+
+    this.emit("window-closed");
+  },
+
+  /**
    * Destroy the window
    */
   destroyUI: function WH_destroyUI() {
+    this._window.removeEventListener("unload", this._boundUnload);
     this._window.close();
   }
 }

@@ -677,8 +677,6 @@ var Scratchpad = {
         }
 
         if (shouldOpen) {
-          this._skipClosePrompt = true;
-
           let file;
           if (aFile) {
             file = aFile;
@@ -1286,25 +1284,14 @@ var Scratchpad = {
    * there are unsaved changes.
    *
    * @param nsIDOMEvent aEvent
+   * @param function aCallback
+   *        Optional function you want to call when file is saved/closed.
+   *        Used mainly for tests.
    */
-  onClose: function SP_onClose(aEvent)
+  onClose: function SP_onClose(aEvent, aCallback)
   {
-    if (this._skipClosePrompt) {
-      return;
-    }
-
-    this.promptSave(function(aShouldClose, aSaved, aStatus) {
-      let shouldClose = aShouldClose;
-      if (aSaved && !Components.isSuccessCode(aStatus)) {
-        shouldClose = false;
-      }
-
-      if (shouldClose) {
-        this._skipClosePrompt = true;
-        window.close();
-      }
-    }.bind(this));
     aEvent.preventDefault();
+    this.close(aCallback);
   },
 
   /**
@@ -1323,7 +1310,6 @@ var Scratchpad = {
       }
 
       if (shouldClose) {
-        this._skipClosePrompt = true;
         window.close();
       }
       if (aCallback) {
