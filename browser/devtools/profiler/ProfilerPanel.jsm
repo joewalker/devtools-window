@@ -85,6 +85,7 @@ ProfilerPanel.prototype = {
           }), "*");
 
           el.setAttribute("label", "Start");
+          Services.obs.notifyObservers(null, "jsprofiler-stopped", null);
         });
 
         return;
@@ -97,6 +98,7 @@ ProfilerPanel.prototype = {
         }
 
         el.setAttribute("label", "Stop");
+        Services.obs.notifyObservers(null, "jsprofiler-started", null);
       });
     }.bind(this));
   }
