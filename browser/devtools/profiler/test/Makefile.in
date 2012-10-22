@@ -12,6 +12,7 @@ include $(DEPTH)/config/autoconf.mk
 
 MOCHITEST_BROWSER_FILES = \
 		browser_profiler_run.js \
+		browser_profiler_controller.js \
 		head.js \
 
 include $(topsrcdir)/config/rules.mk

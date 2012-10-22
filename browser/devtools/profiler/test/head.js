@@ -40,7 +40,7 @@ function closeProfiler(tab, callback) {
   gDevTools.closeToolbox(tab);
 }
 
-function setUp(url, callback) {
+function setUp(url, callback=function(){}) {
   loadTab(url, function onTabLoad(tab, browser) {
     openProfiler(tab, function onProfilerOpen() {
       let panel = gDevTools.getPanelForTarget("jsprofiler", tab);
