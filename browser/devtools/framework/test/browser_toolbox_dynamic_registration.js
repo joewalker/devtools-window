@@ -25,14 +25,12 @@ function openToolbox()
   }
   toolbox = gDevTools.openToolbox(target);
 
-  toolbox.on("load", testRegister);
+  toolbox.once("ready", testRegister);
 }
 
 
 function testRegister()
 {
-  toolbox.off("load", testRegister);
-
   gDevTools.on("tool-registered", toolRegistered);
 
   gDevTools.registerTool({
