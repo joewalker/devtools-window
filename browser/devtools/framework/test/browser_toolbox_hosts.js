@@ -27,7 +27,7 @@ function openToolbox(callback)
   gDevTools.toggleToolboxForTab(tab);
 
   toolbox = gDevTools.getToolboxForTarget(tab);
-  toolbox.once("load", callback);
+  toolbox.once("ready", callback);
 }
 
 function testBottomHost()

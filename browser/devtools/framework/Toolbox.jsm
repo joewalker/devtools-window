@@ -85,9 +85,8 @@ Toolbox.prototype = {
       case "tool-unregistered":
         toolId = args[0];
 
-        let doc = this._host.frame.contentWindow.document;
-        let radio = doc.getElementById("toolbox-tab-" + toolId);
-        let panel = doc.getElementById("toolbox-panel-" + toolId);
+        let radio = this.doc.getElementById("toolbox-tab-" + toolId);
+        let panel = this.doc.getElementById("toolbox-panel-" + toolId);
 
         if (this._currentToolId == toolId) {
           let nextToolName = null;
@@ -175,6 +174,13 @@ Toolbox.prototype = {
   },
 
   /**
+   * Shortcut to the document containing the toolbox UI
+   */
+  get doc() {
+    return this.frame.contentDocument;
+  },
+
+  /**
    * Open the toolbox
    */
   open: function TBOX_open() {
@@ -188,11 +194,10 @@ Toolbox.prototype = {
    * Onload handler for the toolbox's iframe
    */
   _onLoad: function TBOX_onLoad() {
-    let frame = this._host.frame;
-    frame.removeEventListener("DOMContentLoaded", this._onLoad, true);
+    this.frame.removeEventListener("DOMContentLoaded", this._onLoad, true);
+    this.isReady = true;
 
-    let doc = frame.contentDocument;
-    let buttons = doc.getElementsByClassName("toolbox-dock-button");
+    let buttons = this.doc.getElementsByClassName("toolbox-dock-button");
 
     for (let i = 0; i < buttons.length; i++) {
       let button = buttons[i];
@@ -203,15 +208,15 @@ Toolbox.prototype = {
       .bind(this), true);
     }
 
-    let closeButton = doc.getElementById("toolbox-close");
+    let closeButton = this.doc.getElementById("toolbox-close");
     closeButton.addEventListener("command", this.destroy, true);
 
     this._buildTabs();
-    this._buildButtons(frame);
+    this._buildButtons(this.frame);
 
     this.selectTool(this._defaultToolId);
 
-    this.emit("load");
+    this.emit("ready");
   },
 
   /**
@@ -235,12 +240,11 @@ Toolbox.prototype = {
     }
 
     let toolbarSpec = CommandUtils.getCommandbarSpec("devtools.toolbox.toolbarspec");
-    let doc = frame.contentDocument;
     let requisition = window.DeveloperToolbar.display.requisition;
 
     let buttons = CommandUtils.createButtons(toolbarSpec, doc, requisition);
 
-    let container = doc.getElementById("toolbox-buttons");
+    let container = this.doc.getElementById("toolbox-buttons");
     buttons.forEach(function(button) {
       container.appendChild(button);
     }.bind(this));
@@ -253,14 +257,13 @@ Toolbox.prototype = {
    *        Tool definition of the tool to build a tab for.
    */
   _buildTabForTool: function TBOX_buildTabForTool(aToolDefinition) {
-    let doc = this._host.frame.contentDocument;
-    let tabs = doc.getElementById("toolbox-tabs");
-    let deck = doc.getElementById("toolbox-deck");
+    let tabs = this.doc.getElementById("toolbox-tabs");
+    let deck = this.doc.getElementById("toolbox-deck");
 
     let definition = aToolDefinition;
     let id = definition.id;
 
-    let radio = doc.createElement("radio");
+    let radio = this.doc.createElement("radio");
     radio.setAttribute("label", definition.label);
     radio.className = "toolbox-tab devtools-tab";
     radio.id = "toolbox-tab-" + id;
@@ -269,11 +272,11 @@ Toolbox.prototype = {
       this.selectTool(id);
     }.bind(this, id));
 
-    let vbox = doc.createElement("vbox");
+    let vbox = this.doc.createElement("vbox");
     vbox.className = "toolbox-panel";
     vbox.id = "toolbox-panel-" + id;
 
-    let iframe = doc.createElement("iframe");
+    let iframe = this.doc.createElement("iframe");
     iframe.className = "toolbox-panel-iframe";
     iframe.id = "toolbox-panel-iframe-" + id;
     iframe.setAttribute("toolid", id);
@@ -291,9 +294,11 @@ Toolbox.prototype = {
    *        The id of the tool to switch to
    */
   selectTool: function TBOX_selectTool(id) {
-    let doc = this._host.frame.contentDocument;
-    let tab = doc.getElementById("toolbox-tab-" + id);
-    let tabstrip = doc.getElementById("toolbox-tabs");
+    if (!this.isReady) {
+      throw new Error("Can't select tool, wait for toolbox 'ready' event");
+    }
+    let tab = this.doc.getElementById("toolbox-tab-" + id);
+    let tabstrip = this.doc.getElementById("toolbox-tabs");
 
     // select the right tab
     let index = -1;
@@ -307,17 +312,15 @@ Toolbox.prototype = {
     tabstrip.selectedIndex = index;
 
     // and select the right iframe
-    let deck = doc.getElementById("toolbox-deck");
+    let deck = this.doc.getElementById("toolbox-deck");
     deck.selectedIndex = index;
 
-    let iframe = doc.getElementById("toolbox-panel-iframe-" + id);
+    let iframe = this.doc.getElementById("toolbox-panel-iframe-" + id);
+
+    let definition = gDevTools.getToolDefinitions().get(id);
 
     // only build the tab's content if we haven't already
-    if (!iframe.toolLoaded) {
-      iframe.toolLoaded = true;
-
-      let definition = gDevTools.getToolDefinitions().get(id);
-
+    if (iframe.src != definition.url) {
       let boundLoad = function() {
         iframe.removeEventListener("DOMContentLoaded", boundLoad, true);
         let instance = definition.build(iframe.contentWindow, this);
@@ -366,7 +369,7 @@ Toolbox.prototype = {
     newHost.createUI(function(iframe) {
       // change toolbox document's parent to the new host
       iframe.QueryInterface(Components.interfaces.nsIFrameLoaderOwner);
-      iframe.swapFrameLoaders(this._host.frame);
+      iframe.swapFrameLoaders(this.frame);
 
       // destroy old host's UI
       this._host.destroyUI();
@@ -398,9 +401,7 @@ Toolbox.prototype = {
    * Set the docking buttons to reflect the current host
    */
   _setDockButtons: function TBOX_setDockButtons() {
-    let doc = this._host.frame.contentDocument;
-
-    let buttons = doc.querySelectorAll(".toolbox-dock-button");
+    let buttons = this.doc.querySelectorAll(".toolbox-dock-button");
     for (let button of buttons) {
       if (button.id == "toolbox-dock-" + this._host.type) {
         button.checked = true;
@@ -417,8 +418,7 @@ Toolbox.prototype = {
    * @return The notification box element.
    */
   getNotificationBox: function TBOX_getNotificationBox() {
-    let doc = this._host.frame.contentDocument;
-    return doc.getElementById("toolbox-notificationbox");
+    return this.doc.getElementById("toolbox-notificationbox");
   },
 
   /**

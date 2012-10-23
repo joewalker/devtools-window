@@ -25,15 +25,13 @@ function openToolbox()
   }
   toolbox = gDevTools.openToolbox(target);
 
-  toolbox.on("load", testRegister);
+  toolbox.once("ready", testRegister);
 }
 
 
 function testRegister()
 {
-  toolbox.off("load", testRegister);
-
-  gDevTools.on("tool-registered", toolRegistered);
+  gDevTools.once("tool-registered", toolRegistered);
 
   gDevTools.registerTool({
     id: "test-tool",
@@ -44,8 +42,6 @@ function testRegister()
 
 function toolRegistered(event, toolId)
 {
-  gDevTools.off("tool-registered", toolRegistered);
-
   is(toolId, "test-tool", "tool-registered event handler sent tool id");
 
   ok(gDevTools.getToolDefinitions().has(toolId), "tool added to map");
@@ -64,15 +60,13 @@ function toolRegistered(event, toolId)
 
 function testUnregister()
 {
-  gDevTools.on("tool-unregistered", toolUnregistered);
+  gDevTools.once("tool-unregistered", toolUnregistered);
 
   gDevTools.unregisterTool("test-tool");
 }
 
 function toolUnregistered(event, toolId)
 {
-  gDevTools.off("tool-unregistered", toolUnregistered);
-
   is(toolId, "test-tool", "tool-unregistered event handler sent tool id");
 
   ok(!gDevTools.getToolDefinitions().has(toolId), "tool removed from map");
