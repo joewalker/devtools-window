@@ -63,6 +63,35 @@ ProfilerPanel.prototype = {
     Services.obs.notifyObservers(null, "jsprofiler-destroyed", null);
   },
 
+  parseProfileData: function PP_parseProfileData(data) {
+    let iframe = this.document.getElementById("profiler-cleo");
+
+    iframe.contentWindow.postMessage(JSON.stringify({
+      task: "receiveProfileData",
+      rawProfile: data
+    }), "*");
+
+    // FIXME: There has to be a better way to emit an event when
+    // Cleopatra finishes parsing data.
+
+    let poll = function pollBreadcrumbs() {
+      let wait = this.window.setTimeout.bind(null, poll, 100);
+      let trail = iframe.contentWindow.gBreadcrumbTrail;
+
+      if (!trail) {
+        return wait();
+      }
+
+      if (!trail._breadcrumbs || !trail._breadcrumbs.length) {
+        return wait();
+      }
+
+      Services.obs.notifyObservers(null, "jsprofiler-parsed", null);
+    }.bind(this);
+
+    poll();
+  },
+
   onToggle: function PP_onToggle() {
     let el = this.document.getElementById("profiler-toggle");
     let iframe = this.document.getElementById("profiler-cleo");
@@ -79,14 +108,10 @@ ProfilerPanel.prototype = {
             return; // TODO
           }
 
-          iframe.contentWindow.postMessage(JSON.stringify({
-            task: "receiveProfileData",
-            rawProfile: data
-          }), "*");
-
+          this.parseProfileData(data);
           el.setAttribute("label", "Start");
           Services.obs.notifyObservers(null, "jsprofiler-stopped", null);
-        });
+        }.bind(this));
 
         return;
       }

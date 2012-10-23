@@ -277,7 +277,7 @@ ProfileTreeManager.prototype = {
         return {
           getData: function () {
             if (!createdNode) {
-              createdNode = createTreeViewNode(child, parent); 
+              createdNode = createTreeViewNode(child, parent);
             }
             return createdNode;
           }
@@ -378,7 +378,7 @@ PluginView.prototype = {
       self._iframe.contentWindow.initCleopatraPlugin(data, param, gSymbols);
     }
     this.show();
-    //console.log(gSymbols); 
+    //console.log(gSymbols);
   },
 }
 
@@ -447,7 +447,7 @@ HistogramView.prototype = {
     return Math.ceil(minWidth / this._widthSum);
   },
   histogramClick: function HistogramView_histogramClick(index) {
-    var sample = this._histogramData[index]; 
+    var sample = this._histogramData[index];
     var frames = sample.frames;
     if (gSampleBar) {
       var list = gSampleBar.setSample(frames[0]);
@@ -735,7 +735,7 @@ function videoPaneTimeChange(video) {
   //var frameStart = gMeta.frameStart[frame];
   //var frameEnd = gMeta.frameStart[frame+1]; // If we don't have a frameEnd assume the end of the profile
 
-  gHistogramView.showVideoFramePosition(frame); 
+  gHistogramView.showVideoFramePosition(frame);
 }
 
 
@@ -948,11 +948,11 @@ function uploadProfile(selected) {
     var oXHR = new XMLHttpRequest();
     oXHR.open("POST", "http://profile-store.appspot.com/store", true);
     oXHR.onload = function (oEvent) {
-      if (oXHR.status == 200) {  
+      if (oXHR.status == 200) {
         document.getElementById("upload_status").innerHTML = "Success! Use this <a href='" + document.URL.split('?')[0] + "?report=" + oXHR.responseText + "'>link</a>";
-      } else {  
+      } else {
         document.getElementById("upload_status").innerHTML = "Error " + oXHR.status + " occurred uploading your file.";
-      }  
+      }
     };
     oXHR.onerror = function (oEvent) {
       document.getElementById("upload_status").innerHTML = "Error " + oXHR.status + " occurred uploading your file.";
@@ -986,7 +986,7 @@ function populate_skip_symbol() {
     elOptNew.value = gSkipSymbols[i];
     elSel.add(elOptNew);
   }
-    
+
 }
 
 function delete_skip_symbol() {
@@ -994,7 +994,7 @@ function delete_skip_symbol() {
 }
 
 function add_skip_symbol() {
-  
+
 }
 
 var gFilterChangeCallback = null;
@@ -1010,12 +1010,12 @@ function filterOnChange() {
 function filterUpdate() {
   gFilterChangeCallback = null;
 
-  filtersChanged(); 
+  filtersChanged();
 
   var filterNameInput = document.getElementById("filterName");
   if (filterNameInput != null) {
     filterNameInput.focus();
-  } 
+  }
 }
 
 // Maps document id to a tooltip description
@@ -1033,7 +1033,7 @@ var tooltip = {
 
 function addTooltips() {
   for (var elemId in tooltip) {
-    var elem = document.getElementById(elemId); 
+    var elem = document.getElementById(elemId);
     if (!elem)
       continue;
     if (elem.parentNode.nodeName.toLowerCase() == "label")
@@ -1102,7 +1102,7 @@ InfoBar.prototype = {
     //infoText += "<select size=8 id='skipsymbol'></select><br />"
     //infoText += "<input type='button' id='delete_skipsymbol' value='Delete'/><br />\n";
     //infoText += "<input type='button' id='add_skipsymbol' value='Add'/><br />\n";
-    
+
     infobar.innerHTML = infoText;
     addTooltips();
 
@@ -1256,7 +1256,7 @@ function loadProfileURL(url) {
       loadRawProfile(subreporters.parsing, xhr.responseText);
     }
   };
-  xhr.onerror = function (e) { 
+  xhr.onerror = function (e) {
     subreporters.fileLoading.begin("Error fetching profile :(. URL:  " + url);
   }
   xhr.onprogress = function (e) {
@@ -1282,7 +1282,7 @@ function loadRawProfile(reporter, rawProfile) {
   reporter.begin("Parsing...");
   var startTime = Date.now();
   var parseRequest = Parser.parse(rawProfile, {
-    appendVideoCapture : gAppendVideoCapture,  
+    appendVideoCapture : gAppendVideoCapture,
   });
   gVideoCapture = null;
   parseRequest.addEventListener("progress", function (progress, action) {
@@ -1353,13 +1353,13 @@ function toggleInvertCallStack() {
 var gMergeUnbranched = false;
 function toggleMergeUnbranched() {
   gMergeUnbranched = !gMergeUnbranched;
-  viewOptionsChanged(); 
+  viewOptionsChanged();
 }
 
 var gMergeFunctions = true;
 function toggleMergeFunctions() {
   gMergeFunctions = !gMergeFunctions;
-  filtersChanged(); 
+  filtersChanged();
 }
 
 var gJankOnly = false;
