@@ -49,7 +49,7 @@ EventEmitter.prototype = {
   once: function EventEmitter_once(aEvent, aListener) {
     let handler = function() {
       this.off(aEvent, handler);
-      aListener();
+      aListener.apply(null, arguments);
     }.bind(this);
     this.on(aEvent, handler);
   },
