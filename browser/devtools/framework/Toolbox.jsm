@@ -323,8 +323,15 @@ Toolbox.prototype = {
     if (iframe.src != definition.url) {
       let boundLoad = function() {
         iframe.removeEventListener("DOMContentLoaded", boundLoad, true);
-        let instance = definition.build(iframe.contentWindow, this);
-        this._toolPanels.set(id, instance);
+        let panel = definition.build(iframe.contentWindow, this);
+        this._toolPanels.set(id, panel);
+        if (panel.isReady) {
+          this.emit(id + "-ready", panel);
+        } else {
+          panel.once("ready", function(event) {
+            this.emit(id + "-ready", panel);
+          }.bind(this));
+        }
       }.bind(this);
 
       iframe.addEventListener("DOMContentLoaded", boundLoad, true);
