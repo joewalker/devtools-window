@@ -17,6 +17,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "HUDService",
 XPCOMUtils.defineLazyModuleGetter(this, "DevTools",
                                   "resource:///modules/devtools/gDevTools.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "EventEmitter",
+                                  "resource:///modules/devtools/EventEmitter.jsm");
+
 const STRINGS_URI = "chrome://browser/locale/devtools/webconsole.properties";
 let l10n = new WebConsoleUtils.l10n(STRINGS_URI);
 
@@ -43,18 +46,30 @@ function WebConsolePanel(iframeWindow, toolbox) {
   this._frameWindow = iframeWindow;
   this._toolbox = toolbox;
 
+  new EventEmitter(this);
+
   let tab = this._toolbox.target.value;
   let parentDoc = iframeWindow.document.defaultView.parent.document;
   let iframe = parentDoc.querySelector("#toolbox-panel-iframe-webconsole");
   this.hud = HUDService.activateHUDForContext(tab, iframe);
+
+  this.setReady();
 }
 
 WebConsolePanel.prototype = {
   get target() this._toolbox.target,
+
+  get isReady() this._isReady,
 
   destroy: function WCP_destroy()
   {
     let tab = this._toolbox.target.value;
     HUDService.deactivateHUDForContext(tab);
   },
-};
+
+  setReady: function WCP_setReady()
+  {
+    this._isReady = true;
+    this.emit("ready");
+  },
+}

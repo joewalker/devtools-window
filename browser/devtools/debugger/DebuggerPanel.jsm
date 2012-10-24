@@ -51,6 +51,13 @@ function DebuggerPanel(iframeWindow, toolbox) {
   this._controller = iframeWindow.DebuggerController;
   this._bkp = this._controller.Breakpoints;
 
+  let onDebuggerLoaded = function() {
+    iframeWindow.removeEventListener("Debugger:Loaded", onDebuggerLoaded, true);
+    this.setReady();
+  }.bind(this);
+
+  iframeWindow.addEventListener("Debugger:Loaded", onDebuggerLoaded, true);
+
   new EventEmitter(this);
 
   if (this.target.type == gDevTools.TargetType.TAB) {
@@ -69,6 +76,13 @@ DebuggerPanel.prototype = {
   // DevToolPanel API
   get target() {
     return this._toolbox.target;
+  },
+
+  get isReady() this._isReady,
+
+  setReady: function() {
+    this._isReady = true;
+    this.emit("ready");
   },
 
   destroy: function() {
