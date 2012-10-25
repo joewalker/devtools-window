@@ -268,7 +268,9 @@ DevTools.prototype = {
         gDevTools._addToolToMenu(toolDefinition, chromeDoc, true);
 
       fragCommands.appendChild(cmd);
-      fragKeys.appendChild(key);
+      if (key) {
+        fragKeys.appendChild(key);
+      }
       fragBroadcasters.appendChild(bc);
       fragAppMenuItems.appendChild(item);
       item = item.cloneNode();
@@ -285,8 +287,10 @@ DevTools.prototype = {
     mbs.appendChild(fragBroadcasters);
 
     let amp = doc.getElementById("appmenu_webDeveloper_popup");
-    let amps = doc.getElementById("appmenu_devtools_separator");
-    amp.insertBefore(fragAppMenuItems, amps);
+    if (amp) {
+      let amps = doc.getElementById("appmenu_devtools_separator");
+      amp.insertBefore(fragAppMenuItems, amps);
+    }
 
     let mp = doc.getElementById("menuWebDeveloperPopup");
     let mps = doc.getElementById("menu_devtools_separator");
@@ -318,24 +322,30 @@ DevTools.prototype = {
     cmd.setAttribute("oncommand",
       'gDevTools.openToolForTab("' + id + '", gBrowser.selectedTab);');
 
-    let key = doc.createElement("key");
-    key.setAttribute("id", "key_" + id);
+    let key = null;
+    if (toolDefinition.key) {
+      key = doc.createElement("key");
+      key.setAttribute("id", "key_" + id);
 
-    if (toolDefinition.key.startsWith("VK_")) {
-      key.setAttribute("keycode", toolDefinition.key);
-    } else {
-      key.setAttribute("key", toolDefinition.key);
+      if (toolDefinition.key.startsWith("VK_")) {
+        key.setAttribute("keycode", toolDefinition.key);
+      } else {
+        key.setAttribute("key", toolDefinition.key);
+      }
+
+      key.setAttribute("oncommand",
+        'gDevTools.openToolForTab("' + id + '", gBrowser.selectedTab);');
+      key.setAttribute("modifiers", toolDefinition.modifiers);
     }
-
-    key.setAttribute("oncommand",
-      'gDevTools.openToolForTab("' + id + '", gBrowser.selectedTab);');
-    key.setAttribute("modifiers", toolDefinition.modifiers);
 
     let bc = doc.createElement("broadcaster");
     bc.id = "devtoolsMenuBroadcaster_" + id;
     bc.setAttribute("label", toolDefinition.label);
     bc.setAttribute("command", "Tools:" + id);
-    bc.setAttribute("key", "key_" + id);
+
+    if (key) {
+      bc.setAttribute("key", "key_" + id);
+    }
 
     let item = doc.createElement("menuitem");
     item.id = "appmenu_devToolbar" + id;
@@ -351,15 +361,19 @@ DevTools.prototype = {
       let mcs = doc.getElementById("mainCommandSet");
       mcs.appendChild(cmd);
 
-      let mks = doc.getElementById("mainKeyset");
-      mks.appendChild(key);
+      if (key) {
+        let mks = doc.getElementById("mainKeyset");
+        mks.appendChild(key);
+      }
 
       let mbs = doc.getElementById("mainBroadcasterSet");
       mbs.appendChild(bc);
 
       let amp = doc.getElementById("appmenu_webDeveloper_popup");
-      let amps = doc.getElementById("appmenu_devtools_separator");
-      amp.insertBefore(item, amps);
+      if (amp) {
+        let amps = doc.getElementById("appmenu_devtools_separator");
+        amp.insertBefore(item, amps);
+      }
 
       item = item.cloneNode();
 
