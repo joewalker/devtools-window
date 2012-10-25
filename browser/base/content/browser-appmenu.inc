@@ -150,8 +150,9 @@
       <menu id="appmenu_webDeveloper"
             label="&appMenuWebDeveloper.label;">
         <menupopup id="appmenu_webDeveloper_popup">
+          <menuitem id="appmenu_devToolbox" observes="devtoolsMenuBroadcaster_DevToolbox"/>
+          <menuseparator id="appmenu_devtools_separator"/>
           <menuitem id="appmenu_devToolbar" observes="devtoolsMenuBroadcaster_DevToolbar"/>
-          <menuitem id="appmenu_webConsole" observes="devtoolsMenuBroadcaster_WebConsole"/>
           <menuitem id="appmenu_remoteWebConsole" observes="devtoolsMenuBroadcaster_RemoteWebConsole"/>
           <menuitem id="appmenu_pageinspect" observes="devtoolsMenuBroadcaster_Inspect"/>
           <menuitem id="appmenu_responsiveUI" observes="devtoolsMenuBroadcaster_ResponsiveUI"/>

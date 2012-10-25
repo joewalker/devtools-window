@@ -5,9 +5,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const Cc = Components.classes;
-const Ci = Components.interfaces;
-const Cu = Components.utils;
+const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 const EXPORTED_SYMBOLS = ["DebuggerDefinition"];
 
@@ -22,8 +20,15 @@ XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
 XPCOMUtils.defineLazyGetter(this, "_strings",
   function() Services.strings.createBundle(STRINGS_URI));
 
+XPCOMUtils.defineLazyGetter(this, "osString", function() {
+  return Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
+});
+
 const DebuggerDefinition = {
   id: "jsdebugger",
+  key: l10n("open.commandkey"),
+  accesskey: l10n("debuggerMenu.accesskey"),
+  modifiers: osString == "Darwin" ? "accel,alt" : "accel,shift",
   killswitch: "devtools.debugger.enabled",
   icon: "chrome://browser/skin/devtools/tools-icons-small.png",
   url: "chrome://browser/content/debugger.xul",

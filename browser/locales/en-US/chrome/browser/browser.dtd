@@ -246,6 +246,8 @@ These should match what Safari and other Apple applications use on OS X Lion. --
 <!ENTITY devToolbarToolsButton.label       "Toggle Toolbox">
 <!ENTITY devToolbarOtherToolsButton.label  "More Tools">
 
+<!ENTITY devToolbox.accesskey              "B">
+
 <!ENTITY inspectorHTMLCopyInner.label       "Copy Inner HTML">
 <!ENTITY inspectorHTMLCopyInner.accesskey   "I">
 

@@ -21,6 +21,9 @@ XPCOMUtils.defineLazyGetter(this, "_strings",
  */
 const StyleEditorDefinition = {
   id: "styleeditor",
+  key: l10n("open.commandkey"),
+  accesskey: l10n("open.accesskey"),
+  modifiers: "shift",
   label: l10n("ToolboxStyleEditor.label"),
   url: "chrome://browser/content/styleeditor.xul",
   build: function(iframeWindow, toolbox) {

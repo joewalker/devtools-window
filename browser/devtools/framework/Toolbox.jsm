@@ -75,6 +75,7 @@ Toolbox.prototype = {
         let tool = defs.get(toolId);
 
         this._buildTabForTool(tool);
+        this._addToolToMenu(tool);
         break;
 
       /**
