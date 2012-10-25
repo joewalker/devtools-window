@@ -298,12 +298,12 @@ MarkupView.prototype = {
         // Fake a childList mutation here.
         this._mutationObserver([{target: aEvent.target, type: "childList"}]);
       }.bind(this), true);
-
     }
 
     this._containers.set(aNode, container);
     container.expanded = aExpand;
 
+    container.childrenDirty = true;
     this._updateChildren(container);
 
     if (parent) {
@@ -327,6 +327,7 @@ MarkupView.prototype = {
       if (mutation.type === "attributes" || mutation.type === "characterData") {
         container.update();
       } else if (mutation.type === "childList") {
+        container.childrenDirty = true;
         this._updateChildren(container);
       }
     }
@@ -451,11 +452,17 @@ MarkupView.prototype = {
    */
   _updateChildren: function MT__updateChildren(aContainer)
   {
+    if (!aContainer.childrenDirty) {
+      return false;
+    }
+
     // Get a tree walker pointing at the first child of the node.
     let treeWalker = documentWalker(aContainer.node);
     let child = treeWalker.firstChild();
     aContainer.hasChildren = !!child;
     if (aContainer.expanded) {
+      aContainer.childrenDirty = false;
+
       let lastContainer = null;
       while (child) {
         let container = this.importNode(child, false);
@@ -471,6 +478,8 @@ MarkupView.prototype = {
         aContainer.children.removeChild(aContainer.children.lastChild);
       }
     }
+
+    return true;
   },
 
   /**
