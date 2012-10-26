@@ -28,9 +28,6 @@ function attemptTearDown() {
   }
 
   tearDown(gTab, function onTearDown() {
-    let panel = gDevTools.getPanelForTarget("jsprofiler", gTab);
-    ok(!panel, "JS Profiler is destroyed");
-
     gPanel = null;
     gTab = null;
   });

@@ -31,9 +31,7 @@ function openProfiler(tab, callback) {
 
 function closeProfiler(tab, callback) {
   let panel = gDevTools.getPanelForTarget("jsprofiler", tab);
-  panel.once("destroyed", function () {
-    executeSoon(callback);
-  });
+  panel.once("destroyed", callback);
 
   gDevTools.closeToolbox(tab);
 }
