@@ -13,6 +13,7 @@ const Cu = Components.utils;
 const CONSOLEAPI_CLASS_ID = "{b49c18f8-3379-4fc0-8c90-d7772c1a9ff3}";
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource:///modules/devtools/gDevTools.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
                                   "resource://gre/modules/Services.jsm");
@@ -91,10 +92,17 @@ HUD_SERVICE.prototype =
    *        The xul:tab element.
    * @param nsIDOMElement aIframe
    *        The iframe element into which to place the web console.
+   * @param object aOptions
+   *        Options for the Web Console:
+   *        - host
+   *          Server to connect to.
+   *        - port
+   *          Port to connect to.
    * @return object
    *         The new HeadsUpDisplay instance.
    */
-  activateHUDForContext: function HS_activateHUDForContext(aTab, aIframe)
+  activateHUDForContext: function HS_activateHUDForContext(aTab, aIframe,
+                                                           aOptions)
   {
     let hudId = "hud_" + aTab.linkedPanel;
     if (hudId in this.hudReferences) {
@@ -109,7 +117,7 @@ HUD_SERVICE.prototype =
     gBrowser.tabContainer.addEventListener("TabSelect", this.onTabSelect, false);
     window.addEventListener("unload", this.onWindowUnload, false);
 
-    let hud = new WebConsole(aTab, aIframe);
+    let hud = new WebConsole(aTab, aIframe, aOptions);
     this.hudReferences[hudId] = hud;
 
     HeadsUpDisplayUICommands.refreshCommand();
@@ -339,8 +347,10 @@ HUD_SERVICE.prototype =
  *        The xul:tab for which you want the WebConsole object.
  * @param nsIDOMElement aIframe
  *        iframe into which we should create the WebConsole UI.
+ * @param object aOptions
+ *        Web Console options: host and port, for the remote Web console.
  */
-function WebConsole(aTab, aIframe)
+function WebConsole(aTab, aIframe, aOptions = {})
 {
   this.tab = aTab;
   if (this.tab == null) {
@@ -356,6 +366,10 @@ function WebConsole(aTab, aIframe)
   this.chromeDocument = this.tab.ownerDocument;
   this.chromeWindow = this.chromeDocument.defaultView;
   this.hudId = "hud_" + this.tab.linkedPanel;
+
+  this.remoteHost = aOptions.host;
+  this.remotePort = aOptions.port;
+
   this._onIframeLoad = this._onIframeLoad.bind(this);
 
   this.iframe.className = "web-console-frame";
@@ -620,10 +634,52 @@ var HeadsUpDisplayUICommands = {
     }
   },
 
-  toggleHUD: function UIC_toggleHUD() {
+  toggleHUD: function UIC_toggleHUD(aOptions)
+  {
     var window = HUDService.currentContext();
     var tab = window.gBrowser.selectedTab;
     gDevTools.toggleToolboxForTab(tab, "webconsole");
+  },
+
+  toggleRemoteHUD: function UIC_toggleRemoteHUD()
+  {
+    if (this.getOpenHUD()) {
+      this.toggleHUD();
+      return;
+    }
+
+    let host = Services.prefs.getCharPref("devtools.debugger.remote-host");
+    let port = Services.prefs.getIntPref("devtools.debugger.remote-port");
+
+    let check = { value: false };
+    let input = { value: host + ":" + port };
+
+    let result = Services.prompt.prompt(null,
+      l10n.getStr("remoteWebConsolePromptTitle"),
+      l10n.getStr("remoteWebConsolePromptMessage"),
+      input, null, check);
+
+    if (!result) {
+      return;
+    }
+
+    let parts = input.value.split(":");
+    if (parts.length != 2) {
+      return;
+    }
+
+    [host, port] = parts;
+    if (!host.length || !port.length) {
+      return;
+    }
+
+    Services.prefs.setCharPref("devtools.debugger.remote-host", host);
+    Services.prefs.setIntPref("devtools.debugger.remote-port", port);
+
+    this.toggleHUD({
+      host: host,
+      port: port,
+    });
   },
 
   /**

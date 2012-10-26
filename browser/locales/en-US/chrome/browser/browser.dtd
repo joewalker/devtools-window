@@ -207,6 +207,7 @@ These should match what Safari and other Apple applications use on OS X Lion. --
 <!ENTITY webConsoleCmd.label          "Web Console">
 <!ENTITY webConsoleCmd.accesskey      "W">
 <!ENTITY webConsoleCmd.commandkey     "k">
+<!ENTITY remoteWebConsoleCmd.label    "Remote Web Console">
 
 <!ENTITY inspectMenu.label            "Inspect">
 <!ENTITY inspectMenu.accesskey        "I">
@@ -244,6 +245,8 @@ These should match what Safari and other Apple applications use on OS X Lion. --
 <!ENTITY devToolbar.keytext                "F2">
 <!ENTITY devToolbarToolsButton.label       "Toggle Toolbox">
 <!ENTITY devToolbarOtherToolsButton.label  "More Tools">
+
+<!ENTITY devToolbox.accesskey              "B">
 
 <!ENTITY inspectorHTMLCopyInner.label       "Copy Inner HTML">
 <!ENTITY inspectorHTMLCopyInner.accesskey   "I">

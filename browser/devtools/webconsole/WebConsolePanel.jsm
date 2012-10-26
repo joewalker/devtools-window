@@ -6,10 +6,12 @@
 
 const EXPORTED_SYMBOLS = [ "WebConsoleDefinition" ];
 
-const Cu = Components.utils;
+const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "Services",
+                                  "resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "WebConsoleUtils",
                                   "resource://gre/modules/devtools/WebConsoleUtils.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "HUDService",
@@ -17,17 +19,28 @@ XPCOMUtils.defineLazyModuleGetter(this, "HUDService",
 XPCOMUtils.defineLazyModuleGetter(this, "DevTools",
                                   "resource:///modules/devtools/gDevTools.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "EventEmitter",
+                                  "resource:///modules/devtools/EventEmitter.jsm");
+
 const STRINGS_URI = "chrome://browser/locale/devtools/webconsole.properties";
-let l10n = new WebConsoleUtils.l10n(STRINGS_URI);
+XPCOMUtils.defineLazyGetter(this, "_strings",
+  function() Services.strings.createBundle(STRINGS_URI));
+
+XPCOMUtils.defineLazyGetter(this, "osString", function() {
+  return Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
+});
 
 /**
  * The external API allowing us to be registered with DevTools.jsm
  */
 const WebConsoleDefinition = {
   id: "webconsole",
+  key: l10n("cmd.commandkey"),
+  accesskey: l10n("webConsoleCmd.accesskey"),
+  modifiers: osString == "Darwin" ? "accel,alt" : "accel,shift",
   icon: "chrome://browser/skin/devtools/webconsole-tool-icon.png",
   url: "chrome://browser/content/devtools/webconsole.xul",
-  label: l10n.getStr("ToolboxWebconsole.label"),
+  label: l10n("ToolboxWebconsole.label"),
   isTargetSupported: function(target) {
     return target.type == DevTools.TargetType.TAB;
   },
@@ -42,19 +55,45 @@ const WebConsoleDefinition = {
 function WebConsolePanel(iframeWindow, toolbox) {
   this._frameWindow = iframeWindow;
   this._toolbox = toolbox;
+  new EventEmitter(this);
 
   let tab = this._toolbox.target.value;
   let parentDoc = iframeWindow.document.defaultView.parent.document;
-  let iframe = parentDoc.querySelector("#toolbox-panel-iframe-webconsole");
+  let iframe = parentDoc.getElementById("toolbox-panel-iframe-webconsole");
   this.hud = HUDService.activateHUDForContext(tab, iframe);
+
+  this.setReady();
 }
 
 WebConsolePanel.prototype = {
   get target() this._toolbox.target,
+
+  get isReady() this._isReady,
 
   destroy: function WCP_destroy()
   {
     let tab = this._toolbox.target.value;
     HUDService.deactivateHUDForContext(tab);
   },
-};
+
+  setReady: function WCP_setReady()
+  {
+    this._isReady = true;
+    this.emit("ready");
+  },
+}
+
+/**
+ * Lookup l10n string from a string bundle.
+ * @param {string} aName The key to lookup.
+ * @returns A localized version of the given key.
+ */
+function l10n(aName)
+{
+  try {
+    return _strings.GetStringFromName(aName);
+  } catch (ex) {
+    Services.console.logStringMessage("Error reading '" + aName + "'");
+    throw new Error("l10n error with " + aName);
+  }
+}

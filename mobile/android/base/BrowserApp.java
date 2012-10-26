@@ -86,7 +86,7 @@ abstract public class BrowserApp extends GeckoApp
     private FindInPageBar mFindInPageBar;
 
     // We'll ask for feedback after the user launches the app this many times.
-    private static final int FEEDBACK_LAUNCH_COUNT = 10;
+    private static final int FEEDBACK_LAUNCH_COUNT = 15;
 
     @Override
     public void onTabChanged(Tab tab, Tabs.TabEvents msg, Object data) {
@@ -261,11 +261,14 @@ abstract public class BrowserApp extends GeckoApp
         super.finishProfileMigration();
     }
 
-    // We don't want to call super.initializeChrome in here because we don't
-    // want to create two DoorHangerPopup instances.
-    @Override void initializeChrome(String uri, Boolean isExternalURL) {
+    @Override
+    protected void initializeChrome(String uri, Boolean isExternalURL) {
+        super.initializeChrome(uri, isExternalURL);
+
         mBrowserToolbar.updateBackButton(false);
         mBrowserToolbar.updateForwardButton(false);
+
+        mDoorHangerPopup.setAnchor(mBrowserToolbar.mFavicon);
 
         Intent intent = getIntent();
         String action = intent.getAction();
@@ -278,23 +281,17 @@ abstract public class BrowserApp extends GeckoApp
             }
         }
 
-        if (uri != null && uri.length() > 0) {
-            mBrowserToolbar.setTitle(uri);
-        }
-
         if (!isExternalURL) {
             // show about:home if we aren't restoring previous session
             if (mRestoreMode == GeckoAppShell.RESTORE_NONE) {
-                mBrowserToolbar.updateTabCount(1);
+                Tab tab = Tabs.getInstance().loadUrl("about:home", Tabs.LOADURL_NEW_TAB);
+                tab.updateTitle(null);
                 showAboutHome();
             }
         } else {
-            mBrowserToolbar.updateTabCount(1);
+            hideAboutHome();
+            Tabs.getInstance().loadUrl(uri, Tabs.LOADURL_NEW_TAB | Tabs.LOADURL_USER_ENTERED);
         }
-
-        mBrowserToolbar.setProgressVisibility(isExternalURL || (mRestoreMode != GeckoAppShell.RESTORE_NONE));
-
-        mDoorHangerPopup = new DoorHangerPopup(this, mBrowserToolbar.mFavicon);
     }
 
     void toggleChrome(final boolean aShow) {

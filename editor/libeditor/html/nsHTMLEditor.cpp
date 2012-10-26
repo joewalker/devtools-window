@@ -763,7 +763,11 @@ nsHTMLEditor::NodeIsBlockStatic(const dom::Element* aElement)
   }
 
   bool isBlock;
-  DebugOnly<nsresult> rv = nsContentUtils::GetParserService()->
+#ifdef DEBUG
+  // XXX we can't use DebugOnly here because VC++ is stupid (bug 802884)
+  nsresult rv =
+#endif
+    nsContentUtils::GetParserService()->
     IsBlock(nsContentUtils::GetParserService()->HTMLAtomTagToId(tagAtom),
             isBlock);
   MOZ_ASSERT(rv == NS_OK);
@@ -3354,7 +3358,7 @@ nsHTMLEditor::GetIsSelectionEditable(bool* aIsSelectionEditable)
     nsINode* commonAncestor =
       selection->GetAnchorFocusRange()->GetCommonAncestor();
     while (commonAncestor && !commonAncestor->IsEditable()) {
-      commonAncestor = commonAncestor->GetNodeParent();
+      commonAncestor = commonAncestor->GetParentNode();
     }
     if (!commonAncestor) {
       // No editable common ancestor

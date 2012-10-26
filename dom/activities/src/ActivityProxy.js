@@ -11,7 +11,6 @@ const Cu = Components.utils;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/ObjectWrapper.jsm");
-Cu.import("resource://gre/modules/Webapps.jsm");
 
 XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
                                    "@mozilla.org/childprocessmessagemanager;1",
@@ -30,6 +29,11 @@ function debug(aMsg) {
 function ActivityProxy() {
   debug("ActivityProxy");
   this.activity = null;
+  let inParent = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime)
+                   .processType == Ci.nsIXULRuntime.PROCESS_TYPE_DEFAULT;
+  debug("inParent: " + inParent);
+  Cu.import(inParent ? "resource://gre/modules/Webapps.jsm"
+                     : "resource://gre/modules/AppsServiceChild.jsm");
 }
 
 ActivityProxy.prototype = {
@@ -76,12 +80,17 @@ ActivityProxy.prototype = {
         Services.DOMRequest.fireError(this.activity, msg.error);
         break;
     }
+    // We can only get one FireSuccess / FireError message, so cleanup as soon as possible.
+    this.cleanup();
   },
 
   cleanup: function actProxy_cleanup() {
     debug("cleanup");
-    cpmm.removeMessageListener("Activity:FireSuccess", this);
-    cpmm.removeMessageListener("Activity:FireError", this);
+    if (!this.cleanedUp) {
+      cpmm.removeMessageListener("Activity:FireSuccess", this);
+      cpmm.removeMessageListener("Activity:FireError", this);
+    }
+    this.cleanedUp = true;
   },
 
   classID: Components.ID("{ba9bd5cb-76a0-4ecf-a7b3-d2f7c43c5949}"),

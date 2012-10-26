@@ -57,6 +57,7 @@ using mozilla::DefaultXDisplay;
 #include "nsIScrollableFrame.h"
 #include "nsIDocShell.h"
 #include "ImageContainer.h"
+#include "nsIDOMHTMLCollection.h"
 
 #include "nsContentCID.h"
 #include "nsWidgetsCID.h"
@@ -984,7 +985,7 @@ static const moz2javaCharset charsets[] =
     {"x-mac-greek",     "MacGreek"},
     {"x-mac-hebrew",    "MacHebrew"},
     {"x-mac-icelandic", "MacIceland"},
-    {"x-mac-roman",     "MacRoman"},
+    {"macintosh",       "MacRoman"},
     {"x-mac-romanian",  "MacRomania"},
     {"x-mac-ukrainian", "MacUkraine"},
     {"Shift_JIS",       "SJIS"},
@@ -1142,7 +1143,7 @@ nsresult nsPluginInstanceOwner::EnsureCachedAttrParamArrays()
   // Making DOM method calls can cause our frame to go away.
   nsCOMPtr<nsIPluginInstanceOwner> kungFuDeathGrip(this);
 
-  nsCOMPtr<nsIDOMNodeList> allParams;
+  nsCOMPtr<nsIDOMHTMLCollection> allParams;
   NS_NAMED_LITERAL_STRING(xhtml_ns, "http://www.w3.org/1999/xhtml");
   mydomElement->GetElementsByTagNameNS(xhtml_ns, NS_LITERAL_STRING("param"),
                                        getter_AddRefs(allParams));
@@ -1368,6 +1369,14 @@ bool nsPluginInstanceOwner::IsRemoteDrawingCoreAnimation()
     return false;
 
   return coreAnimation;
+}
+
+nsresult nsPluginInstanceOwner::ContentsScaleFactorChanged(double aContentsScaleFactor)
+{
+  if (!mInstance) {
+    return NS_ERROR_NULL_POINTER;
+  }
+  return mInstance->ContentsScaleFactorChanged(aContentsScaleFactor);
 }
 
 NPEventModel nsPluginInstanceOwner::GetEventModel()
@@ -2704,8 +2713,8 @@ void nsPluginInstanceOwner::Paint(const nsRect& aDirtyRect, HPS aHPS)
 
   NPEvent pluginEvent;
   pluginEvent.event = WM_PAINT;
-  pluginEvent.wParam = (uint32)aHPS;
-  pluginEvent.lParam = (uint32)&rectl;
+  pluginEvent.wParam = (uint32_t)aHPS;
+  pluginEvent.lParam = (uint32_t)&rectl;
   mInstance->HandleEvent(&pluginEvent, nullptr);
 }
 #endif

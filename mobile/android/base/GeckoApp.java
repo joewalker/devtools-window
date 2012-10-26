@@ -140,6 +140,7 @@ abstract public class GeckoApp
     public static final String ACTION_BOOKMARK      = "org.mozilla.gecko.BOOKMARK";
     public static final String ACTION_LOAD          = "org.mozilla.gecko.LOAD";
     public static final String ACTION_INIT_PW       = "org.mozilla.gecko.INIT_PW";
+    public static final String ACTION_WIDGET        = "org.mozilla.gecko.WIDGET";
     public static final String SAVED_STATE_TITLE         = "title";
     public static final String SAVED_STATE_IN_BACKGROUND = "inBackground";
     public static final String SAVED_STATE_PRIVATE_SESSION = "privateSession";
@@ -1555,7 +1556,7 @@ abstract public class GeckoApp
         });
     }
 
-    void initializeChrome(String uri, Boolean isExternalURL) {
+    protected void initializeChrome(String uri, Boolean isExternalURL) {
         mDoorHangerPopup = new DoorHangerPopup(this, null);
     }
 
@@ -1610,8 +1611,6 @@ abstract public class GeckoApp
         }
 
         boolean isExternalURL = passedUri != null && !passedUri.equals("about:home");
-        initializeChrome(uri, isExternalURL);
-
         StartupAction startupAction;
         if (isExternalURL) {
             startupAction = StartupAction.URL;
@@ -1635,11 +1634,18 @@ abstract public class GeckoApp
                 // loading it twice
                 intent.setAction(Intent.ACTION_MAIN);
                 intent.setData(null);
-                passedUri = "about:empty";
+                passedUri = null;
             } else {
                 startupAction = StartupAction.PREFETCH;
                 GeckoAppShell.getHandler().post(new PrefetchRunnable(copy));
             }
+        }
+
+        initializeChrome(passedUri, isExternalURL);
+
+        if (mRestoreMode == GeckoAppShell.RESTORE_NONE) {
+            // show telemetry door hanger if we aren't restoring a session
+            GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Telemetry:Prompt", null));
         }
 
         Telemetry.HistogramAdd("FENNEC_STARTUP_GECKOAPP_ACTION", startupAction.ordinal());
@@ -1991,6 +1997,9 @@ abstract public class GeckoApp
                     alertCookie = "";
             }
             handleNotification(ACTION_ALERT_CALLBACK, alertName, alertCookie);
+        }
+        else if (ACTION_WIDGET.equals(action)) {
+            addTab();
         }
     }
 

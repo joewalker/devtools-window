@@ -51,6 +51,7 @@ public:
   bool SendFile(BlobParent* aBlob,
                 BluetoothReplyRunnable* aRunnable);
   bool StopSendingFile(BluetoothReplyRunnable* aRunnable);
+  void ConfirmReceivingFile(bool aConfirm, BluetoothReplyRunnable* aRunnable);
 
   void SendConnectRequest();
   void SendPutHeaderRequest(const nsAString& aFileName, int aFileSize);
@@ -76,9 +77,13 @@ private:
                       bool aReceived,
                       uint32_t aProcessedLength,
                       uint32_t aFileLength);
+  void ReceivingFileConfirmation(const nsString& aAddress,
+                                 const nsString& aFileName,
+                                 uint32_t aFileLength,
+                                 const nsString& aContentType);
   void ReplyToConnect();
   void ReplyToDisconnect();
-  void ReplyToPut(bool aFinal);
+  void ReplyToPut(bool aFinal, bool aContinue);
   virtual void OnConnectSuccess() MOZ_OVERRIDE;
   virtual void OnConnectError() MOZ_OVERRIDE;
   virtual void OnDisconnect() MOZ_OVERRIDE;
@@ -92,6 +97,9 @@ private:
   bool mAbortFlag;
   int mPacketLeftLength;
   nsString mConnectedDeviceAddress;
+  bool mReceiving;
+  bool mPutFinal;
+  bool mWaitingForConfirmationFlag;
 
   nsCOMPtr<nsIDOMBlob> mBlob;
   nsCOMPtr<nsIThread> mReadFileThread;

@@ -129,13 +129,11 @@ public class GeckoLayerClient
         mGeckoIsReady = true;
 
         mRootLayer = new VirtualLayer(new IntSize(mView.getWidth(), mView.getHeight()));
-        mLayerRenderer = new LayerRenderer(mView);
+        mLayerRenderer = mView.getRenderer();
 
         registerEventListener("Checkerboard:Toggle");
 
         mView.setListener(this);
-        mView.setLayerRenderer(mLayerRenderer);
-
         sendResizeEventIfNecessary(true);
 
         DisplayPortCalculator.initPrefs();
@@ -499,6 +497,12 @@ public class GeckoLayerClient
             // a full viewport update, which is fine because if browser.js has somehow moved to
             // be out of sync with this first-paint viewport, then we force them back in sync.
             abortPanZoomAnimation();
+
+            // Indicate that the document is about to be composited so the
+            // LayerView background can be removed.
+            if (mView.getPaintState() == LayerView.PAINT_START) {
+                mView.setPaintState(LayerView.PAINT_BEFORE_FIRST);
+            }
         }
         DisplayPortCalculator.resetPageState();
         mDrawTimingQueue.reset();

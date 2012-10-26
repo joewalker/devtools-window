@@ -1241,16 +1241,12 @@ nsWindow::OnSizeChanged(const gfxIntSize& aSize)
 {
     ALOG("nsWindow: %p OnSizeChanged [%d %d]", (void*)this, aSize.width, aSize.height);
 
-    SchedulePauseComposition();
-
     mBounds.width = aSize.width;
     mBounds.height = aSize.height;
 
     if (mWidgetListener) {
         mWidgetListener->WindowResized(this, aSize.width, aSize.height);
     }
-
-    ScheduleResumeComposition(aSize.width, aSize.height);
 }
 
 void
@@ -1421,6 +1417,10 @@ nsWindow::DispatchMultitouchEvent(nsTouchEvent &event, AndroidGeckoEvent *ae)
 
     event.modifiers = 0;
     event.time = ae->Time();
+    event.InitBasicModifiers(ae->IsCtrlPressed(),
+                             ae->IsAltPressed(),
+                             ae->IsShiftPressed(),
+                             ae->IsMetaPressed());
 
     int action = ae->Action() & AndroidMotionEvent::ACTION_MASK;
     if (action == AndroidMotionEvent::ACTION_UP ||
@@ -1956,6 +1956,7 @@ nsWindow::OnIMEEvent(AndroidGeckoEvent *ae)
                                         ae->Offset() + ae->Count());
             selEvent.mLength = uint32_t(NS_ABS(ae->Count()));
             selEvent.mReversed = ae->Count() >= 0 ? false : true;
+            selEvent.mExpandToClusterBoundary = false;
 
             DispatchEvent(&selEvent);
         }

@@ -443,6 +443,7 @@ public:
   nsresult
   SelectDevice()
   {
+    bool found = false;
     uint32_t count;
     if (mPicture || mVideo) {
       nsTArray<nsRefPtr<MediaEngineVideoSource> > videoSources;
@@ -455,7 +456,22 @@ public:
         ));
         return NS_ERROR_FAILURE;
       }
-      mVideoDevice = new MediaDevice(videoSources[0]);
+
+      // Pick the first available device.
+      for (uint32_t i = 0; i < count; i++) {
+        nsRefPtr<MediaEngineVideoSource> vSource = videoSources[i];
+        if (vSource->IsAvailable()) {
+          found = true;
+          mVideoDevice = new MediaDevice(videoSources[i]);
+        }
+      }
+
+      if (!found) {
+        NS_DispatchToMainThread(new ErrorCallbackRunnable(
+          mSuccess, mError, NS_LITERAL_STRING("HARDWARE_UNAVAILABLE"), mWindowID
+        ));
+        return NS_ERROR_FAILURE;
+      }
       LOG(("Selected video device"));
     }
     if (mAudio) {
@@ -469,7 +485,21 @@ public:
         ));
         return NS_ERROR_FAILURE;
       }
-      mAudioDevice = new MediaDevice(audioSources[0]);
+
+      for (uint32_t i = 0; i < count; i++) {
+        nsRefPtr<MediaEngineAudioSource> aSource = audioSources[i];
+        if (aSource->IsAvailable()) {
+          found = true;
+          mAudioDevice = new MediaDevice(audioSources[i]);
+        }
+      }
+
+      if (!found) {
+        NS_DispatchToMainThread(new ErrorCallbackRunnable(
+          mSuccess, mError, NS_LITERAL_STRING("HARDWARE_UNAVAILABLE"), mWindowID
+        ));
+        return NS_ERROR_FAILURE;
+      }
       LOG(("Selected audio device"));
     }
 
@@ -596,11 +626,23 @@ public:
     nsTArray<nsCOMPtr<nsIMediaDevice> > *devices =
       new nsTArray<nsCOMPtr<nsIMediaDevice> >;
 
+    /**
+     * We only display available devices in the UI for now. We can easily
+     * change this later, when we implement a more sophisticated UI that
+     * lets the user revoke a device currently held by another tab (or
+     * we decide to provide a stream from a device already allocated).
+     */
     for (i = 0; i < videoCount; i++) {
-      devices->AppendElement(new MediaDevice(videoSources[i]));
+      nsRefPtr<MediaEngineVideoSource> vSource = videoSources[i];
+      if (vSource->IsAvailable()) {
+        devices->AppendElement(new MediaDevice(vSource));
+      }
     }
     for (i = 0; i < audioCount; i++) {
-      devices->AppendElement(new MediaDevice(audioSources[i]));
+      nsRefPtr<MediaEngineAudioSource> aSource = audioSources[i];
+      if (aSource->IsAvailable()) {
+        devices->AppendElement(new MediaDevice(aSource));
+      }
     }
 
     NS_DispatchToMainThread(new DeviceSuccessCallbackRunnable(
@@ -633,6 +675,8 @@ MediaManager::GetUserMedia(bool aPrivileged, nsPIDOMWindow* aWindow,
 
   NS_ENSURE_TRUE(aParams, NS_ERROR_NULL_POINTER);
   NS_ENSURE_TRUE(aWindow, NS_ERROR_NULL_POINTER);
+  NS_ENSURE_TRUE(aOnError, NS_ERROR_NULL_POINTER);
+  NS_ENSURE_TRUE(aOnSuccess, NS_ERROR_NULL_POINTER);
 
   nsCOMPtr<nsIDOMGetUserMediaSuccessCallback> onSuccess(aOnSuccess);
   nsCOMPtr<nsIDOMGetUserMediaErrorCallback> onError(aOnError);
@@ -770,6 +814,7 @@ MediaManager::GetUserMedia(bool aPrivileged, nsPIDOMWindow* aWindow,
     if (!mMediaThread) {
       nsresult rv = NS_NewThread(getter_AddRefs(mMediaThread));
       NS_ENSURE_SUCCESS(rv, rv);
+      LOG(("New Media thread for gum"));
     }
     mMediaThread->Dispatch(gUMRunnable, NS_DISPATCH_NORMAL);
   } else {
@@ -820,6 +865,9 @@ MediaManager::GetUserMediaDevices(nsPIDOMWindow* aWindow,
   nsIDOMGetUserMediaErrorCallback* aOnError)
 {
   NS_ASSERTION(NS_IsMainThread(), "Only call on main thread");
+
+  NS_ENSURE_TRUE(aOnError, NS_ERROR_NULL_POINTER);
+  NS_ENSURE_TRUE(aOnSuccess, NS_ERROR_NULL_POINTER);
 
   nsCOMPtr<nsIGetUserMediaDevicesSuccessCallback> onSuccess(aOnSuccess);
   nsCOMPtr<nsIDOMGetUserMediaErrorCallback> onError(aOnError);
@@ -910,8 +958,11 @@ MediaManager::Observe(nsISupports* aSubject, const char* aTopic,
 
     // Reuse the same thread to save memory.
     if (!mMediaThread) {
+      LOG(("New Media thread for gum on allow"));
       nsresult rv = NS_NewThread(getter_AddRefs(mMediaThread));
       NS_ENSURE_SUCCESS(rv, rv);
+    } else {
+      LOG(("Reused Media thread for gum on allow"));
     }
 
     if (aSubject) {

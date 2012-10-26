@@ -75,6 +75,7 @@ Toolbox.prototype = {
         let tool = defs.get(toolId);
 
         this._buildTabForTool(tool);
+        this._addToolToMenu(tool);
         break;
 
       /**
@@ -184,10 +185,12 @@ Toolbox.prototype = {
    * Open the toolbox
    */
   open: function TBOX_open() {
-    this._host.createUI(function (iframe) {
+    this._host.once("ready", function(event, iframe) {
       iframe.addEventListener("DOMContentLoaded", this._onLoad, true);
       iframe.setAttribute("src", this._URL);
     }.bind(this));
+
+    this._host.open();
   },
 
   /**
@@ -242,7 +245,7 @@ Toolbox.prototype = {
     let toolbarSpec = CommandUtils.getCommandbarSpec("devtools.toolbox.toolbarspec");
     let requisition = window.DeveloperToolbar.display.requisition;
 
-    let buttons = CommandUtils.createButtons(toolbarSpec, doc, requisition);
+    let buttons = CommandUtils.createButtons(toolbarSpec, this.doc, requisition);
 
     let container = this.doc.getElementById("toolbox-buttons");
     buttons.forEach(function(button) {
@@ -323,8 +326,15 @@ Toolbox.prototype = {
     if (iframe.src != definition.url) {
       let boundLoad = function() {
         iframe.removeEventListener("DOMContentLoaded", boundLoad, true);
-        let instance = definition.build(iframe.contentWindow, this);
-        this._toolPanels.set(id, instance);
+        let panel = definition.build(iframe.contentWindow, this);
+        this._toolPanels.set(id, panel);
+        if (panel.isReady) {
+          this.emit(id + "-ready", panel);
+        } else {
+          panel.once("ready", function(event) {
+            this.emit(id + "-ready", panel);
+          }.bind(this));
+        }
       }.bind(this);
 
       iframe.addEventListener("DOMContentLoaded", boundLoad, true);
@@ -366,14 +376,13 @@ Toolbox.prototype = {
 
     let newHost = this._createHost(hostType);
 
-    newHost.createUI(function(iframe) {
+    newHost.once("ready", function(event, iframe) {
       // change toolbox document's parent to the new host
       iframe.QueryInterface(Components.interfaces.nsIFrameLoaderOwner);
       iframe.swapFrameLoaders(this.frame);
 
-      // destroy old host's UI
-      this._host.destroyUI();
       this._host.off("window-closed", this.destroy);
+      this._host.destroy();
 
       this._host = newHost;
 
@@ -383,6 +392,8 @@ Toolbox.prototype = {
 
       this.emit("host-changed");
     }.bind(this));
+
+    newHost.open();
   },
 
   /**
@@ -429,7 +440,7 @@ Toolbox.prototype = {
       panel.destroy();
     }
 
-    this._host.destroyUI();
+    this._host.destroy();
 
     gDevTools.off("tool-registered", this._handleEvent);
     gDevTools.off("tool-unregistered", this._handleEvent);
