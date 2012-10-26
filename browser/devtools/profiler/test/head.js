@@ -23,22 +23,18 @@ function loadTab(url, callback) {
 }
 
 function openProfiler(tab, callback) {
-  function onOpen(subject, topic) {
-    Services.obs.removeObserver(onOpen, "jsprofiler-created");
-    executeSoon(callback);
-  }
-
-  Services.obs.addObserver(onOpen, "jsprofiler-created", false);
   gDevTools.openDefaultToolbox(tab, "jsprofiler");
+
+  let tb = gDevTools.getToolboxForTarget(tab);
+  tb.once("jsprofiler-ready", callback);
 }
 
 function closeProfiler(tab, callback) {
-  function onClose(subhect, topic) {
-    Services.obs.removeObserver(onClose, "jsprofiler-destroyed");
+  let panel = gDevTools.getPanelForTarget("jsprofiler", tab);
+  panel.once("destroyed", function () {
     executeSoon(callback);
-  }
+  });
 
-  Services.obs.addObserver(onClose, "jsprofiler-destroyed", false);
   gDevTools.closeToolbox(tab);
 }
 

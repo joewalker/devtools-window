@@ -9,8 +9,8 @@ const Cu = Components.utils;
 const EXPORTED_SYMBOLS = ["ProfilerDefinition"];
 
 Cu.import("resource:///modules/devtools/ProfilerController.jsm");
+Cu.import("resource://gre/modules/devtools/EventEmitter.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
   "resource:///modules/devtools/gDevTools.jsm");
@@ -44,23 +44,29 @@ const ProfilerDefinition = {
 };
 
 function ProfilerPanel(frame, toolbox) {
+  this.isReady = false;
   this.frame = frame;
   this.window = frame.window;
   this.document = frame.document;
   this.target = toolbox.target;
   this.controller = new ProfilerController();
 
+  new EventEmitter(this);
+
   this.controller.connect(function onConnect() {
     let toggle = this.document.getElementById("profiler-toggle");
     toggle.addEventListener("click", this.onToggle.bind(this), false);
     toggle.removeAttribute("disabled");
-    Services.obs.notifyObservers(null, "jsprofiler-created", null);
+    this.isReady = true;
+    this.emit("ready");
   }.bind(this));
 }
 
 ProfilerPanel.prototype = {
   destroy: function PP_destroy() {
-    Services.obs.notifyObservers(null, "jsprofiler-destroyed", null);
+    // FIXME: Need an actualt destroy function that closes
+    // connections and all that.
+    this.emit("destroyed");
   },
 
   parseProfileData: function PP_parseProfileData(data) {
@@ -86,7 +92,7 @@ ProfilerPanel.prototype = {
         return wait();
       }
 
-      Services.obs.notifyObservers(null, "jsprofiler-parsed", null);
+      this.emit("parsed");
     }.bind(this);
 
     poll();
@@ -110,7 +116,7 @@ ProfilerPanel.prototype = {
 
           this.parseProfileData(data);
           el.setAttribute("label", "Start");
-          Services.obs.notifyObservers(null, "jsprofiler-stopped", null);
+          this.emit("stopped");
         }.bind(this));
 
         return;
@@ -123,8 +129,8 @@ ProfilerPanel.prototype = {
         }
 
         el.setAttribute("label", "Stop");
-        Services.obs.notifyObservers(null, "jsprofiler-started", null);
-      });
+        this.emit("started");
+      }.bind(this));
     }.bind(this));
   }
 };

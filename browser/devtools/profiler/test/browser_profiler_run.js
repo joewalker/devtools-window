@@ -12,9 +12,9 @@ function test() {
     gTab = tab;
     gPanel = panel;
 
-    Services.obs.addObserver(onStart, "jsprofiler-started", false);
-    Services.obs.addObserver(onStop, "jsprofiler-stopped", false);
-    Services.obs.addObserver(onParsed, "jsprofiler-parsed", false);
+    panel.once("started", onStart);
+    panel.once("stopped", onStop);
+    panel.once("parsed", onParsed);
 
     testUI();
   });
@@ -48,8 +48,6 @@ function testUI() {
 }
 
 function onStart() {
-  Services.obs.removeObserver(onStart, "jsprofiler-started");
-
   let toggle = gPanel.document.getElementById("profiler-toggle");
   ok(toggle.getAttribute("label") == "Stop", "Toggle button says 'Stop'");
 
@@ -60,8 +58,6 @@ function onStart() {
 }
 
 function onStop() {
-  Services.obs.removeObserver(onStop, "jsprofiler-stopped");
-
   let toggle = gPanel.document.getElementById("profiler-toggle");
   ok(toggle.getAttribute("label") == "Start", "Toggle button says 'Start' again");
 
@@ -72,8 +68,6 @@ function onStop() {
 }
 
 function onParsed() {
-  Services.obs.removeObserver(onParsed, "jsprofiler-parsed");
-
   function assertSample() {
     let iframe = gPanel.document.getElementById("profiler-cleo");
     let sample = iframe.contentWindow.document
