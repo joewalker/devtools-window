@@ -4,16 +4,21 @@
 
 "use strict";
 
+const Cu = Components.utils;
 const EXPORTED_SYMBOLS = [ "defaultTools" ];
 
-Components.utils.import("resource:///modules/WebConsolePanel.jsm");
-Components.utils.import("resource:///modules/devtools/DebuggerPanel.jsm");
-Components.utils.import("resource:///modules/devtools/StyleEditorPanel.jsm");
-Components.utils.import("resource:///modules/devtools/ProfilerPanel.jsm");
+Cu.import("resource:///modules/WebConsolePanel.jsm");
+Cu.import("resource:///modules/devtools/DebuggerPanel.jsm");
+Cu.import("resource:///modules/devtools/StyleEditorPanel.jsm");
+Cu.import("resource:///modules/devtools/ProfilerPanel.jsm");
+Cu.import("resource://gre/modules/Services.jsm");
 
 let defaultTools = [
   StyleEditorDefinition,
   WebConsoleDefinition,
   DebuggerDefinition,
-  ProfilerDefinition,
 ];
+
+if (Services.prefs.getBoolPref("devtools.profiler.enabled")) {
+  defaultTools.push(ProfilerDefinition);
+}

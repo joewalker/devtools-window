@@ -1,6 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+const PROFILER_ENABLED = "devtools.profiler.enabled";
+
 function loadTab(url, callback) {
   let tab = gBrowser.addTab();
   gBrowser.selectedTab = tab;
@@ -41,6 +43,8 @@ function closeProfiler(tab, callback) {
 }
 
 function setUp(url, callback=function(){}) {
+  Services.prefs.setBoolPref(PROFILER_ENABLED, true);
+
   loadTab(url, function onTabLoad(tab, browser) {
     openProfiler(tab, function onProfilerOpen() {
       let panel = gDevTools.getPanelForTarget("jsprofiler", tab);
@@ -58,5 +62,6 @@ function tearDown(tab, callback=function(){}) {
     }
 
     finish();
+    Services.prefs.setBoolPref(PROFILER_ENABLED, false);
   });
 }
