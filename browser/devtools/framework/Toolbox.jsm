@@ -28,7 +28,8 @@ function Toolbox(target, hostType, selectedTool) {
   this._toolPanels = new Map();
 
   this._onLoad = this._onLoad.bind(this);
-  this._handleEvent = this._handleEvent.bind(this);
+  this._toolRegistered = this._toolRegistered.bind(this);
+  this._toolUnregistered = this._toolUnregistered.bind(this);
   this.destroy = this.destroy.bind(this);
 
   if (!hostType) {
@@ -47,8 +48,8 @@ function Toolbox(target, hostType, selectedTool) {
 
   new EventEmitter(this);
 
-  gDevTools.on("tool-registered", this._handleEvent);
-  gDevTools.on("tool-unregistered", this._handleEvent);
+  gDevTools.on("tool-registered", this._toolRegistered);
+  gDevTools.on("tool-unregistered", this._toolUnregistered);
 }
 
 Toolbox.prototype = {
@@ -57,66 +58,6 @@ Toolbox.prototype = {
   _prefs: {
     LAST_HOST: "devtools.toolbox.host",
     LAST_TOOL: "devtools.toolbox.selectedTool"
-  },
-
-  _handleEvent: function TB_handleEvent(aEventId, ...args) {
-    let toolId;
-
-    switch(aEventId) {
-      /**
-       * Handler for the tool-registered event.
-       * @param  {String} aToolId
-       *         The ID of the registered tool.
-       */
-      case "tool-registered":
-        toolId = args[0];
-
-        let defs = gDevTools.getToolDefinitions();
-        let tool = defs.get(toolId);
-
-        this._buildTabForTool(tool);
-        this._addToolToMenu(tool);
-        break;
-
-      /**
-       * Handler for the tool-unregistered event.
-       * @param  {String} aToolId
-       *         The ID of the unregistered tool.
-       */
-      case "tool-unregistered":
-        toolId = args[0];
-
-        let radio = this.doc.getElementById("toolbox-tab-" + toolId);
-        let panel = this.doc.getElementById("toolbox-panel-" + toolId);
-
-        if (this._currentToolId == toolId) {
-          let nextToolName = null;
-          if (radio.nextSibling) {
-            nextToolName = radio.nextSibling.getAttribute("toolid");
-          }
-          if (radio.previousSibling) {
-            nextToolName = radio.previousSibling.getAttribute("toolid");
-          }
-          if (nextToolName) {
-            this.selectTool(nextToolName);
-          }
-        }
-
-        if (radio) {
-          radio.parentNode.removeChild(radio);
-        }
-
-        if (panel) {
-          panel.parentNode.removeChild(panel);
-        }
-
-        if (this._toolPanels.has(toolId)) {
-          let instance = this._toolPanels.get(toolId);
-          instance.destroy();
-          this._toolPanels.delete(toolId);
-        }
-        break;
-    }
   },
 
   /**
@@ -168,7 +109,7 @@ Toolbox.prototype = {
   },
 
   /**
-   * Get the iframe containing the toolbox UI
+   * Get the iframe containing the toolbox UI.
    */
   get frame() {
     return this._host.frame;
@@ -424,6 +365,60 @@ Toolbox.prototype = {
   },
 
   /**
+   * Handler for the tool-registered event.
+   * @param  {string} event
+   *         Name of the event ("tool-registered")
+   * @param  {string} toolId
+   *         Id of the tool that was registered
+   */
+  _toolRegistered: function TBOX_toolRegistered(event, toolId) {
+    let defs = gDevTools.getToolDefinitions();
+    let tool = defs.get(toolId);
+
+    this._buildTabForTool(tool);
+  },
+
+  /**
+   * Handler for the tool-unregistered event.
+   * @param  {string} event
+   *         Name of the event ("tool-unregistered")
+   * @param  {string} toolId
+   *         Id of the tool that was unregistered
+   */
+  _toolUnregistered: function TBOX_toolUnregistered(event, toolId) {
+    let radio = this.doc.getElementById("toolbox-tab-" + toolId);
+    let panel = this.doc.getElementById("toolbox-panel-" + toolId);
+
+    if (this._currentToolId == toolId) {
+      let nextToolName = null;
+      if (radio.nextSibling) {
+        nextToolName = radio.nextSibling.getAttribute("toolid");
+      }
+      if (radio.previousSibling) {
+        nextToolName = radio.previousSibling.getAttribute("toolid");
+      }
+      if (nextToolName) {
+        this.selectTool(nextToolName);
+      }
+    }
+
+    if (radio) {
+      radio.parentNode.removeChild(radio);
+    }
+
+    if (panel) {
+      panel.parentNode.removeChild(panel);
+    }
+
+    if (this._toolPanels.has(toolId)) {
+      let instance = this._toolPanels.get(toolId);
+      instance.destroy();
+      this._toolPanels.delete(toolId);
+    }
+  },
+
+
+  /**
    * Get the toolbox's notification box
    *
    * @return The notification box element.
@@ -442,8 +437,8 @@ Toolbox.prototype = {
 
     this._host.destroy();
 
-    gDevTools.off("tool-registered", this._handleEvent);
-    gDevTools.off("tool-unregistered", this._handleEvent);
+    gDevTools.off("tool-registered", this._toolRegistered);
+    gDevTools.off("tool-unregistered", this._toolUnregistered);
 
     this.emit("destroyed");
   }
