@@ -20,8 +20,15 @@ const EXPORTED_SYMBOLS = [ "Toolbox" ];
 
 /**
  * A "Toolbox" is the component that holds all the tools for one specific
- * target. Visually, it's a document (about:devtools) that includes the tools
- * tabs and all the iframes where the tool panels will be living in.
+ * target. Visually, it's a document that includes the tools tabs and all
+ * the iframes where the tool panels will be living in.
+ *
+ * @param {object} target
+ *        The object the toolbox is debugging.
+ * @param {DevTools.HostType} hostType
+ *        Type of host that will host the toolbox (e.g. sidebar, window)
+ * @param {string} selectedTool
+ *        Tool to select initially
  */
 function Toolbox(target, hostType, selectedTool) {
   this._target = target;
@@ -62,6 +69,9 @@ Toolbox.prototype = {
 
   /**
    * Returns a *copy* of the _toolPanels collection.
+   *
+   * @return {Map} panels
+   *         All the running panels in the toolbox
    */
   getToolPanels: function TB_getToolPanels() {
     let panels = new Map();
@@ -81,8 +91,8 @@ Toolbox.prototype = {
     return this._target;
   },
 
-  set target(aValue) {
-    this._target = aValue;
+  set target(value) {
+    this._target = value;
   },
 
   /**
@@ -93,8 +103,8 @@ Toolbox.prototype = {
     return this._host.type;
   },
 
-  set hostType(aValue) {
-    this._switchToHost(aValue);
+  set hostType(value) {
+    this._switchToHost(value);
   },
 
   /**
@@ -104,8 +114,8 @@ Toolbox.prototype = {
     return this._currentToolId;
   },
 
-  set currentToolId(aValue) {
-    this._currentToolId = aValue;
+  set currentToolId(value) {
+    this._currentToolId = value;
   },
 
   /**
@@ -174,6 +184,9 @@ Toolbox.prototype = {
 
   /**
    * Add buttons to the UI as specified in the devtools.window.toolbarspec pref
+   *
+   * @param {iframe} frame
+   *        The iframe to contain the buttons
    */
   _buildButtons: function TBOX_buildButtons(frame) {
     let window = frame.ownerDocument.defaultView;
@@ -197,15 +210,14 @@ Toolbox.prototype = {
   /**
    * Build a tab for one tool definition and add to the toolbox
    *
-   * @param {string} aToolDefinition
+   * @param {string} toolDefinition
    *        Tool definition of the tool to build a tab for.
    */
-  _buildTabForTool: function TBOX_buildTabForTool(aToolDefinition) {
+  _buildTabForTool: function TBOX_buildTabForTool(toolDefinition) {
     let tabs = this.doc.getElementById("toolbox-tabs");
     let deck = this.doc.getElementById("toolbox-deck");
 
-    let definition = aToolDefinition;
-    let id = definition.id;
+    let id = toolDefinition.id;
 
     let radio = this.doc.createElement("radio");
     radio.setAttribute("label", definition.label);
@@ -290,8 +302,11 @@ Toolbox.prototype = {
   /**
    * Create a host object based on the given host type.
    *
-   * @param string hostType
+   * @param {string} hostType
    *        The host type of the new host object
+   *
+   * @return {Host} host
+   *        The created host object
    */
   _createHost: function TBOX_createHost(hostType) {
     let hostTab = this._getHostTab();
@@ -309,6 +324,9 @@ Toolbox.prototype = {
   /**
    * Switch to a new host for the toolbox UI. E.g.
    * bottom, sidebar, separate window.
+   *
+   * @param {string} hostType
+   *        The host type of the new host object
    */
   _switchToHost: function TBOX_switchToHost(hostType) {
     if (hostType == this._host.type) {
