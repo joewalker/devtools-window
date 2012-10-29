@@ -1043,6 +1043,9 @@ pref("devtools.debugger.ui.variables-width", 300);
 pref("devtools.debugger.ui.variables-pane-visible", true);
 pref("devtools.debugger.ui.non-enum-visible", true);
 
+// Enable the Profiler
+pref("devtools.profiler.enabled", true);
+
 // Enable the style inspector
 pref("devtools.styleinspector.enabled", true);
 
