@@ -51,7 +51,7 @@ gcli.addCommand({
     debuggers.push(dbg);
 
     let tab = context.environment.chromeDocument.defaultView.gBrowser.selectedTab;
-    gDevTools.openDefaultToolbox(tab, "webconsole");
+    gDevTools.openToolboxForTab(tab, "webconsole");
 
     return gcli.lookup("calllogStartReply");
   },

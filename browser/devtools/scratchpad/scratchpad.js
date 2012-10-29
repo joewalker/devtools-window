@@ -1011,7 +1011,7 @@ var Scratchpad = {
    */
   openWebConsole: function SP_openWebConsole()
   {
-    gDevTools.openDefaultToolbox(this.gBrowser.selectedTab, "webconsole");
+    gDevTools.openToolboxForTab(this.gBrowser.selectedTab, "webconsole");
     this.browserWindow.focus();
   },
 

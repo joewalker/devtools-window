@@ -107,7 +107,7 @@ function test() {
 
     oneTimeObserve("web-console-created", _onWebConsoleOpen);
 
-    gDevTools.openDefaultToolbox(tab, "webconsole");
+    gDevTools.openToolboxForTab(tab, "webconsole");
   }
 
   function onWebConsoleOpen(hud) {

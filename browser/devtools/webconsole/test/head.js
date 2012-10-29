@@ -152,7 +152,7 @@ function openConsole(aTab, aCallback)
     Services.obs.addObserver(onWebConsoleOpen, "web-console-created", false);
   }
 
-  gDevTools.openDefaultToolbox(aTab || tab, "webconsole");
+  gDevTools.openToolboxForTab(aTab || tab, "webconsole");
 }
 
 /**

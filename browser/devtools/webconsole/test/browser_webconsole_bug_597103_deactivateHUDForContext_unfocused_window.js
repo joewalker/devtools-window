@@ -44,18 +44,18 @@ function tab2Loaded(aEvent) {
 
   function openConsoles() {
     try {
-      gDevTools.openDefaultToolbox(tab1, "webconsole");
+      gDevTools.openToolboxForTab(tab1, "webconsole");
     }
     catch (ex) {
-      ok(false, "gDevTools.openDefaultToolbox(tab1) exception: " + ex);
+      ok(false, "gDevTools.openToolboxForTab(tab1) exception: " + ex);
       noErrors = false;
     }
 
     try {
-      gDevTools.openDefaultToolbox(tab2, "webconsole");
+      gDevTools.openToolboxForTab(tab2, "webconsole");
     }
     catch (ex) {
-      ok(false, "gDevTools.openDefaultToolbox(tab2) exception: " + ex);
+      ok(false, "gDevTools.openToolboxForTab(tab2) exception: " + ex);
       noErrors = false;
     }
   }
