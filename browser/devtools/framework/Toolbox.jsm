@@ -220,7 +220,7 @@ Toolbox.prototype = {
     let id = toolDefinition.id;
 
     let radio = this.doc.createElement("radio");
-    radio.setAttribute("label", definition.label);
+    radio.setAttribute("label", toolDefinition.label);
     radio.className = "toolbox-tab devtools-tab";
     radio.id = "toolbox-tab-" + id;
     radio.setAttribute("toolid", id);
