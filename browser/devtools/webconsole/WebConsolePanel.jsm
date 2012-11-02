@@ -42,7 +42,7 @@ const WebConsoleDefinition = {
   url: "chrome://browser/content/devtools/webconsole.xul",
   label: l10n("ToolboxWebconsole.label"),
   isTargetSupported: function(target) {
-    return target.type == DevTools.TargetType.TAB;
+    return !target.isRemote && !target.isChrome;
   },
   build: function(iframeWindow, toolbox) {
     return new WebConsolePanel(iframeWindow, toolbox);
@@ -57,7 +57,7 @@ function WebConsolePanel(iframeWindow, toolbox) {
   this._toolbox = toolbox;
   new EventEmitter(this);
 
-  let tab = this._toolbox.target.value;
+  let tab = this._toolbox.target.tab;
   let parentDoc = iframeWindow.document.defaultView.parent.document;
   let iframe = parentDoc.getElementById("toolbox-panel-iframe-webconsole");
   this.hud = HUDService.activateHUDForContext(tab, iframe);
@@ -72,8 +72,8 @@ WebConsolePanel.prototype = {
 
   destroy: function WCP_destroy()
   {
-    let tab = this._toolbox.target.value;
-    HUDService.deactivateHUDForContext(tab);
+    let tab = this._toolbox.target.tab;
+    HUDService.deactivateHUDForContext(tab, false);
   },
 
   setReady: function WCP_setReady()

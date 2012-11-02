@@ -35,14 +35,7 @@ const DebuggerDefinition = {
   label: l10n("ToolboxDebugger.label"),
 
   isTargetSupported: function(target) {
-    switch (target.type) {
-      case gDevTools.TargetType.TAB:
-        return true;
-      case gDevTools.TargetType.REMOTE:
-      case gDevTools.TargetType.CHROME:
-      default:
-        return false;
-    }
+    return !target.isRemote && !target.isChrome;
   },
 
   build: function(iframeWindow, toolbox) {
@@ -65,15 +58,11 @@ function DebuggerPanel(iframeWindow, toolbox) {
 
   new EventEmitter(this);
 
-  if (this.target.type == gDevTools.TargetType.TAB) {
-    this._ensureOnlyOneRunningDebugger();
-    if (!DebuggerServer.initialized) {
-      // Always allow connections from nsIPipe transports.
-      DebuggerServer.init(function() true);
-      DebuggerServer.addBrowserActors();
-    }
-  } else {
-    throw "Unsupported target";
+  this._ensureOnlyOneRunningDebugger();
+  if (!DebuggerServer.initialized) {
+    // Always allow connections from nsIPipe transports.
+    DebuggerServer.init(function() true);
+    DebuggerServer.addBrowserActors();
   }
 }
 

@@ -4,6 +4,10 @@
 
 let toolbox;
 
+let temp = [];
+Cu.import("resource:///modules/devtools/Toolbox.jsm", temp);
+let Target = temp.Target;
+
 function test()
 {
   waitForExplicitFinish();
@@ -19,10 +23,7 @@ function test()
 
 function openToolbox()
 {
-  let target = {
-    type: gDevTools.TargetType.TAB,
-    value: gBrowser.selectedTab
-  }
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
   toolbox = gDevTools.openToolbox(target);
 
   toolbox.once("ready", testRegister);

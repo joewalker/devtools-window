@@ -3,6 +3,8 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 let temp = {}
+Cu.import("resource:///modules/devtools/Target.jsm", temp);
+let Target = temp.Target;
 Cu.import("resource:///modules/devtools/gDevTools.jsm", temp);
 let DevTools = temp.DevTools;
 
