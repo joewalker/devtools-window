@@ -54,6 +54,7 @@
 #include "TextOverflow.h"
 #include "nsStyleStructInlines.h"
 #include "mozilla/Util.h" // for DebugOnly
+#include "mozilla/Likely.h"
 
 #ifdef IBMBIDI
 #include "nsBidiPresUtils.h"
@@ -932,7 +933,7 @@ nsBlockFrame::Reflow(nsPresContext*           aPresContext,
            aReflowState.ComputedWidth(), aReflowState.ComputedHeight());
   }
   AutoNoisyIndenter indent(gNoisy);
-  PRTime start = LL_ZERO; // Initialize these variablies to silence the compiler.
+  PRTime start = 0; // Initialize these variablies to silence the compiler.
   int32_t ctc = 0;        // We only use these if they are set (gLameReflowMetrics).
   if (gLameReflowMetrics) {
     start = PR_Now();
@@ -2543,7 +2544,7 @@ nsBlockFrame::PullFrameFrom(nsBlockReflowState&  aState,
       "mPrevChild should be the LastChild of the line we are adding to");
     // The frame is being pulled from a next-in-flow; therefore we
     // need to add it to our sibling list.
-    if (NS_LIKELY(!aFromOverflowLine)) {
+    if (MOZ_LIKELY(!aFromOverflowLine)) {
       NS_ASSERTION(&aFromFrameList == &aFromContainer->mFrames,
                    "must be normal flow if not overflow line");
       NS_ASSERTION(aFromLine == aFromContainer->mLines.begin(),
@@ -6098,7 +6099,7 @@ nsBlockFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
              aDirtyRect.x, aDirtyRect.y, aDirtyRect.width, aDirtyRect.height,
              ca.x, ca.y, ca.width, ca.height);
   }
-  PRTime start = LL_ZERO; // Initialize these variables to silence the compiler.
+  PRTime start = 0; // Initialize these variables to silence the compiler.
   if (gLamePaintMetrics) {
     start = PR_Now();
     drawnLines = 0;

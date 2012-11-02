@@ -20,6 +20,7 @@
 
 #include "mozilla/dom/PBrowserChild.h"
 #include "mozilla/dom/TabChild.h"
+#include "mozilla/Likely.h"
 #include "mozilla/Util.h"
 
 #ifdef XP_WIN
@@ -1523,7 +1524,15 @@ PresShell::AddAuthorSheet(nsISupports* aSheet)
     return;
   }
 
-  mStyleSet->AppendStyleSheet(nsStyleSet::eDocSheet, sheet);
+  // Document specific "additional" Author sheets should be stronger than the ones
+  // added with the StyleSheetService.
+  nsIStyleSheet* firstAuthorSheet = mDocument->FirstAdditionalAuthorSheet();
+  if (firstAuthorSheet) {
+    mStyleSet->InsertStyleSheetBefore(nsStyleSet::eDocSheet, sheet, firstAuthorSheet);
+  } else {
+    mStyleSet->AppendStyleSheet(nsStyleSet::eDocSheet, sheet);  
+  }
+
   ReconstructStyleData();
 }
 
@@ -1738,7 +1747,7 @@ PresShell::Initialize(nscoord aWidth, nscoord aHeight)
 
   // Note: when the frame was created above it had the NS_FRAME_IS_DIRTY bit
   // set, but XBL processing could have caused a reflow which clears it.
-  if (NS_LIKELY(rootFrame->GetStateBits() & NS_FRAME_IS_DIRTY)) {
+  if (MOZ_LIKELY(rootFrame->GetStateBits() & NS_FRAME_IS_DIRTY)) {
     // Unset the DIRTY bits so that FrameNeedsReflow() will work right.
     rootFrame->RemoveStateBits(NS_FRAME_IS_DIRTY |
                                NS_FRAME_HAS_DIRTY_CHILDREN);
@@ -2215,7 +2224,9 @@ PresShell::ScrollCharacter(bool aRight)
   nsIScrollableFrame* scrollFrame =
     GetFrameToScrollAsScrollable(nsIPresShell::eHorizontal);
   if (scrollFrame) {
-    scrollFrame->ScrollBy(nsIntPoint(aRight ? 1 : -1, 0),
+    int32_t h = Preferences::GetInt("toolkit.scrollbox.horizontalScrollDistance",
+                                    NS_DEFAULT_HORIZONTAL_SCROLL_DISTANCE);
+    scrollFrame->ScrollBy(nsIntPoint(aRight ? h : -h, 0),
                           nsIScrollableFrame::LINES,
                           nsIScrollableFrame::SMOOTH);
   }
@@ -3290,7 +3301,7 @@ PresShell::DoScrollContentIntoView()
 
   ScrollIntoViewData* data = static_cast<ScrollIntoViewData*>(
     mContentToScrollTo->GetProperty(nsGkAtoms::scrolling));
-  if (NS_UNLIKELY(!data)) {
+  if (MOZ_UNLIKELY(!data)) {
     mContentToScrollTo = nullptr;
     return;
   }
@@ -3640,7 +3651,7 @@ nsresult
 PresShell::PostReflowCallback(nsIReflowCallback* aCallback)
 {
   void* result = AllocateMisc(sizeof(nsCallbackEventRequest));
-  if (NS_UNLIKELY(!result)) {
+  if (MOZ_UNLIKELY(!result)) {
     return NS_ERROR_OUT_OF_MEMORY;
   }
   nsCallbackEventRequest* request = (nsCallbackEventRequest*)result;
@@ -5216,32 +5227,34 @@ PresShell::ProcessSynthMouseMoveEvent(bool aFromScroll)
 class nsAutoNotifyDidPaint
 {
 public:
-  nsAutoNotifyDidPaint(bool aWillSendDidPaint)
-    : mWillSendDidPaint(aWillSendDidPaint)
+  nsAutoNotifyDidPaint(PresShell* aShell, uint32_t aFlags)
+    : mShell(aShell), mFlags(aFlags)
   {
   }
   ~nsAutoNotifyDidPaint()
   {
-    if (!mWillSendDidPaint && nsContentUtils::XPConnect()) {
+    mShell->GetPresContext()->NotifyDidPaintForSubtree(mFlags);
+    if (!(mFlags & nsIPresShell::PAINT_WILL_SEND_DID_PAINT) &&
+        nsContentUtils::XPConnect()) {
       nsContentUtils::XPConnect()->NotifyDidPaint();
     }
   }
 
 private:
-  bool mWillSendDidPaint;
+  PresShell* mShell;
+  uint32_t mFlags;
 };
 
 void
-PresShell::Paint(nsIView*           aViewToPaint,
-                 const nsRegion&    aDirtyRegion,
-                 PaintType          aType,
-                 bool               aWillSendDidPaint)
+PresShell::Paint(nsIView*        aViewToPaint,
+                 const nsRegion& aDirtyRegion,
+                 uint32_t        aFlags)
 {
   SAMPLE_LABEL("Paint", "PresShell::Paint");
   NS_ASSERTION(!mIsDestroying, "painting a destroyed PresShell");
   NS_ASSERTION(aViewToPaint, "null view");
 
-  nsAutoNotifyDidPaint notifyDidPaint(aWillSendDidPaint);
+  nsAutoNotifyDidPaint notifyDidPaint(this, aFlags);
 
   nsPresContext* presContext = GetPresContext();
   AUTO_LAYOUT_PHASE_ENTRY_POINT(presContext, Paint);
@@ -5265,7 +5278,7 @@ PresShell::Paint(nsIView*           aViewToPaint,
     // draws the window title bar on Mac), because a) it won't work
     // and b) below we don't want to clear NS_FRAME_UPDATE_LAYER_TREE,
     // that will cause us to forget to update the real layer manager!
-    if (aType == PaintType_Composite) {
+    if (!(aFlags & PAINT_LAYERS)) {
       if (layerManager->HasShadowManager()) {
         return;
       }
@@ -5288,7 +5301,8 @@ PresShell::Paint(nsIView*           aViewToPaint,
                                          LayerProperties::CloneFrom(layerManager->GetRoot()) : 
                                          nullptr);
 
-      if (layerManager->EndEmptyTransaction((aType == PaintType_NoComposite) ? LayerManager::END_NO_COMPOSITE : LayerManager::END_DEFAULT)) {
+      if (layerManager->EndEmptyTransaction((aFlags & PAINT_COMPOSITE) ?
+            LayerManager::END_DEFAULT : LayerManager::END_NO_COMPOSITE)) {
         nsIntRect invalid;
         if (props) {
           invalid = props->ComputeDifferences(layerManager->GetRoot(), computeInvalidFunc);
@@ -5309,7 +5323,6 @@ PresShell::Paint(nsIView*           aViewToPaint,
         }
 
         frame->UpdatePaintCountForPaintedPresShells();
-        presContext->NotifyDidPaintForSubtree();
         return;
       }
     }
@@ -5323,7 +5336,7 @@ PresShell::Paint(nsIView*           aViewToPaint,
 
   nscolor bgcolor = ComputeBackstopColor(aViewToPaint);
   uint32_t flags = nsLayoutUtils::PAINT_WIDGET_LAYERS | nsLayoutUtils::PAINT_EXISTING_TRANSACTION;
-  if (aType == PaintType_NoComposite) {
+  if (!(aFlags & PAINT_COMPOSITE)) {
     flags |= nsLayoutUtils::PAINT_NO_COMPOSITE;
   }
 
@@ -5338,9 +5351,6 @@ PresShell::Paint(nsIView*           aViewToPaint,
     nsLayoutUtils::PaintFrame(nullptr, frame, aDirtyRegion, bgcolor, flags);
 
     frame->EndDeferringInvalidatesForDisplayRoot();
-    if (aType != PaintType_Composite) {
-      presContext->NotifyDidPaintForSubtree();
-    }
     return;
   }
 
@@ -5354,13 +5364,8 @@ PresShell::Paint(nsIView*           aViewToPaint,
     root->SetVisibleRegion(bounds);
     layerManager->SetRoot(root);
   }
-  layerManager->EndTransaction(NULL, NULL, aType == PaintType_NoComposite ?
-                                             LayerManager::END_NO_COMPOSITE :
-                                             LayerManager::END_DEFAULT);
-
-  if (aType != PaintType_Composite) {
-    presContext->NotifyDidPaintForSubtree();
-  }
+  layerManager->EndTransaction(NULL, NULL, (aFlags & PAINT_COMPOSITE) ?
+    LayerManager::END_DEFAULT : LayerManager::END_NO_COMPOSITE);
 }
 
 // static
@@ -5394,7 +5399,7 @@ nsIPresShell::SetCapturingContent(nsIContent* aContent, uint8_t aFlags)
 nsIFrame*
 PresShell::GetCurrentEventFrame()
 {
-  if (NS_UNLIKELY(mIsDestroying)) {
+  if (MOZ_UNLIKELY(mIsDestroying)) {
     return nullptr;
   }
     
@@ -7041,11 +7046,6 @@ PresShell::WillPaint(bool aWillSendDidPaint)
   // interruptible; if we can't do all the reflows it's better to flicker a bit
   // than to freeze up.
   FlushPendingNotifications(Flush_InterruptibleLayout);
-}
-
-void
-PresShell::DidPaint()
-{
 }
 
 void

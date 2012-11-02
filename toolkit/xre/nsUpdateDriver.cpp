@@ -71,9 +71,16 @@
 #endif
 
 #ifdef PR_LOGGING
-static PRLogModuleInfo *sUpdateLog = PR_NewLogModule("updatedriver");
+static PRLogModuleInfo *
+GetUpdateLog()
+{
+  static PRLogModuleInfo *sUpdateLog;
+  if (!sUpdateLog)
+    sUpdateLog = PR_NewLogModule("updatedriver");
+  return sUpdateLog;
+}
 #endif
-#define LOG(args) PR_LOG(sUpdateLog, PR_LOG_DEBUG, args)
+#define LOG(args) PR_LOG(GetUpdateLog(), PR_LOG_DEBUG, args)
 
 #ifdef XP_WIN
 static const char kUpdaterBin[] = "updater.exe";
@@ -376,7 +383,11 @@ SwitchToUpdatedApp(nsIFile *greDir, nsIFile *updateDir, nsIFile *statusFile,
   // updater binary in the OS temporary location which we cannot write to.
   // Note that we don't check for errors here, as if this directory can't
   // be created, the following CopyUpdaterIntoUpdateDir call will fail.
+  // We create the unique directory inside a subfolder of MozUpdater instead
+  // of directly in the temp directory so we can efficiently delete everything
+  // after updates.
   tmpDir->Append(NS_LITERAL_STRING("MozUpdater"));
+  tmpDir->Append(NS_LITERAL_STRING("bgupdate"));
   tmpDir->CreateUnique(nsIFile::DIRECTORY_TYPE, 0755);
 
   nsCOMPtr<nsIFile> updater;

@@ -876,7 +876,7 @@ nsWebBrowserPersist::OnDataAvailable(
             }
         }
 
-        int32_t channelContentLength = -1;
+        int64_t channelContentLength = -1;
         if (!cancel &&
             NS_SUCCEEDED(channel->GetContentLength(&channelContentLength)))
         {
@@ -2456,7 +2456,7 @@ nsWebBrowserPersist::CalcTotalProgress()
     }
 
     // XXX this code seems pretty bogus and pointless
-    if (mTotalCurrentProgress == LL_ZERO && mTotalMaxProgress == LL_ZERO)
+    if (mTotalCurrentProgress == 0 && mTotalMaxProgress == 0)
     {
         // No output streams so we must be complete
         mTotalCurrentProgress = 10000;

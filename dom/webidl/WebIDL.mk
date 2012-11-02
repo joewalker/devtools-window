@@ -14,11 +14,13 @@ webidl_files = \
   AudioContext.webidl \
   AudioDestinationNode.webidl \
   AudioNode.webidl \
+  AudioParam.webidl \
   AudioSourceNode.webidl \
   Blob.webidl \
   CanvasRenderingContext2D.webidl \
   ClientRectList.webidl \
   CSSStyleDeclaration.webidl \
+  DOMImplementation.webidl \
   DOMTokenList.webidl \
   DOMSettableTokenList.webidl \
   Function.webidl \
@@ -30,6 +32,7 @@ webidl_files = \
   HTMLCollection.webidl \
   HTMLOptionsCollection.webidl \
   HTMLPropertiesCollection.webidl \
+  ImageData.webidl \
   NodeList.webidl \
   PaintRequestList.webidl \
   Performance.webidl \

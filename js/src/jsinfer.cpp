@@ -748,12 +748,7 @@ void
 StackTypeSet::addPropagateThis(JSContext *cx, HandleScript script, jsbytecode *pc,
                                Type type, StackTypeSet *types)
 {
-    /* Don't add constraints when the call will be 'new' (see addCallProperty). */
-    jsbytecode *callpc = script->analysis()->getCallPC(pc);
-    if (JSOp(*callpc) == JSOP_NEW)
-        return;
-
-    add(cx, cx->analysisLifoAlloc().new_<TypeConstraintPropagateThis>(script, callpc, type, types));
+    add(cx, cx->analysisLifoAlloc().new_<TypeConstraintPropagateThis>(script, pc, type, types));
 }
 
 /* Subset constraint which filters out primitive types. */
@@ -1207,7 +1202,6 @@ TypeConstraintCallProp<access>::newType(JSContext *cx, TypeSet *source, Type typ
                 return;
             if (!types->hasPropagatedProperty())
                 object->getFromPrototypes(cx, id, types);
-            /* Bypass addPropagateThis, we already have the callpc. */
             if (access == PROPERTY_READ) {
                 types->add(cx, cx->typeLifoAlloc().new_<TypeConstraintPropagateThis>(
                                 script_, callpc, type, (StackTypeSet *) NULL));
@@ -3579,16 +3573,6 @@ GetInitializerType(JSContext *cx, HandleScript script, jsbytecode *pc)
     return TypeScript::InitObject(cx, script, pc, key);
 }
 
-static inline Type
-GetCalleeThisType(jsbytecode *pc)
-{
-    pc += GetBytecodeLength(pc);
-    if (*pc == JSOP_UNDEFINED)
-        return Type::UndefinedType();
-    JS_ASSERT(*pc == JSOP_IMPLICITTHIS);
-    return Type::UnknownType();
-}
-
 /* Analyze type information for a single bytecode. */
 bool
 ScriptAnalysis::analyzeTypesBytecode(JSContext *cx, unsigned offset, TypeInferenceState &state)
@@ -3823,9 +3807,6 @@ ScriptAnalysis::analyzeTypesBytecode(JSContext *cx, unsigned offset, TypeInferen
             PropertyAccess<PROPERTY_READ_EXISTING>(cx, script, pc, global, seen, id);
         else
             PropertyAccess<PROPERTY_READ>(cx, script, pc, global, seen, id);
-
-        if (op == JSOP_CALLGNAME)
-            pushed[0].addPropagateThis(cx, script, pc, GetCalleeThisType(pc));
         break;
       }
 
@@ -3836,8 +3817,6 @@ ScriptAnalysis::analyzeTypesBytecode(JSContext *cx, unsigned offset, TypeInferen
         StackTypeSet *seen = bytecodeTypes(pc);
         addTypeBarrier(cx, pc, seen, Type::UnknownType());
         seen->addSubset(cx, &pushed[0]);
-        if (op == JSOP_CALLNAME || op == JSOP_CALLINTRINSIC)
-            pushed[0].addPropagateThis(cx, script, pc, GetCalleeThisType(pc));
         break;
       }
 
@@ -3885,8 +3864,6 @@ ScriptAnalysis::analyzeTypesBytecode(JSContext *cx, unsigned offset, TypeInferen
             /* Local 'let' variable. Punt on types for these, for now. */
             pushed[0].addType(cx, Type::UnknownType());
         }
-        if (op == JSOP_CALLARG || op == JSOP_CALLLOCAL)
-            pushed[0].addPropagateThis(cx, script, pc, Type::UndefinedType());
         break;
       }
 
@@ -3917,34 +3894,11 @@ ScriptAnalysis::analyzeTypesBytecode(JSContext *cx, unsigned offset, TypeInferen
          * variable. Instead, we monitor/barrier all reads unconditionally.
          */
         bytecodeTypes(pc)->addSubset(cx, &pushed[0]);
-        if (op == JSOP_CALLALIASEDVAR)
-            pushed[0].addPropagateThis(cx, script, pc, Type::UnknownType());
         break;
 
       case JSOP_SETALIASEDVAR:
         poppedTypes(pc, 0)->addSubset(cx, &pushed[0]);
         break;
-
-      case JSOP_INCARG:
-      case JSOP_DECARG:
-      case JSOP_ARGINC:
-      case JSOP_ARGDEC:
-      case JSOP_INCLOCAL:
-      case JSOP_DECLOCAL:
-      case JSOP_LOCALINC:
-      case JSOP_LOCALDEC: {
-        uint32_t slot = GetBytecodeSlot(script_, pc);
-        if (trackSlot(slot)) {
-            poppedTypes(pc, 0)->addArith(cx, script, pc, &pushed[0]);
-        } else if (slot < TotalSlots(script_)) {
-            StackTypeSet *types = TypeScript::SlotTypes(script_, slot);
-            types->addArith(cx, script, pc, types);
-            types->addSubset(cx, &pushed[0]);
-        } else {
-            pushed[0].addType(cx, Type::UnknownType());
-        }
-        break;
-      }
 
       case JSOP_ARGUMENTS:
         /* Compute a precise type only when we know the arguments won't escape. */
@@ -4035,8 +3989,6 @@ ScriptAnalysis::analyzeTypesBytecode(JSContext *cx, unsigned offset, TypeInferen
         }
 
         seen->addSubset(cx, &pushed[0]);
-        if (op == JSOP_CALLELEM)
-            pushed[0].addPropagateThis(cx, script, pc, Type::UndefinedType(), poppedTypes(pc, 1));
         break;
       }
 
@@ -4133,7 +4085,24 @@ ScriptAnalysis::analyzeTypesBytecode(JSContext *cx, unsigned offset, TypeInferen
         if (op == JSOP_FUNCALL || op == JSOP_FUNAPPLY)
             cx->compartment->types.monitorBytecode(cx, script, pc - script_->code);
 
-        poppedTypes(pc, argCount + 1)->addCall(cx, callsite);
+        StackTypeSet *calleeTypes = poppedTypes(pc, argCount + 1);
+
+        /*
+         * Propagate possible 'this' types to the callee except when the call
+         * came through JSOP_CALLPROP (which uses TypeConstraintCallProperty)
+         * or for JSOP_NEW (where the callee will construct the 'this' object).
+         */
+        SSAValue calleeValue = poppedValue(pc, argCount + 1);
+        if (*pc != JSOP_NEW &&
+            (calleeValue.kind() != SSAValue::PUSHED ||
+             script->code[calleeValue.pushedOffset()] != JSOP_CALLPROP))
+        {
+            HandleScript script_ = script;
+            calleeTypes->add(cx, cx->analysisLifoAlloc().new_<TypeConstraintPropagateThis>
+                                   (script_, pc, Type::UndefinedType(), callsite->thisTypes));
+        }
+
+        calleeTypes->addCall(cx, callsite);
         break;
       }
 
@@ -4514,25 +4483,6 @@ ScriptAnalysis::integerOperation(jsbytecode *pc)
     JS_ASSERT(uint32_t(pc - script_->code) < script_->length);
 
     switch (JSOp(*pc)) {
-
-      case JSOP_INCARG:
-      case JSOP_DECARG:
-      case JSOP_ARGINC:
-      case JSOP_ARGDEC:
-      case JSOP_INCLOCAL:
-      case JSOP_DECLOCAL:
-      case JSOP_LOCALINC:
-      case JSOP_LOCALDEC: {
-        if (pushedTypes(pc, 0)->getKnownTypeTag() != JSVAL_TYPE_INT32)
-            return false;
-        uint32_t slot = GetBytecodeSlot(script_, pc);
-        if (trackSlot(slot)) {
-            if (poppedTypes(pc, 0)->getKnownTypeTag() != JSVAL_TYPE_INT32)
-                return false;
-        }
-        return true;
-      }
-
       case JSOP_ADD:
       case JSOP_SUB:
       case JSOP_MUL:
@@ -5267,42 +5217,6 @@ TypeDynamicResult(JSContext *cx, HandleScript script, jsbytecode *pc, Type type)
             types->addType(cx, type);
         }
         return;
-    }
-
-    /*
-     * For inc/dec ops, we need to go back and reanalyze the affected opcode
-     * taking the overflow into account. We won't see an explicit adjustment
-     * of the type of the thing being inc/dec'ed, nor will adding TYPE_DOUBLE to
-     * the pushed value affect that type.
-     */
-    JSOp op = JSOp(*pc);
-    const JSCodeSpec *cs = &js_CodeSpec[op];
-    if (cs->format & (JOF_INC | JOF_DEC)) {
-        switch (op) {
-          case JSOP_INCLOCAL:
-          case JSOP_DECLOCAL:
-          case JSOP_LOCALINC:
-          case JSOP_LOCALDEC:
-          case JSOP_INCARG:
-          case JSOP_DECARG:
-          case JSOP_ARGINC:
-          case JSOP_ARGDEC: {
-            /*
-             * Just mark the slot's type as holding the new type. This captures
-             * the effect if the slot is not being tracked, and if the slot
-             * doesn't escape we will update the pushed types below to capture
-             * the slot's value after this write.
-             */
-            uint32_t slot = GetBytecodeSlot(script, pc);
-            if (slot < TotalSlots(script)) {
-                TypeSet *types = TypeScript::SlotTypes(script, slot);
-                types->addType(cx, type);
-            }
-            break;
-          }
-
-          default:;
-        }
     }
 
     if (script->hasAnalysis() && script->analysis()->ranInference()) {

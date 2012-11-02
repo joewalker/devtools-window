@@ -176,8 +176,15 @@ using namespace mozilla;
 
 #ifdef PR_LOGGING
 
-static PRLogModuleInfo * kPrintingLogMod = PR_NewLogModule("printing");
-#define PR_PL(_p1)  PR_LOG(kPrintingLogMod, PR_LOG_DEBUG, _p1);
+static PRLogModuleInfo *
+GetPrintingLog()
+{
+  static PRLogModuleInfo *sLog;
+  if (!sLog)
+    sLog = PR_NewLogModule("printing");
+  return sLog;
+}
+#define PR_PL(_p1)  PR_LOG(GetPrintingLog(), PR_LOG_DEBUG, _p1);
 
 #define PRT_YESNO(_p) ((_p)?"YES":"NO")
 #else
@@ -1869,19 +1876,9 @@ DocumentViewerImpl::SetBounds(const nsIntRect& aBounds)
 
   mBounds = aBounds;
   if (mWindow) {
-    // When attached to a top level window, change the client area, not the
-    // window frame.
-    // Don't have the widget repaint. Layout will generate repaint requests
-    // during reflow.
-    if (mAttachedToParent) {
-      if (aBounds.x != 0 || aBounds.y != 0) {
-        mWindow->ResizeClient(aBounds.x, aBounds.y,
-                              aBounds.width, aBounds.height,
-                              false);
-      } else {
-        mWindow->ResizeClient(aBounds.width, aBounds.height, false);
-      }
-    } else {
+    if (!mAttachedToParent) {
+      // Don't have the widget repaint. Layout will generate repaint requests
+      // during reflow.
       mWindow->Resize(aBounds.x, aBounds.y,
                       aBounds.width, aBounds.height,
                       false);
@@ -4073,7 +4070,7 @@ DocumentViewerImpl::ShouldAttachToTopLevel()
   if (nsIWidget::UsePuppetWidgets())
     return true;
 
-#ifdef XP_WIN
+#if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
   // On windows, in the parent process we also attach, but just to
   // chrome items
   int32_t docType;

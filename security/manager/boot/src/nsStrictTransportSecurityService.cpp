@@ -33,10 +33,17 @@
 #define STS_KNOCKOUT (nsIPermissionManager::DENY_ACTION)
 
 #if defined(PR_LOGGING)
-PRLogModuleInfo *gSTSLog = PR_NewLogModule("nsSTSService");
+static PRLogModuleInfo *
+GetSTSLog()
+{
+  static PRLogModuleInfo *gSTSLog;
+  if (!gSTSLog)
+    gSTSLog = PR_NewLogModule("nsSTSService");
+  return gSTSLog;
+}
 #endif
 
-#define STSLOG(args) PR_LOG(gSTSLog, 4, args)
+#define STSLOG(args) PR_LOG(GetSTSLog(), 4, args)
 
 #define STS_PARSER_FAIL_IF(test,args) \
   if (test) { \
@@ -374,16 +381,23 @@ int STSPreloadCompare(const void *key, const void *entry)
 const nsSTSPreload *
 nsStrictTransportSecurityService::GetPreloadListEntry(const char *aHost)
 {
-  if (mUsePreloadList) {
+  PRTime currentTime = PR_Now();
+  int32_t timeOffset = 0;
+  nsresult rv = mozilla::Preferences::GetInt("test.currentTimeOffsetSeconds",
+                                             &timeOffset);
+  if (NS_SUCCEEDED(rv)) {
+    currentTime += (PRTime(timeOffset) * PR_USEC_PER_SEC);
+  }
+
+  if (mUsePreloadList && currentTime < gPreloadListExpirationTime) {
     return (const nsSTSPreload *) bsearch(aHost,
                                           kSTSPreloadList,
                                           PR_ARRAY_SIZE(kSTSPreloadList),
                                           sizeof(nsSTSPreload),
                                           STSPreloadCompare);
   }
-  else {
-    return nullptr;
-  }
+
+  return nullptr;
 }
 
 NS_IMETHODIMP

@@ -173,6 +173,7 @@ const UnsolicitedNotifications = {
   "locationChange": "locationChange",
   "networkEvent": "networkEvent",
   "networkEventUpdate": "networkEventUpdate",
+  "newGlobal": "newGlobal",
   "newScript": "newScript",
   "tabDetached": "tabDetached",
   "tabNavigated": "tabNavigated",
@@ -492,7 +493,7 @@ DebuggerClient.prototype = {
       }
     } catch(ex) {
       dumpn("Error handling response: " + ex + " - stack:\n" + ex.stack);
-      Cu.reportError(ex);
+      Cu.reportError(ex.message + "\n" + ex.stack);
     }
 
     this._sendRequests();

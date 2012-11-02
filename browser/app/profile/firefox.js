@@ -57,7 +57,7 @@ pref("extensions.update.autoUpdateDefault", true);
 
 pref("extensions.hotfix.id", "firefox-hotfix@mozilla.org");
 pref("extensions.hotfix.cert.checkAttributes", true);
-pref("extensions.hotfix.certs.1.sha1Fingerprint", "F1:DB:F9:6A:7B:B8:04:FA:48:3C:16:95:C7:2F:17:C6:5B:C2:9F:45");
+pref("extensions.hotfix.certs.1.sha1Fingerprint", "CA:C4:7D:BF:63:4D:24:E9:DC:93:07:2F:E3:C8:EA:6D:C3:94:6E:89");
 
 // Disable add-ons that are not installed by the user in all scopes by default.
 // See the SCOPE constants in AddonManager.jsm for values to use here.
@@ -328,6 +328,13 @@ pref("browser.download.useToolkitUI", false);
 
 // This controls retention behavior in the Downloads Panel only.
 pref("browser.download.panel.removeFinishedDownloads", false);
+
+// This records whether or not the panel has been shown at least once.
+pref("browser.download.panel.shown", false);
+
+// This records whether or not at least one session with the Downloads Panel
+// enabled has been completed already.
+pref("browser.download.panel.firstSessionCompleted", false);
 
 // search engines URL
 pref("browser.search.searchEnginesURL",      "https://addons.mozilla.org/%LOCALE%/firefox/search-engines/");
@@ -1012,8 +1019,6 @@ pref("devtools.toolbox.toolbarspec", '["tilt toggle","scratchpad open","screensh
 
 // Enable the Inspector
 pref("devtools.inspector.enabled", true);
-pref("devtools.inspector.htmlHeight", 112);
-pref("devtools.inspector.htmlPanelOpen", false);
 pref("devtools.inspector.sidebarOpen", false);
 pref("devtools.inspector.activeSidebar", "ruleview");
 pref("devtools.inspector.markupPreview", false);
@@ -1027,7 +1032,7 @@ pref("devtools.responsiveUI.enabled", true);
 
 // Enable the Debugger
 pref("devtools.debugger.enabled", true);
-pref("devtools.debugger.chrome-enabled", false);
+pref("devtools.debugger.chrome-enabled", true);
 pref("devtools.debugger.remote-host", "localhost");
 pref("devtools.debugger.remote-autoconnect", false);
 pref("devtools.debugger.remote-connection-retries", 3);
@@ -1038,24 +1043,17 @@ pref("devtools.debugger.ui.height", 250);
 pref("devtools.debugger.ui.remote-win.width", 900);
 pref("devtools.debugger.ui.remote-win.height", 400);
 pref("devtools.debugger.ui.stackframes-width", 200);
-pref("devtools.debugger.ui.stackframes-pane-visible", true);
 pref("devtools.debugger.ui.variables-width", 300);
-pref("devtools.debugger.ui.variables-pane-visible", true);
+pref("devtools.debugger.ui.panes-visible-on-startup", false);
 pref("devtools.debugger.ui.non-enum-visible", true);
 
 // Enable the Profiler
 pref("devtools.profiler.enabled", true);
 
-// Enable the style inspector
-pref("devtools.styleinspector.enabled", true);
-
 // Enable the Tilt inspector
 pref("devtools.tilt.enabled", true);
 pref("devtools.tilt.intro_transition", true);
 pref("devtools.tilt.outro_transition", true);
-
-// Enable the rules view
-pref("devtools.ruleview.enabled", true);
 
 // Enable the Scratchpad tool.
 pref("devtools.scratchpad.enabled", true);
@@ -1176,6 +1174,7 @@ pref("social.manifest.facebook", "{\"origin\":\"https://www.facebook.com\",\"nam
 // built-in social functionality.
 pref("social.activation.whitelist", "https://www.facebook.com");
 pref("social.sidebar.open", true);
+pref("social.sidebar.unload_timeout_ms", 10000);
 pref("social.active", false);
 pref("social.toast-notifications.enabled", true);
 

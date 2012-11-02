@@ -54,8 +54,22 @@ function toolRegistered(event, toolId)
   let panel = doc.getElementById("toolbox-panel-" + toolId);
   ok(panel, "new tool's panel exists in toolbox UI");
 
+  for (let win of getAllBrowserWindows()) {
+    let command = win.document.getElementById("Tools:" + toolId);
+    ok(command, "command for new tool added to every browser window");
+  }
+
   // then unregister it
   testUnregister();
+}
+
+function getAllBrowserWindows() {
+  let wins = [];
+  let enumerator = Services.wm.getEnumerator("navigator:browser");
+  while (enumerator.hasMoreElements()) {
+    wins.push(enumerator.getNext());
+  }
+  return wins;
 }
 
 function testUnregister()
@@ -78,6 +92,11 @@ function toolUnregistered(event, toolId)
 
   let panel = doc.getElementById("toolbox-panel-" + toolId);
   ok(!panel, "tool's panel was removed from toolbox UI");
+
+  for (let win of getAllBrowserWindows()) {
+    let command = win.document.getElementById("Tools:" + toolId);
+    ok(!command, "command removed from every browser window");
+  }
 
   cleanup();
 }

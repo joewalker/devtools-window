@@ -24,6 +24,7 @@
 #include "nsIXULRuntime.h"
 #include "nsIXULWindow.h"
 #include "nsIBaseWindow.h"
+#include "nsXULPopupManager.h"
 #include "nsEventStateManager.h"
 #include "nsIWidgetListener.h"
 #include "nsIGfxInfo.h"
@@ -47,6 +48,8 @@ static bool debug_InSecureKeyboardInputMode = false;
 #ifdef NOISY_WIDGET_LEAKS
 static int32_t gNumWidgets;
 #endif
+
+nsIRollupListener* nsBaseWidget::gRollupListener = nullptr;
 
 using namespace mozilla::layers;
 using namespace mozilla;
@@ -374,9 +377,23 @@ float nsBaseWidget::GetDPI()
   return 96.0f;
 }
 
-double nsBaseWidget::GetDefaultScale()
+double nsIWidget::GetDefaultScale()
 {
-  return 1.0;
+  // The number of device pixels per CSS pixel. A value <= 0 means choose
+  // automatically based on the DPI. A positive value is used as-is. This effectively
+  // controls the size of a CSS "px".
+  float devPixelsPerCSSPixel = -1.0;
+
+  nsAdoptingCString prefString = Preferences::GetCString("layout.css.devPixelsPerPx");
+  if (!prefString.IsEmpty()) {
+    devPixelsPerCSSPixel = static_cast<float>(atof(prefString));
+  }
+
+  if (devPixelsPerCSSPixel <= 0) {
+    devPixelsPerCSSPixel = GetDefaultScaleInternal();
+  }
+
+  return devPixelsPerCSSPixel;
 }
 
 //-------------------------------------------------------------------------
@@ -1295,6 +1312,17 @@ void nsBaseWidget::SetSizeConstraints(const SizeConstraints& aConstraints)
 const widget::SizeConstraints& nsBaseWidget::GetSizeConstraints() const
 {
   return mSizeConstraints;
+}
+
+// static
+nsIRollupListener*
+nsBaseWidget::GetActiveRollupListener()
+{
+  // If set, then this is likely an <html:select> dropdown.
+  if (gRollupListener)
+    return gRollupListener;
+
+  return nsXULPopupManager::GetInstance();
 }
 
 void

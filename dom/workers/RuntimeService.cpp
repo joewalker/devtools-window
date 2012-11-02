@@ -532,16 +532,7 @@ ResolveWorkerClasses(JSContext* aCx, JSHandleObject aObj, JSHandleId aId, unsign
 
   for (uint32_t i = 0; i < ID_COUNT; i++) {
     if (gStringIDs[i] == aId) {
-      nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
-      NS_ASSERTION(ssm, "This should never be null!");
-
-      bool enabled;
-      if (NS_FAILED(ssm->IsCapabilityEnabled("UniversalXPConnect", &enabled))) {
-        NS_WARNING("IsCapabilityEnabled failed!");
-        isChrome = false;
-      }
-
-      isChrome = !!enabled;
+      isChrome = nsContentUtils::IsCallerChrome();
 
       // Don't resolve if this is ChromeWorker and we're not chrome. Otherwise
       // always resolve.
@@ -557,7 +548,7 @@ ResolveWorkerClasses(JSContext* aCx, JSHandleObject aObj, JSHandleId aId, unsign
       return true;
     }
 
-    JSObject* eventTarget = EventTargetBinding_workers::GetProtoObject(aCx, aObj, aObj);
+    JSObject* eventTarget = EventTargetBinding_workers::GetProtoObject(aCx, aObj);
     if (!eventTarget) {
       return false;
     }

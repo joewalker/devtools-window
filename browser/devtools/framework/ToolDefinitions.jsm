@@ -10,6 +10,7 @@ const EXPORTED_SYMBOLS = [ "defaultTools" ];
 Cu.import("resource:///modules/WebConsolePanel.jsm");
 Cu.import("resource:///modules/devtools/DebuggerPanel.jsm");
 Cu.import("resource:///modules/devtools/StyleEditorPanel.jsm");
+Cu.import("resource:///modules/devtools/InspectorDefinition.jsm");
 Cu.import("resource:///modules/devtools/ProfilerPanel.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
@@ -17,6 +18,7 @@ let defaultTools = [
   StyleEditorDefinition,
   WebConsoleDefinition,
   DebuggerDefinition,
+  InspectorDefinition,
 ];
 
 if (Services.prefs.getBoolPref("devtools.profiler.enabled")) {

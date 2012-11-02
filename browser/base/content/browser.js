@@ -18,7 +18,6 @@ var gLastValidURLStr = "";
 var gInPrintPreviewMode = false;
 var gDownloadMgr = null;
 var gContextMenu = null; // nsContextMenu instance
-var gDelayedStartupTimeoutId;
 var gStartupRan = false;
 
 #ifndef XP_MACOSX
@@ -117,12 +116,6 @@ XPCOMUtils.defineLazyGetter(this, "DeveloperToolbar", function() {
   let tmp = {};
   Cu.import("resource:///modules/devtools/DeveloperToolbar.jsm", tmp);
   return new tmp.DeveloperToolbar(window, document.getElementById("developer-toolbar"));
-});
-
-XPCOMUtils.defineLazyGetter(this, "InspectorUI", function() {
-  let tmp = {};
-  Cu.import("resource:///modules/inspector.jsm", tmp);
-  return new tmp.InspectorUI(window);
 });
 
 XPCOMUtils.defineLazyGetter(this, "Tilt", function() {
@@ -1236,8 +1229,16 @@ var gBrowserInit = {
     gPrivateBrowsingUI.init();
     retrieveToolbarIconsizesFromTheme();
 
-    gDelayedStartupTimeoutId = setTimeout(this._delayedStartup.bind(this), 0, isLoadingBlank, mustLoadSidebar);
+    // Wait until chrome is painted before executing code not critical to making the window visible
+    this._boundDelayedStartup = this._delayedStartup.bind(this, isLoadingBlank, mustLoadSidebar);
+    window.addEventListener("MozAfterPaint", this._boundDelayedStartup);
+
     gStartupRan = true;
+  },
+
+  _cancelDelayedStartup: function () {
+    window.removeEventListener("MozAfterPaint", this._boundDelayedStartup);
+    this._boundDelayedStartup = null;
   },
 
   _delayedStartup: function(isLoadingBlank, mustLoadSidebar) {
@@ -1245,7 +1246,8 @@ var gBrowserInit = {
     Cu.import("resource:///modules/TelemetryTimestamps.jsm", tmp);
     let TelemetryTimestamps = tmp.TelemetryTimestamps;
     TelemetryTimestamps.add("delayedStartupStarted");
-    gDelayedStartupTimeoutId = null;
+
+    this._cancelDelayedStartup();
 
 #ifdef MOZ_SAFE_BROWSING
     // Bug 778855 - Perf regression if we do this here. To be addressed in bug 779008.
@@ -1458,6 +1460,9 @@ var gBrowserInit = {
       cmd.removeAttribute("hidden");
     }
 
+    // Initialize gDevTools
+    gDevTools.init(window.document);
+
     let appMenuButton = document.getElementById("appmenu-button");
     let appMenuPopup = document.getElementById("appmenu-popup");
     if (appMenuButton && appMenuPopup) {
@@ -1500,8 +1505,8 @@ var gBrowserInit = {
     if (!gStartupRan)
       return;
 
-    if (!__lookupGetter__("InspectorUI"))
-      InspectorUI.destroy();
+    if (!__lookupGetter__("gDevTools"))
+      gDevTools.destroy(window.document);
 
     // First clean up services initialized in gBrowserInit.onLoad (or those whose
     // uninit methods don't depend on the services having been initialized).
@@ -1542,8 +1547,8 @@ var gBrowserInit = {
 
     // Now either cancel delayedStartup, or clean up the services initialized from
     // it.
-    if (gDelayedStartupTimeoutId) {
-      clearTimeout(gDelayedStartupTimeoutId);
+    if (this._boundDelayedStartup) {
+      this._cancelDelayedStartup();
     } else {
       if (Win7Features)
         Win7Features.onCloseWindow();
@@ -1599,7 +1604,7 @@ var gBrowserInit = {
                          'viewToolbarsMenu', 'viewSidebarMenuMenu', 'Browser:Reload',
                          'viewFullZoomMenu', 'pageStyleMenu', 'charsetMenu', 'View:PageSource', 'View:FullScreen',
                          'viewHistorySidebar', 'Browser:AddBookmarkAs', 'Browser:BookmarkAllTabs',
-                         'View:PageInfo', 'Tasks:InspectPage', 'Browser:ToggleTabView', 'Browser:ToggleAddonBar'];
+                         'View:PageInfo', 'Browser:ToggleTabView', 'Browser:ToggleAddonBar'];
     var element;
 
     for (let disabledItem of disabledItems) {
@@ -1640,11 +1645,11 @@ var gBrowserInit = {
       }
     }
 
-    gDelayedStartupTimeoutId = setTimeout(this.nonBrowserWindowDelayedStartup.bind(this), 0);
+    this._delayedStartupTimeoutId = setTimeout(this.nonBrowserWindowDelayedStartup.bind(this), 0);
   },
 
   nonBrowserWindowDelayedStartup: function() {
-    gDelayedStartupTimeoutId = null;
+    this._delayedStartupTimeoutId = null;
 
     // initialise the offline listener
     BrowserOffline.init();
@@ -1666,8 +1671,8 @@ var gBrowserInit = {
   nonBrowserWindowShutdown: function() {
     // If nonBrowserWindowDelayedStartup hasn't run yet, we have no work to do -
     // just cancel the pending timeout and return;
-    if (gDelayedStartupTimeoutId) {
-      clearTimeout(gDelayedStartupTimeoutId);
+    if (this._delayedStartupTimeoutId) {
+      clearTimeout(this._delayedStartupTimeoutId);
       return;
     }
 
@@ -7087,7 +7092,7 @@ let gPrivateBrowsingUI = {
   },
 
   get _disableUIOnToggle() {
-    if (this._privateBrowsingService.autoStarted)
+    if (PrivateBrowsingUtils.permanentPrivateBrowsing)
       return false;
 
     try {
@@ -7183,7 +7188,7 @@ let gPrivateBrowsingUI = {
     document.getElementById("Tools:Sanitize").setAttribute("disabled", "true");
 
     let docElement = document.documentElement;
-    if (this._privateBrowsingService.autoStarted) {
+    if (PrivateBrowsingUtils.permanentPrivateBrowsing) {
       // Disable the menu item in auto-start mode
       document.getElementById("privateBrowsingItem")
               .setAttribute("disabled", "true");

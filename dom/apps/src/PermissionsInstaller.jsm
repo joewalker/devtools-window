@@ -9,9 +9,12 @@ const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/AppsUtils.jsm");
+Cu.import("resource://gre/modules/PermissionSettings.jsm");
 
-var EXPORTED_SYMBOLS = ["PermissionsInstaller"];
-
+var EXPORTED_SYMBOLS = ["PermissionsInstaller",
+                        "expandPermissions",
+                        "PermissionsTable",
+                       ];
 const UNKNOWN_ACTION = Ci.nsIPermissionManager.UNKNOWN_ACTION;
 const ALLOW_ACTION = Ci.nsIPermissionManager.ALLOW_ACTION;
 const DENY_ACTION = Ci.nsIPermissionManager.DENY_ACTION;
@@ -24,16 +27,6 @@ const READCREATE = "readcreate";
 const READWRITE = "readwrite";
 
 const PERM_TO_STRING = ["unknown", "allow", "deny", "prompt"];
-
-XPCOMUtils.defineLazyServiceGetter(this,
-                                   "PermSettings",
-                                   "@mozilla.org/permissionSettings;1",
-                                   "nsIDOMPermissionSettings");
-
-XPCOMUtils.defineLazyServiceGetter(this,
-                                   "permissionManager",
-                                   "@mozilla.org/permissionmanager;1",
-                                   "nsIPermissionManager");
 
 function debug(aMsg) {
   //dump("-*-*- PermissionsInstaller.jsm : " + aMsg + "\n");
@@ -51,6 +44,7 @@ function mapSuffixes(aPermName, aSuffixes)
 }
 
 // Permissions Matrix: https://docs.google.com/spreadsheet/ccc?key=0Akyz_Bqjgf5pdENVekxYRjBTX0dCXzItMnRyUU1RQ0E#gid=0
+// Also, keep in sync with https://mxr.mozilla.org/mozilla-central/source/extensions/cookie/Permission.txt
 
 // Permissions that are implicit:
 // battery-status, network-information, vibration,
@@ -89,27 +83,38 @@ const PermissionsTable = { "resource-lock": {
                            contacts: {
                              app: DENY_ACTION,
                              privileged: PROMPT_ACTION,
-                             certified: ALLOW_ACTION
+                             certified: ALLOW_ACTION,
+                             access: ["read", "write", "create"]
                            },
                            "device-storage:apps": {
                              app: DENY_ACTION,
-                             privileged: ALLOW_ACTION,
-                             certified: ALLOW_ACTION
+                             privileged: PROMPT_ACTION,
+                             certified: ALLOW_ACTION,
+                             access: ["read", "write", "create"]
                            },
                            "device-storage:pictures": {
                              app: DENY_ACTION,
-                             privileged: ALLOW_ACTION,
-                             certified: ALLOW_ACTION
+                             privileged: PROMPT_ACTION,
+                             certified: ALLOW_ACTION,
+                             access: ["read", "write", "create"]
                            },
                            "device-storage:videos": {
                              app: DENY_ACTION,
-                             privileged: ALLOW_ACTION,
-                             certified: ALLOW_ACTION
+                             privileged: PROMPT_ACTION,
+                             certified: ALLOW_ACTION,
+                             access: ["read", "write", "create"]
                            },
                            "device-storage:music": {
                              app: DENY_ACTION,
-                             privileged: ALLOW_ACTION,
-                             certified: ALLOW_ACTION
+                             privileged: PROMPT_ACTION,
+                             certified: ALLOW_ACTION,
+                             access: ["read", "write", "create"]
+                           },
+                           "device-storage:sdcard": {
+                             app: DENY_ACTION,
+                             privileged: PROMPT_ACTION,
+                             certified: ALLOW_ACTION,
+                             access: ["read", "write", "create"]
                            },
                            sms: {
                              app: DENY_ACTION,
@@ -159,7 +164,8 @@ const PermissionsTable = { "resource-lock": {
                            settings: {
                              app: DENY_ACTION,
                              privileged: DENY_ACTION,
-                             certified: ALLOW_ACTION
+                             certified: ALLOW_ACTION,
+                             access: ["read", "write"]
                            },
                            permissions: {
                              app: DENY_ACTION,
@@ -241,6 +247,11 @@ const PermissionsTable = { "resource-lock": {
                              privileged: DENY_ACTION,
                              certified: ALLOW_ACTION
                            },
+                           "background-sensors": {
+                             app: DENY_ACTION,
+                             privileged: DENY_ACTION,
+                             certified: ALLOW_ACTION
+                           },
                          };
 
 // Sometimes all permissions (fully expanded) need to be iterated through
@@ -267,15 +278,20 @@ for (let permName in PermissionsTable) {
 function expandPermissions(aPermName, aAccess) {
   if (!PermissionsTable[aPermName]) {
     Cu.reportError("PermissionsTable.jsm: expandPermissions: Unknown Permission: " + aPermName);
-    throw new Error("PermissionsTable.jsm: expandPermissions: Unknown Permission: " + aPermName);
+    return [];
   }
+
+/*
+Temporarily disabled in order to add access fields to gaia: See Bug 805646
   if (!aAccess && PermissionsTable[aPermName].access ||
       aAccess && !PermissionsTable[aPermName].access) {
     Cu.reportError("PermissionsTable.jsm: expandPermissions: Invalid Manifest : " +
                    aPermName + " " + aAccess + "\n");
     throw new Error("PermissionsTable.jsm: expandPermissions: Invalid Manifest");
   }
-  if (!PermissionsTable[aPermName].access) {
+*/
+
+  if (!PermissionsTable[aPermName].access || !aAccess) {
     return [aPermName];
   }
 
@@ -299,7 +315,7 @@ function expandPermissions(aPermName, aAccess) {
 
   let permArr = mapSuffixes(aPermName, requestedSuffixes);
 
-  let expandedPerms = [];
+  let expandedPerms = [aPermName];
   for (let idx in permArr) {
     if (PermissionsTable[aPermName].access.indexOf(requestedSuffixes[idx]) != -1) {
       expandedPerms.push(permArr[idx]);
@@ -344,7 +360,7 @@ let PermissionsInstaller = {
             let index = newPerms.indexOf(AllPossiblePermissions[idx]);
             if (index == -1) {
               // See if the permission was installed previously
-              let _perm = PermSettings.get(AllPossiblePermissions[idx],
+              let _perm = PermissionSettingsModule.getPermission(AllPossiblePermissions[idx],
                                            aApp.manifestURL,
                                            aApp.origin,
                                            false);
@@ -379,9 +395,9 @@ let PermissionsInstaller = {
 
       for (let permName in newManifest.permissions) {
         if (!PermissionsTable[permName]) {
-          throw new Error("PermissionsInstaller.jsm: '" + permName + "'" +
-                         " is not a valid Webapps permission type. Aborting Webapp installation");
-          return;
+          Cu.reportError("PermissionsInstaller.jsm: '" + permName + "'" +
+                         " is not a valid Webapps permission type.");
+          continue;
         }
 
         let perms = expandPermissions(permName,
@@ -415,13 +431,25 @@ let PermissionsInstaller = {
    **/
   _setPermission: function setPermission(aPerm, aValue, aApp) {
     if (aPerm != "storage") {
-      PermSettings.set(aPerm, aValue, aApp.manifestURL, aApp.origin, false);
+      PermissionSettingsModule.addPermission({
+        type: aPerm,
+        origin: aApp.origin,
+        manifestURL: aApp.manifestURL,
+        value: aValue,
+        browserFlag: false
+      });
       return;
     }
 
     ["indexedDB-unlimited", "offline-app", "pin-app"].forEach(
       function(aName) {
-        PermSettings.set(aName, aValue, aApp.manifestURL, aApp.origin, false);
+        PermissionSettingsModule.addPermission({
+          type: aName,
+          origin: aApp.origin,
+          manifestURL: aApp.manifestURL,
+          value: aValue,
+          browserFlag: false
+        });
       }
     );
   }

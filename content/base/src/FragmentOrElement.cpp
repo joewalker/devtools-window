@@ -11,6 +11,7 @@
  */
 
 #include "mozilla/Util.h"
+#include "mozilla/Likely.h"
 
 #include "mozilla/dom/FragmentOrElement.h"
 
@@ -100,7 +101,6 @@
 #include "nsAsyncDOMEvent.h"
 #include "nsTextNode.h"
 #include "mozilla/dom/NodeListBinding.h"
-#include "dombindings.h"
 
 #ifdef MOZ_XUL
 #include "nsIXULDocument.h"
@@ -389,13 +389,7 @@ JSObject*
 nsChildContentList::WrapObject(JSContext *cx, JSObject *scope,
                                bool *triedToWrap)
 {
-  JSObject* obj = NodeListBinding::Wrap(cx, scope, this, triedToWrap);
-  if (obj || *triedToWrap) {
-    return obj;
-  }
-
-  *triedToWrap = true;
-  return oldproxybindings::NodeList::create(cx, scope, this);
+  return NodeListBinding::Wrap(cx, scope, this, triedToWrap);
 }
 
 NS_IMETHODIMP
@@ -409,7 +403,7 @@ nsChildContentList::GetLength(uint32_t* aLength)
 NS_IMETHODIMP
 nsChildContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
 {
-  nsINode* node = GetNodeAt(aIndex);
+  nsINode* node = Item(aIndex);
   if (!node) {
     *aReturn = nullptr;
 
@@ -420,7 +414,7 @@ nsChildContentList::Item(uint32_t aIndex, nsIDOMNode** aReturn)
 }
 
 nsIContent*
-nsChildContentList::GetNodeAt(uint32_t aIndex)
+nsChildContentList::Item(uint32_t aIndex)
 {
   if (mNode) {
     return mNode->GetChildAt(aIndex);
@@ -679,7 +673,7 @@ FragmentOrElement::GetChildren(uint32_t aFilter)
     uint32_t length = 0;
     childList->GetLength(&length);
     for (uint32_t idx = 0; idx < length; idx++) {
-      nsIContent* child = childList->GetNodeAt(idx);
+      nsIContent* child = childList->Item(idx);
       list->AppendElement(child);
     }
   }
@@ -1564,7 +1558,7 @@ static const char* kNSURIs[] = {
 };
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(FragmentOrElement)
-  if (NS_UNLIKELY(cb.WantDebugInfo())) {
+  if (MOZ_UNLIKELY(cb.WantDebugInfo())) {
     char name[512];
     uint32_t nsid = tmp->GetNameSpaceID();
     nsAtomCString localName(tmp->NodeInfo()->NameAtom());

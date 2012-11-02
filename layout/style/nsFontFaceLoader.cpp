@@ -44,11 +44,18 @@
 using namespace mozilla;
 
 #ifdef PR_LOGGING
-static PRLogModuleInfo *gFontDownloaderLog = PR_NewLogModule("fontdownloader");
+static PRLogModuleInfo *
+GetFontDownloaderLog()
+{
+  static PRLogModuleInfo *sLog;
+  if (!sLog)
+    sLog = PR_NewLogModule("fontdownloader");
+  return sLog;
+}
 #endif /* PR_LOGGING */
 
-#define LOG(args) PR_LOG(gFontDownloaderLog, PR_LOG_DEBUG, args)
-#define LOG_ENABLED() PR_LOG_TEST(gFontDownloaderLog, PR_LOG_DEBUG)
+#define LOG(args) PR_LOG(GetFontDownloaderLog(), PR_LOG_DEBUG, args)
+#define LOG_ENABLED() PR_LOG_TEST(GetFontDownloaderLog(), PR_LOG_DEBUG)
 
 
 nsFontFaceLoader::nsFontFaceLoader(gfxProxyFontEntry *aProxy, nsIURI *aFontURI,
@@ -103,10 +110,11 @@ nsFontFaceLoader::LoadTimerCallback(nsITimer *aTimer, void *aClosure)
   // If the entry is loading, check whether it's >75% done; if so,
   // we allow another timeout period before showing a fallback font.
   if (pe->mLoadingState == gfxProxyFontEntry::LOADING_STARTED) {
-    int32_t contentLength;
+    int64_t contentLength;
     uint32_t numBytesRead;
     if (NS_SUCCEEDED(loader->mChannel->GetContentLength(&contentLength)) &&
         contentLength > 0 &&
+        contentLength < UINT32_MAX &&
         NS_SUCCEEDED(loader->mStreamLoader->GetNumBytesRead(&numBytesRead)) &&
         numBytesRead > 3 * (uint32_t(contentLength) >> 2))
     {
@@ -753,8 +761,8 @@ nsUserFontSet::LogMessage(gfxProxyFontEntry *aProxy,
   msg.Append(fontURI);
 
 #ifdef PR_LOGGING
-  if (PR_LOG_TEST(sUserFontsLog, PR_LOG_DEBUG)) {
-    PR_LOG(sUserFontsLog, PR_LOG_DEBUG,
+  if (PR_LOG_TEST(GetUserFontsLog(), PR_LOG_DEBUG)) {
+    PR_LOG(GetUserFontsLog(), PR_LOG_DEBUG,
            ("userfonts (%p) %s", this, msg.get()));
   }
 #endif

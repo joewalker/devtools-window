@@ -597,7 +597,7 @@ ProcessFile(JSContext *cx,
             }
             bufp += strlen(bufp);
             lineno++;
-        } while (!JS_BufferIsCompilableUnit(cx, JS_FALSE, obj, buffer, strlen(buffer)));
+        } while (!JS_BufferIsCompilableUnit(cx, obj, buffer, strlen(buffer)));
 
         /* Clear any pending exception from previous failed compiles.  */
         JS_ClearPendingException(cx);
@@ -743,18 +743,6 @@ FullTrustSecMan::GetSystemPrincipal(nsIPrincipal **_retval)
 }
 
 NS_IMETHODIMP
-FullTrustSecMan::GetCertificatePrincipal(const nsACString & aCertFingerprint,
-                                         const nsACString & aSubjectName,
-                                         const nsACString & aPrettyName,
-                                         nsISupports *aCert,
-                                         nsIURI *aURI,
-                                         nsIPrincipal **_retval)
-{
-    NS_IF_ADDREF(*_retval = mSystemPrincipal);
-    return *_retval ? NS_OK : NS_ERROR_FAILURE;
-}
-
-NS_IMETHODIMP
 FullTrustSecMan::GetSimpleCodebasePrincipal(nsIURI *aURI,
                                             nsIPrincipal **_retval)
 {
@@ -765,6 +753,12 @@ FullTrustSecMan::GetSimpleCodebasePrincipal(nsIURI *aURI,
 NS_IMETHODIMP
 FullTrustSecMan::GetNoAppCodebasePrincipal(nsIURI *aURI,
                                            nsIPrincipal **_retval)
+{
+    return GetSimpleCodebasePrincipal(aURI, _retval);
+}
+
+NS_IMETHODIMP
+FullTrustSecMan::GetCodebasePrincipal(nsIURI *aURI, nsIPrincipal **_retval)
 {
     return GetSimpleCodebasePrincipal(aURI, _retval);
 }
@@ -784,29 +778,6 @@ FullTrustSecMan::GetDocShellCodebasePrincipal(nsIURI *aURI,
                                               nsIPrincipal **_retval)
 {
     return GetSimpleCodebasePrincipal(aURI, _retval);
-}
-
-NS_IMETHODIMP
-FullTrustSecMan::RequestCapability(nsIPrincipal *principal,
-                                   const char *capability,
-                                   int16_t *_retval)
-{
-    *_retval = nsIPrincipal::ENABLE_GRANTED;
-    return NS_OK;
-}
-
-NS_IMETHODIMP
-FullTrustSecMan::IsCapabilityEnabled(const char *capability,
-                                     bool *_retval)
-{
-    *_retval = true;
-    return NS_OK;
-}
-
-NS_IMETHODIMP
-FullTrustSecMan::EnableCapability(const char *capability)
-{
-    return NS_OK;;
 }
 
 NS_IMETHODIMP
@@ -838,14 +809,6 @@ FullTrustSecMan::CheckSameOriginURI(nsIURI *aSourceURI,
                                     bool reportError)
 {
     return NS_OK;
-}
-
-NS_IMETHODIMP
-FullTrustSecMan::GetPrincipalFromContext(JSContext * cx,
-                                         nsIPrincipal **_retval)
-{
-    NS_IF_ADDREF(*_retval = mSystemPrincipal);
-    return *_retval ? NS_OK : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP

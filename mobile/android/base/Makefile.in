@@ -35,6 +35,7 @@ UTIL_JAVA_FILES := \
   $(NULL)
 
 FENNEC_JAVA_FILES = \
+  AboutHomeContent.java \
   AboutHomePromoBox.java \
   AboutHomeSection.java \
   ActivityHandlerHelper.java \
@@ -114,6 +115,7 @@ FENNEC_JAVA_FILES = \
   RemoteTabs.java \
   RobocopAPI.java \
   ScreenshotHandler.java \
+  SessionParser.java \
   SetupScreen.java \
   ShapedButton.java \
   SiteIdentityPopup.java \
@@ -186,7 +188,6 @@ endif
 
 FENNEC_PP_JAVA_FILES = \
   App.java \
-  AboutHomeContent.java \
   MarketplaceApp.java \
   WebApp.java \
   WebApps.java \
@@ -230,7 +231,6 @@ FENNEC_PP_XML_FILES = \
 
 ifneq (,$(findstring -march=armv7,$(OS_CFLAGS)))
 MIN_CPU_VERSION=7
-DEFINES += -DARMV7_ONLY=1
 else
 MIN_CPU_VERSION=5
 endif
@@ -267,8 +267,11 @@ DEFINES += \
   -DMOZ_APP_BUILDID=$(MOZ_APP_BUILDID) \
   -DMOZ_APP_ABI=$(TARGET_XPCOM_ABI) \
   -DMOZ_UPDATER=$(MOZ_UPDATER) \
-  -DMOZ_PKG_SPECIAL=$(MOZ_PKG_SPECIAL) \
   $(NULL)
+
+ifdef MOZ_PKG_SPECIAL
+DEFINES += -DMOZ_PKG_SPECIAL=$(MOZ_PKG_SPECIAL)
+endif
 
 ifdef MOZ_LINKER_EXTRACT
 DEFINES += -DMOZ_LINKER_EXTRACT=1

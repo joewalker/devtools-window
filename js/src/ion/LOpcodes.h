@@ -20,6 +20,7 @@
     _(Parameter)                    \
     _(Callee)                       \
     _(TableSwitch)                  \
+    _(TableSwitchV)                 \
     _(Goto)                         \
     _(NewArray)                     \
     _(NewObject)                    \
@@ -65,6 +66,7 @@
     _(IsNullOrUndefinedAndBranch)   \
     _(MinMaxI)                      \
     _(MinMaxD)                      \
+    _(NegD)                         \
     _(AbsI)                         \
     _(AbsD)                         \
     _(SqrtD)                        \

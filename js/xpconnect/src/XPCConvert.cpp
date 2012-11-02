@@ -18,7 +18,6 @@
 #include "AccessCheck.h"
 #include "nsJSUtils.h"
 
-#include "dombindings.h"
 #include "nsWrapperCacheInlines.h"
 
 #include "jsapi.h"
@@ -813,8 +812,7 @@ XPCConvert::NativeInterface2JSObject(XPCLazyCallContext& lccx,
                       "bad scope for new JSObjects");
 
     JSObject *jsscope = lccx.GetScopeForNewJSObjects();
-    XPCWrappedNativeScope* xpcscope =
-        XPCWrappedNativeScope::FindInJSObjectScope(cx, jsscope);
+    XPCWrappedNativeScope* xpcscope = GetObjectScope(jsscope);
     if (!xpcscope)
         return false;
 
@@ -845,7 +843,7 @@ XPCConvert::NativeInterface2JSObject(XPCLazyCallContext& lccx,
             }
 
             if (flat) {
-                if (!JS_WrapObject(ccx, &flat))
+                if (allowNativeWrapper && !JS_WrapObject(ccx, &flat))
                     return false;
 
                 return CreateHolderIfNeeded(ccx, flat, d, dest);

@@ -481,6 +481,7 @@ private:
     nsresult ProcessNewTransaction(nsHttpTransaction *);
     nsresult EnsureSocketThreadTarget();
     void     ClosePersistentConnections(nsConnectionEntry *ent);
+    void     ReportProxyTelemetry(nsConnectionEntry *ent);
     nsresult CreateTransport(nsConnectionEntry *, nsAHttpTransaction *,
                              uint8_t, bool);
     void     AddActiveConn(nsHttpConnection *, nsConnectionEntry *);
@@ -560,6 +561,7 @@ private:
 
     // message handlers
     void OnMsgShutdown             (int32_t, void *);
+    void OnMsgShutdownConfirm      (int32_t, void *);
     void OnMsgNewTransaction       (int32_t, void *);
     void OnMsgReschedTransaction   (int32_t, void *);
     void OnMsgCancelTransaction    (int32_t, void *);

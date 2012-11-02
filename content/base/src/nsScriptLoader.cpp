@@ -829,9 +829,6 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest,
     return NS_ERROR_FAILURE;
   }
 
-  bool oldProcessingScriptTag = context->GetProcessingScriptTag();
-  context->SetProcessingScriptTag(true);
-
   // Update our current script.
   nsCOMPtr<nsIScriptElement> oldCurrent = mCurrentScript;
   mCurrentScript = aRequest->mElement;
@@ -852,10 +849,6 @@ nsScriptLoader::EvaluateScript(nsScriptLoadRequest* aRequest,
   // Put the old script back in case it wants to do anything else.
   mCurrentScript = oldCurrent;
 
-  JSContext *cx = nullptr; // Initialize this to keep GCC happy.
-  cx = context->GetNativeContext();
-  JSAutoRequest ar(cx);
-  context->SetProcessingScriptTag(oldProcessingScriptTag);
   return rv;
 }
 
@@ -1004,84 +997,93 @@ nsScriptLoader::ConvertToUTF16(nsIChannel* aChannel, const uint8_t* aData,
     return NS_OK;
   }
 
-  nsAutoCString characterSet;
+  // The encoding info precedence is as follows from high to low:
+  // The BOM
+  // HTTP Content-Type (if name recognized)
+  // charset attribute (if name recognized)
+  // The encoding of the document
 
-  nsresult rv = NS_OK;
-  if (aChannel) {
-    rv = aChannel->GetContentCharset(characterSet);
-  }
-
-  if (!aHintCharset.IsEmpty() && (NS_FAILED(rv) || characterSet.IsEmpty())) {
-    // charset name is always ASCII.
-    LossyCopyUTF16toASCII(aHintCharset, characterSet);
-  }
-
-  if (NS_FAILED(rv) || characterSet.IsEmpty()) {
-    DetectByteOrderMark(aData, aLength, characterSet);
-  }
-
-  if (characterSet.IsEmpty() && aDocument) {
-    // charset from document default
-    characterSet = aDocument->GetDocumentCharacterSet();
-  }
-
-  if (characterSet.IsEmpty()) {
-    // fall back to ISO-8859-1, see bug 118404
-    characterSet.AssignLiteral("ISO-8859-1");
-  }
+  nsAutoCString charset;
 
   nsCOMPtr<nsICharsetConverterManager> charsetConv =
-    do_GetService(NS_CHARSETCONVERTERMANAGER_CONTRACTID, &rv);
+    do_GetService(NS_CHARSETCONVERTERMANAGER_CONTRACTID);
 
   nsCOMPtr<nsIUnicodeDecoder> unicodeDecoder;
 
-  if (NS_SUCCEEDED(rv) && charsetConv) {
-    rv = charsetConv->GetUnicodeDecoder(characterSet.get(),
-                                        getter_AddRefs(unicodeDecoder));
+  if (DetectByteOrderMark(aData, aLength, charset)) {
+    // charset is now "UTF-8" or "UTF-16". The UTF-16 decoder will re-sniff
+    // the BOM for endianness. Both the UTF-16 and the UTF-8 decoder will
+    // take care of swallowing the BOM.
+    charsetConv->GetUnicodeDecoderRaw(charset.get(),
+                                      getter_AddRefs(unicodeDecoder));
+  }
+
+  if (!unicodeDecoder &&
+      aChannel &&
+      NS_SUCCEEDED(aChannel->GetContentCharset(charset))) {
+    charsetConv->GetUnicodeDecoder(charset.get(),
+                                   getter_AddRefs(unicodeDecoder));
+  }
+
+  if (!unicodeDecoder && !aHintCharset.IsEmpty()) {
+    CopyUTF16toUTF8(aHintCharset, charset);
+    charsetConv->GetUnicodeDecoder(charset.get(),
+                                   getter_AddRefs(unicodeDecoder));
+  }
+
+  if (!unicodeDecoder && aDocument) {
+    charset = aDocument->GetDocumentCharacterSet();
+    charsetConv->GetUnicodeDecoderRaw(charset.get(),
+                                      getter_AddRefs(unicodeDecoder));
+  }
+
+  if (!unicodeDecoder) {
+    // Curiously, there are various callers that don't pass aDocument. The
+    // fallback in the old code was ISO-8859-1, which behaved like
+    // windows-1252. Saying windows-1252 for clarity and for compliance
+    // with the Encoding Standard.
+    charsetConv->GetUnicodeDecoderRaw("windows-1252",
+                                      getter_AddRefs(unicodeDecoder));
+  }
+
+  int32_t unicodeLength = 0;
+
+  nsresult rv =
+    unicodeDecoder->GetMaxLength(reinterpret_cast<const char*>(aData),
+                                 aLength, &unicodeLength);
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  if (!EnsureStringLength(aString, unicodeLength)) {
+    return NS_ERROR_OUT_OF_MEMORY;
+  }
+
+  PRUnichar *ustr = aString.BeginWriting();
+
+  int32_t consumedLength = 0;
+  int32_t originalLength = aLength;
+  int32_t convertedLength = 0;
+  int32_t bufferLength = unicodeLength;
+  do {
+    rv = unicodeDecoder->Convert(reinterpret_cast<const char*>(aData),
+                                 (int32_t *) &aLength, ustr,
+                                 &unicodeLength);
     if (NS_FAILED(rv)) {
-      // fall back to ISO-8859-1 if charset is not supported. (bug 230104)
-      rv = charsetConv->GetUnicodeDecoderRaw("ISO-8859-1",
-                                             getter_AddRefs(unicodeDecoder));
+      // if we failed, we consume one byte, replace it with U+FFFD
+      // and try the conversion again.
+      ustr[unicodeLength++] = (PRUnichar)0xFFFD;
+      ustr += unicodeLength;
+
+      unicodeDecoder->Reset();
     }
-  }
-
-  // converts from the charset to unicode
-  if (NS_SUCCEEDED(rv)) {
-    int32_t unicodeLength = 0;
-
-    rv = unicodeDecoder->GetMaxLength(reinterpret_cast<const char*>(aData),
-                                      aLength, &unicodeLength);
-    if (NS_SUCCEEDED(rv)) {
-      if (!EnsureStringLength(aString, unicodeLength))
-        return NS_ERROR_OUT_OF_MEMORY;
-
-      PRUnichar *ustr = aString.BeginWriting();
-
-      int32_t consumedLength = 0;
-      int32_t originalLength = aLength;
-      int32_t convertedLength = 0;
-      int32_t bufferLength = unicodeLength;
-      do {
-        rv = unicodeDecoder->Convert(reinterpret_cast<const char*>(aData),
-                                     (int32_t *) &aLength, ustr,
-                                     &unicodeLength);
-        if (NS_FAILED(rv)) {
-          // if we failed, we consume one byte, replace it with U+FFFD
-          // and try the conversion again.
-          ustr[unicodeLength++] = (PRUnichar)0xFFFD;
-          ustr += unicodeLength;
-
-          unicodeDecoder->Reset();
-        }
-        aData += ++aLength;
-        consumedLength += aLength;
-        aLength = originalLength - consumedLength;
-        convertedLength += unicodeLength;
-        unicodeLength = bufferLength - convertedLength;
-      } while (NS_FAILED(rv) && (originalLength > consumedLength) && (bufferLength > convertedLength));
-      aString.SetLength(convertedLength);
-    }
-  }
+    aData += ++aLength;
+    consumedLength += aLength;
+    aLength = originalLength - consumedLength;
+    convertedLength += unicodeLength;
+    unicodeLength = bufferLength - convertedLength;
+  } while (NS_FAILED(rv) &&
+           (originalLength > consumedLength) &&
+           (bufferLength > convertedLength));
+  aString.SetLength(convertedLength);
   return rv;
 }
 
@@ -1189,10 +1191,6 @@ nsScriptLoader::PrepareLoadedRequest(nsScriptLoadRequest* aRequest,
                         aRequest->mScriptText);
 
     NS_ENSURE_SUCCESS(rv, rv);
-
-    if (!ShouldExecuteScript(mDocument, channel)) {
-      return NS_ERROR_NOT_AVAILABLE;
-    }
   }
 
   // This assertion could fire errorously if we ran out of memory when
@@ -1211,36 +1209,6 @@ nsScriptLoader::PrepareLoadedRequest(nsScriptLoadRequest* aRequest,
   aRequest->mLoading = false;
 
   return NS_OK;
-}
-
-/* static */
-bool
-nsScriptLoader::ShouldExecuteScript(nsIDocument* aDocument,
-                                    nsIChannel* aChannel)
-{
-  if (!aChannel) {
-    return false;
-  }
-
-  bool hasCert;
-  nsIPrincipal* docPrincipal = aDocument->NodePrincipal();
-  docPrincipal->GetHasCertificate(&hasCert);
-  if (!hasCert) {
-    return true;
-  }
-
-  nsCOMPtr<nsIPrincipal> channelPrincipal;
-  nsresult rv = nsContentUtils::GetSecurityManager()->
-    GetChannelPrincipal(aChannel, getter_AddRefs(channelPrincipal));
-  NS_ENSURE_SUCCESS(rv, false);
-
-  NS_ASSERTION(channelPrincipal, "Gotta have a principal here!");
-
-  // If the channel principal isn't at least as powerful as the
-  // document principal, then we don't execute the script.
-  bool subsumes;
-  rv = channelPrincipal->Subsumes(docPrincipal, &subsumes);
-  return NS_SUCCEEDED(rv) && subsumes;
 }
 
 void

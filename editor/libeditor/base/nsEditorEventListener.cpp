@@ -284,6 +284,7 @@ NS_IMETHODIMP
 nsEditorEventListener::HandleEvent(nsIDOMEvent* aEvent)
 {
   NS_ENSURE_TRUE(mEditor, NS_ERROR_NOT_AVAILABLE);
+  nsCOMPtr<nsIEditor> kungFuDeathGrip = mEditor;
 
   nsAutoString eventType;
   aEvent->GetType(eventType);
@@ -900,6 +901,16 @@ nsEditorEventListener::Focus(nsIDOMEvent* aEvent)
   }
 
   mEditor->OnFocus(target);
+
+  nsCOMPtr<nsIContent> focusedContent = mEditor->GetFocusedContent();
+  NS_ENSURE_TRUE(focusedContent, NS_OK);
+  nsIDocument* currentDoc = focusedContent->GetCurrentDoc();
+  NS_ENSURE_TRUE(currentDoc, NS_OK);
+  nsCOMPtr<nsIPresShell> ps = GetPresShell();
+  NS_ENSURE_TRUE(ps, NS_OK);
+  nsIMEStateManager::OnFocusInEditor(ps->GetPresContext(),
+    currentDoc->HasFlag(NODE_IS_EDITABLE) ? nullptr : focusedContent);
+
   return NS_OK;
 }
 

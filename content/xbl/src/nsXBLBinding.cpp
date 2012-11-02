@@ -262,9 +262,15 @@ FieldSetterImpl(JSContext *cx, JS::CallArgs args)
     return false;
   }
 
-  js::Rooted<JS::Value> v(cx,
-                          args.length() > 0 ? args[0] : JS::UndefinedValue());
-  return JS_SetPropertyById(cx, thisObj, id, v.address());
+  if (installed) {
+    js::Rooted<JS::Value> v(cx,
+                            args.length() > 0 ? args[0] : JS::UndefinedValue());
+    if (!::JS_SetPropertyById(cx, thisObj, id, v.address())) {
+      return false;
+    }
+  }
+  args.rval().setUndefined();
+  return true;
 }
 
 static JSBool
@@ -1519,21 +1525,7 @@ nsXBLBinding::AllowScripts()
   bool canExecute;
   nsresult rv =
     mgr->CanExecuteScripts(cx, ourDocument->NodePrincipal(), &canExecute);
-  if (NS_FAILED(rv) || !canExecute) {
-    return false;
-  }
-
-  // Now one last check: make sure that we're not allowing a privilege
-  // escalation here.
-  bool haveCert;
-  doc->NodePrincipal()->GetHasCertificate(&haveCert);
-  if (!haveCert) {
-    return true;
-  }
-
-  bool subsumes;
-  rv = ourDocument->NodePrincipal()->Subsumes(doc->NodePrincipal(), &subsumes);
-  return NS_SUCCEEDED(rv) && subsumes;
+  return NS_SUCCEEDED(rv) && canExecute;
 }
 
 void

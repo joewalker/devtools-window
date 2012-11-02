@@ -29,10 +29,12 @@ public:
                BluetoothReplyRunnable* aRunnable);
   void Disconnect();
   bool SendLine(const char* aMessage);
+  bool SendCommand(const char* aCommand, const int aValue);
   void CallStateChanged(int aCallIndex, int aCallState,
                         const char* aNumber, bool aIsActive);
   void EnumerateCallState(int aCallIndex, int aCallState,
                           const char* aNumber, bool aIsActive);
+  void SetupCIND(int aCallIndex, int aCallState, bool aInitial);
   bool Listen();
 
 private:
@@ -43,19 +45,18 @@ private:
   bool Init();
   void Cleanup();
   void NotifyDialer(const nsAString& aCommand);
-  void NotifySettings(const bool aConnected);
+  void NotifySettings();
   virtual void OnConnectSuccess() MOZ_OVERRIDE;
   virtual void OnConnectError() MOZ_OVERRIDE;
   virtual void OnDisconnect() MOZ_OVERRIDE;
 
   int mCurrentVgs;
   int mCurrentCallIndex;
-  int mCurrentCallState;
-  int mCall;
-  int mCallSetup;
-  int mCallHeld;
-  nsAutoPtr<BluetoothRilListener> mListener;
+  bool mReceiveVgsFlag;
   nsString mDevicePath;
+  enum mozilla::ipc::SocketConnectionStatus mSocketStatus;
+  nsTArray<int> mCurrentCallStateArray;
+  nsAutoPtr<BluetoothRilListener> mListener;
 };
 
 END_BLUETOOTH_NAMESPACE

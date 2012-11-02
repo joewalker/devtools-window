@@ -50,7 +50,6 @@ function HUD_SERVICE()
 {
   // These methods access the "this" object, but they're registered as
   // event listeners. So we hammer in the "this" binding.
-  this.onTabSelect = this.onTabSelect.bind(this);
   this.onWindowUnload = this.onWindowUnload.bind(this);
 
   /**
@@ -114,13 +113,10 @@ HUD_SERVICE.prototype =
     let window = aTab.ownerDocument.defaultView;
     let gBrowser = window.gBrowser;
 
-    gBrowser.tabContainer.addEventListener("TabSelect", this.onTabSelect, false);
     window.addEventListener("unload", this.onWindowUnload, false);
 
     let hud = new WebConsole(aTab, aIframe, aOptions);
     this.hudReferences[hudId] = hud;
-
-    HeadsUpDisplayUICommands.refreshCommand();
 
     return hud;
   },
@@ -162,15 +158,12 @@ HUD_SERVICE.prototype =
 
       let gBrowser = window.gBrowser;
       let tabContainer = gBrowser.tabContainer;
-      tabContainer.removeEventListener("TabSelect", this.onTabSelect, false);
 
       this.suspend();
     }
 
     let contentWindow = aTab.linkedBrowser.contentWindow;
     contentWindow.focus();
-
-    HeadsUpDisplayUICommands.refreshCommand();
   },
 
   /**
@@ -298,17 +291,6 @@ HUD_SERVICE.prototype =
   },
 
   /**
-   * onTabSelect event handler function
-   *
-   * @param aEvent
-   * @returns void
-   */
-  onTabSelect: function HS_onTabSelect(aEvent)
-  {
-    HeadsUpDisplayUICommands.refreshCommand();
-  },
-
-  /**
    * Called whenever a browser window closes. Cleans up any consoles still
    * around.
    *
@@ -324,8 +306,6 @@ HUD_SERVICE.prototype =
 
     let gBrowser = window.gBrowser;
     let tabContainer = gBrowser.tabContainer;
-
-    tabContainer.removeEventListener("TabSelect", this.onTabSelect, false);
 
     let tab = tabContainer.firstChild;
     while (tab != null) {
@@ -620,20 +600,6 @@ WebConsole.prototype = {
 //////////////////////////////////////////////////////////////////////////
 
 var HeadsUpDisplayUICommands = {
-  refreshCommand: function UIC_refreshCommand() {
-    var window = HUDService.currentContext();
-    if (!window) {
-      return;
-    }
-
-    let command = window.document.getElementById("Tools:WebConsole");
-    if (this.getOpenHUD() != null) {
-      command.setAttribute("checked", true);
-    } else {
-      command.setAttribute("checked", false);
-    }
-  },
-
   toggleHUD: function UIC_toggleHUD(aOptions)
   {
     var window = HUDService.currentContext();

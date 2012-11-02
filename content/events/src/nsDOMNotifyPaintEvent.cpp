@@ -22,7 +22,7 @@ nsDOMNotifyPaintEvent::nsDOMNotifyPaintEvent(nsPresContext* aPresContext,
     mEvent->message = aEventType;
   }
   if (aInvalidateRequests) {
-    mInvalidateRequests.SwapElements(aInvalidateRequests->mRequests);
+    mInvalidateRequests.MoveElementsFrom(aInvalidateRequests->mRequests);
   }
 }
 
@@ -40,7 +40,7 @@ nsRegion
 nsDOMNotifyPaintEvent::GetRegion()
 {
   nsRegion r;
-  if (!nsContentUtils::IsCallerTrustedForRead()) {
+  if (!nsContentUtils::IsCallerChrome()) {
     return r;
   }
   for (uint32_t i = 0; i < mInvalidateRequests.Length(); ++i) {
@@ -97,7 +97,7 @@ nsDOMNotifyPaintEvent::GetPaintRequests(nsIDOMPaintRequestList** aResult)
   if (!requests)
     return NS_ERROR_OUT_OF_MEMORY;
 
-  if (nsContentUtils::IsCallerTrustedForRead()) {
+  if (nsContentUtils::IsCallerChrome()) {
     for (uint32_t i = 0; i < mInvalidateRequests.Length(); ++i) {
       nsRefPtr<nsPaintRequest> r = new nsPaintRequest();
       if (!r)

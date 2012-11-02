@@ -9,6 +9,8 @@
  * responsible for converting the rules' information into computed style
  */
 
+#include <algorithm>
+
 #include "nsRuleNode.h"
 #include "nscore.h"
 #include "nsIServiceManager.h"
@@ -40,6 +42,7 @@
 
 #include "mozilla/Assertions.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/Likely.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/Util.h"
 
@@ -53,6 +56,8 @@
 #include <alloca.h>
 #endif
 
+using std::max;
+using std::min;
 using namespace mozilla;
 using namespace mozilla::dom;
 
@@ -253,18 +258,63 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
   if (aValue.IsPixelLengthUnit()) {
     return aValue.GetPixelLength();
   }
-  // Common code for all units other than pixel-based units and fixed-length
-  // units:
-  aCanStoreInRuleTree = false;
-  const nsStyleFont *styleFont =
-    aStyleFont ? aStyleFont : aStyleContext->GetStyleFont();
-  if (aFontSize == -1) {
-    // XXX Should this be styleFont->mSize instead to avoid taking minfontsize
-    // prefs into account?
-    aFontSize = styleFont->mFont.size;
+  if (aValue.IsCalcUnit()) {
+    // For properties for which lengths are the *only* units accepted in
+    // calc(), we can handle calc() here and just compute a final
+    // result.  We ensure that we don't get to this code for other
+    // properties by not calling CalcLength in those cases:  SetCoord
+    // only calls CalcLength for a calc when it is appropriate to do so.
+    CalcLengthCalcOps ops(aFontSize, aStyleFont,
+                          aStyleContext, aPresContext,
+                          aUseProvidedRootEmSize, aUseUserFontSet,
+                          aCanStoreInRuleTree);
+    return css::ComputeCalc(aValue, ops);
   }
   switch (aValue.GetUnit()) {
+    // nsPresContext::SetVisibleArea and
+    // nsPresContext::MediaFeatureValuesChanged handle dynamic changes
+    // of the basis for viewport units by rebuilding the rule tree and
+    // style context tree.  Not caching them in the rule tree wouldn't
+    // be sufficient to handle these changes because we also need a way
+    // to get rid of cached values in the style context tree without any
+    // changes in specified style.  We can either do this by not caching
+    // in the rule tree and then throwing away the style context tree
+    // for dynamic viewport size changes, or by allowing caching in the
+    // rule tree and using the existing rebuild style data path that
+    // throws away the style context and the rule tree.
+    // Thus we do cache viewport units in the rule tree.  This allows us
+    // to benefit from the performance advantages of the rule tree
+    // (e.g., faster dynamic changes on other things, like transforms)
+    // and allows us not to need an additional code path, in exchange
+    // for an increased cost to dynamic changes to the viewport size
+    // when viewport units are in use.
+    case eCSSUnit_ViewportWidth: {
+      aPresContext->SetUsesViewportUnits(true);
+      return ScaleCoord(aValue, 0.01f * aPresContext->GetVisibleArea().width);
+    }
+    case eCSSUnit_ViewportHeight: {
+      aPresContext->SetUsesViewportUnits(true);
+      return ScaleCoord(aValue, 0.01f * aPresContext->GetVisibleArea().height);
+    }
+    case eCSSUnit_ViewportMin: {
+      aPresContext->SetUsesViewportUnits(true);
+      nsSize viewportSize = aPresContext->GetVisibleArea().Size();
+      return ScaleCoord(aValue, 0.01f * min(viewportSize.width, viewportSize.height));
+    }
+    case eCSSUnit_ViewportMax: {
+      aPresContext->SetUsesViewportUnits(true);
+      nsSize viewportSize = aPresContext->GetVisibleArea().Size();
+      return ScaleCoord(aValue, 0.01f * max(viewportSize.width, viewportSize.height));
+    }
+    // While we could deal with 'rem' units correctly by simply not
+    // caching any data that uses them in the rule tree, it's valuable
+    // to store them in the rule tree (for faster dynamic changes of
+    // other things).  And since the font size of the root element
+    // changes rarely, we instead handle dynamic changes to the root
+    // element's font size by rebuilding all style data in
+    // nsCSSFrameConstructor::RestyleElement.
     case eCSSUnit_RootEM: {
+      aPresContext->SetUsesRootEMUnits(true);
       nscoord rootFontSize;
 
       if (aUseProvidedRootEmSize) {
@@ -279,12 +329,15 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
         // nsRuleNode::SetFont makes the same assumption!), so we should
         // use GetStyleFont on this context to get the root element's
         // font size.
+        const nsStyleFont *styleFont =
+          aStyleFont ? aStyleFont : aStyleContext->GetStyleFont();
         rootFontSize = styleFont->mFont.size;
       } else {
         // This is not the root element or we are calculating something other
         // than font size, so rem is relative to the root element's font size.
         nsRefPtr<nsStyleContext> rootStyle;
-        const nsStyleFont *rootStyleFont = styleFont;
+        const nsStyleFont *rootStyleFont =
+          aStyleFont ? aStyleFont : aStyleContext->GetStyleFont();
         Element* docElement = aPresContext->Document()->GetRootElement();
 
         if (docElement) {
@@ -300,6 +353,22 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
 
       return ScaleCoord(aValue, float(rootFontSize));
     }
+    default:
+      // Fall through to the code for units that can't be stored in the
+      // rule tree because they depend on font data.
+      break;
+  }
+  // Common code for units that depend on the element's font data and
+  // thus can't be stored in the rule tree:
+  aCanStoreInRuleTree = false;
+  const nsStyleFont *styleFont =
+    aStyleFont ? aStyleFont : aStyleContext->GetStyleFont();
+  if (aFontSize == -1) {
+    // XXX Should this be styleFont->mSize instead to avoid taking minfontsize
+    // prefs into account?
+    aFontSize = styleFont->mFont.size;
+  }
+  switch (aValue.GetUnit()) {
     case eCSSUnit_EM: {
       return ScaleCoord(aValue, float(aFontSize));
       // XXX scale against font metrics height instead?
@@ -319,23 +388,6 @@ static nscoord CalcLengthWith(const nsCSSValue& aValue,
 
       return ScaleCoord(aValue, ceil(aPresContext->AppUnitsPerDevPixel() *
                                      zeroWidth));
-    }
-    // For properties for which lengths are the *only* units accepted in
-    // calc(), we can handle calc() here and just compute a final
-    // result.  We ensure that we don't get to this code for other
-    // properties by not calling CalcLength in those cases:  SetCoord
-    // only calls CalcLength for a calc when it is appropriate to do so.
-    case eCSSUnit_Calc:
-    case eCSSUnit_Calc_Plus:
-    case eCSSUnit_Calc_Minus:
-    case eCSSUnit_Calc_Times_L:
-    case eCSSUnit_Calc_Times_R:
-    case eCSSUnit_Calc_Divided: {
-      CalcLengthCalcOps ops(aFontSize, aStyleFont,
-                            aStyleContext, aPresContext,
-                            aUseProvidedRootEmSize, aUseUserFontSet,
-                            aCanStoreInRuleTree);
-      return css::ComputeCalc(aValue, ops);
     }
     default:
       NS_NOTREACHED("unexpected unit");
@@ -1976,7 +2028,7 @@ nsRuleNode::WalkRuleTree(const nsStyleStructID aSID,
 #undef STYLE_STRUCT_TEST
 
   // If we have a post-resolve callback, handle that now.
-  if (ruleData.mPostResolveCallback && (NS_LIKELY(res != nullptr)))
+  if (ruleData.mPostResolveCallback && (MOZ_LIKELY(res != nullptr)))
     (*ruleData.mPostResolveCallback)(const_cast<void*>(res), &ruleData);
 
   // Now return the result.
@@ -1990,7 +2042,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_Font:
     {
       nsStyleFont* fontData = new (mPresContext) nsStyleFont(mPresContext);
-      if (NS_LIKELY(fontData != nullptr)) {
+      if (MOZ_LIKELY(fontData != nullptr)) {
         nscoord minimumFontSize = mPresContext->MinFontSize(fontData->mLanguage);
 
         if (minimumFontSize > 0 && !mPresContext->IsChrome()) {
@@ -2006,7 +2058,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_Display:
     {
       nsStyleDisplay* disp = new (mPresContext) nsStyleDisplay();
-      if (NS_LIKELY(disp != nullptr)) {
+      if (MOZ_LIKELY(disp != nullptr)) {
         aContext->SetStyle(eStyleStruct_Display, disp);
       }
       return disp;
@@ -2014,7 +2066,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_Visibility:
     {
       nsStyleVisibility* vis = new (mPresContext) nsStyleVisibility(mPresContext);
-      if (NS_LIKELY(vis != nullptr)) {
+      if (MOZ_LIKELY(vis != nullptr)) {
         aContext->SetStyle(eStyleStruct_Visibility, vis);
       }
       return vis;
@@ -2022,7 +2074,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_Text:
     {
       nsStyleText* text = new (mPresContext) nsStyleText();
-      if (NS_LIKELY(text != nullptr)) {
+      if (MOZ_LIKELY(text != nullptr)) {
         aContext->SetStyle(eStyleStruct_Text, text);
       }
       return text;
@@ -2030,7 +2082,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_TextReset:
     {
       nsStyleTextReset* text = new (mPresContext) nsStyleTextReset();
-      if (NS_LIKELY(text != nullptr)) {
+      if (MOZ_LIKELY(text != nullptr)) {
         aContext->SetStyle(eStyleStruct_TextReset, text);
       }
       return text;
@@ -2038,7 +2090,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_Color:
     {
       nsStyleColor* color = new (mPresContext) nsStyleColor(mPresContext);
-      if (NS_LIKELY(color != nullptr)) {
+      if (MOZ_LIKELY(color != nullptr)) {
         aContext->SetStyle(eStyleStruct_Color, color);
       }
       return color;
@@ -2046,7 +2098,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_Background:
     {
       nsStyleBackground* bg = new (mPresContext) nsStyleBackground();
-      if (NS_LIKELY(bg != nullptr)) {
+      if (MOZ_LIKELY(bg != nullptr)) {
         aContext->SetStyle(eStyleStruct_Background, bg);
       }
       return bg;
@@ -2054,7 +2106,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_Margin:
     {
       nsStyleMargin* margin = new (mPresContext) nsStyleMargin();
-      if (NS_LIKELY(margin != nullptr)) {
+      if (MOZ_LIKELY(margin != nullptr)) {
         aContext->SetStyle(eStyleStruct_Margin, margin);
       }
       return margin;
@@ -2062,7 +2114,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_Border:
     {
       nsStyleBorder* border = new (mPresContext) nsStyleBorder(mPresContext);
-      if (NS_LIKELY(border != nullptr)) {
+      if (MOZ_LIKELY(border != nullptr)) {
         aContext->SetStyle(eStyleStruct_Border, border);
       }
       return border;
@@ -2070,7 +2122,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_Padding:
     {
       nsStylePadding* padding = new (mPresContext) nsStylePadding();
-      if (NS_LIKELY(padding != nullptr)) {
+      if (MOZ_LIKELY(padding != nullptr)) {
         aContext->SetStyle(eStyleStruct_Padding, padding);
       }
       return padding;
@@ -2078,7 +2130,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_Outline:
     {
       nsStyleOutline* outline = new (mPresContext) nsStyleOutline(mPresContext);
-      if (NS_LIKELY(outline != nullptr)) {
+      if (MOZ_LIKELY(outline != nullptr)) {
         aContext->SetStyle(eStyleStruct_Outline, outline);
       }
       return outline;
@@ -2086,7 +2138,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_List:
     {
       nsStyleList* list = new (mPresContext) nsStyleList();
-      if (NS_LIKELY(list != nullptr)) {
+      if (MOZ_LIKELY(list != nullptr)) {
         aContext->SetStyle(eStyleStruct_List, list);
       }
       return list;
@@ -2094,7 +2146,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_Position:
     {
       nsStylePosition* pos = new (mPresContext) nsStylePosition();
-      if (NS_LIKELY(pos != nullptr)) {
+      if (MOZ_LIKELY(pos != nullptr)) {
         aContext->SetStyle(eStyleStruct_Position, pos);
       }
       return pos;
@@ -2102,7 +2154,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_Table:
     {
       nsStyleTable* table = new (mPresContext) nsStyleTable();
-      if (NS_LIKELY(table != nullptr)) {
+      if (MOZ_LIKELY(table != nullptr)) {
         aContext->SetStyle(eStyleStruct_Table, table);
       }
       return table;
@@ -2110,7 +2162,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_TableBorder:
     {
       nsStyleTableBorder* table = new (mPresContext) nsStyleTableBorder(mPresContext);
-      if (NS_LIKELY(table != nullptr)) {
+      if (MOZ_LIKELY(table != nullptr)) {
         aContext->SetStyle(eStyleStruct_TableBorder, table);
       }
       return table;
@@ -2118,7 +2170,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_Content:
     {
       nsStyleContent* content = new (mPresContext) nsStyleContent();
-      if (NS_LIKELY(content != nullptr)) {
+      if (MOZ_LIKELY(content != nullptr)) {
         aContext->SetStyle(eStyleStruct_Content, content);
       }
       return content;
@@ -2126,7 +2178,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_Quotes:
     {
       nsStyleQuotes* quotes = new (mPresContext) nsStyleQuotes();
-      if (NS_LIKELY(quotes != nullptr)) {
+      if (MOZ_LIKELY(quotes != nullptr)) {
         aContext->SetStyle(eStyleStruct_Quotes, quotes);
       }
       return quotes;
@@ -2134,7 +2186,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_UserInterface:
     {
       nsStyleUserInterface* ui = new (mPresContext) nsStyleUserInterface();
-      if (NS_LIKELY(ui != nullptr)) {
+      if (MOZ_LIKELY(ui != nullptr)) {
         aContext->SetStyle(eStyleStruct_UserInterface, ui);
       }
       return ui;
@@ -2142,7 +2194,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_UIReset:
     {
       nsStyleUIReset* ui = new (mPresContext) nsStyleUIReset();
-      if (NS_LIKELY(ui != nullptr)) {
+      if (MOZ_LIKELY(ui != nullptr)) {
         aContext->SetStyle(eStyleStruct_UIReset, ui);
       }
       return ui;
@@ -2151,7 +2203,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_XUL:
     {
       nsStyleXUL* xul = new (mPresContext) nsStyleXUL();
-      if (NS_LIKELY(xul != nullptr)) {
+      if (MOZ_LIKELY(xul != nullptr)) {
         aContext->SetStyle(eStyleStruct_XUL, xul);
       }
       return xul;
@@ -2160,7 +2212,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_Column:
     {
       nsStyleColumn* column = new (mPresContext) nsStyleColumn(mPresContext);
-      if (NS_LIKELY(column != nullptr)) {
+      if (MOZ_LIKELY(column != nullptr)) {
         aContext->SetStyle(eStyleStruct_Column, column);
       }
       return column;
@@ -2169,7 +2221,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_SVG:
     {
       nsStyleSVG* svg = new (mPresContext) nsStyleSVG();
-      if (NS_LIKELY(svg != nullptr)) {
+      if (MOZ_LIKELY(svg != nullptr)) {
         aContext->SetStyle(eStyleStruct_SVG, svg);
       }
       return svg;
@@ -2178,7 +2230,7 @@ nsRuleNode::SetDefaultOnRoot(const nsStyleStructID aSID, nsStyleContext* aContex
     case eStyleStruct_SVGReset:
     {
       nsStyleSVGReset* svgReset = new (mPresContext) nsStyleSVGReset();
-      if (NS_LIKELY(svgReset != nullptr)) {
+      if (MOZ_LIKELY(svgReset != nullptr)) {
         aContext->SetStyle(eStyleStruct_SVGReset, svgReset);
       }
       return svgReset;
@@ -2298,8 +2350,8 @@ nsRuleNode::AdjustLogicalBoxProp(nsStyleContext* aContext,
       data_ = new (mPresContext) nsStyle##type_ ctorargs_;                    \
   }                                                                           \
                                                                               \
-  if (NS_UNLIKELY(!data_))                                                    \
-    return nullptr;  /* Out Of Memory */                                       \
+  if (MOZ_UNLIKELY(!data_))                                                   \
+    return nullptr;  /* Out Of Memory */                                      \
   if (!parentdata_)                                                           \
     parentdata_ = data_;
 
@@ -2334,8 +2386,8 @@ nsRuleNode::AdjustLogicalBoxProp(nsStyleContext* aContext,
   else                                                                        \
     data_ = new (mPresContext) nsStyle##type_ ctorargs_;                      \
                                                                               \
-  if (NS_UNLIKELY(!data_))                                                    \
-    return nullptr;  /* Out Of Memory */                                       \
+  if (MOZ_UNLIKELY(!data_))                                                   \
+    return nullptr;  /* Out Of Memory */                                      \
                                                                               \
   /* If |canStoreInRuleTree| might be true by the time we're done, we */      \
   /* can't call parentContext->GetStyle##type_() since it could recur into */ \
@@ -2366,9 +2418,9 @@ nsRuleNode::AdjustLogicalBoxProp(nsStyleContext* aContext,
     if (!aHighestNode->mStyleData.mInheritedData) {                           \
       aHighestNode->mStyleData.mInheritedData =                               \
         new (mPresContext) nsInheritedStyleData;                              \
-      if (NS_UNLIKELY(!aHighestNode->mStyleData.mInheritedData)) {            \
+      if (MOZ_UNLIKELY(!aHighestNode->mStyleData.mInheritedData)) {           \
         data_->Destroy(mPresContext);                                         \
-        return nullptr;                                                        \
+        return nullptr;                                                       \
       }                                                                       \
     }                                                                         \
     NS_ASSERTION(!aHighestNode->mStyleData.mInheritedData->                   \
@@ -2410,9 +2462,9 @@ nsRuleNode::AdjustLogicalBoxProp(nsStyleContext* aContext,
     if (!aHighestNode->mStyleData.mResetData) {                               \
       aHighestNode->mStyleData.mResetData =                                   \
         new (mPresContext) nsResetStyleData;                                  \
-      if (NS_UNLIKELY(!aHighestNode->mStyleData.mResetData)) {                \
+      if (MOZ_UNLIKELY(!aHighestNode->mStyleData.mResetData)) {               \
         data_->Destroy(mPresContext);                                         \
-        return nullptr;                                                        \
+        return nullptr;                                                       \
       }                                                                       \
     }                                                                         \
     NS_ASSERTION(!aHighestNode->mStyleData.mResetData->                       \
@@ -2981,8 +3033,9 @@ nsRuleNode::SetFont(nsPresContext* aPresContext, nsStyleContext* aContext,
     gfxFontStyle fontStyle;
     LookAndFeel::FontID fontID =
       (LookAndFeel::FontID)systemFontValue->GetIntValue();
-    float devPerCSS = (float)nsPresContext::AppUnitsPerCSSPixel() /
-                      aPresContext->AppUnitsPerDevPixel();
+    float devPerCSS =
+      (float)nsPresContext::AppUnitsPerCSSPixel() /
+      aPresContext->DeviceContext()->UnscaledAppUnitsPerDevPixel();
     if (LookAndFeel::GetFont(fontID, systemFont.name, fontStyle, devPerCSS)) {
       systemFont.style = fontStyle.style;
       systemFont.systemFont = fontStyle.systemFont;
@@ -4663,7 +4716,7 @@ nsRuleNode::ComputeDisplayData(void* aStartStruct,
     mozilla::css::URLValue* url = bindingValue->GetURLStructValue();
     NS_ASSERTION(url, "What's going on here?");
 
-    if (NS_LIKELY(url->GetURI())) {
+    if (MOZ_LIKELY(url->GetURI())) {
       display->mBinding = url;
     } else {
       display->mBinding = nullptr;
@@ -7628,16 +7681,16 @@ nsRuleNode::GetStyleData(nsStyleStructID aSID,
   }
 
   data = mStyleData.GetStyleData(aSID);
-  if (NS_LIKELY(data != nullptr))
+  if (MOZ_LIKELY(data != nullptr))
     return data; // We have a fully specified struct. Just return it.
 
-  if (NS_UNLIKELY(!aComputeData))
+  if (MOZ_UNLIKELY(!aComputeData))
     return nullptr;
 
   // Nothing is cached.  We'll have to delve further and examine our rules.
   data = WalkRuleTree(aSID, aContext);
 
-  if (NS_LIKELY(data != nullptr))
+  if (MOZ_LIKELY(data != nullptr))
     return data;
 
   NS_NOTREACHED("could not create style struct");
@@ -7666,16 +7719,16 @@ nsRuleNode::GetStyle##name_(nsStyleContext* aContext, bool aComputeData)    \
   }                                                                           \
                                                                               \
   data = mStyleData.GetStyle##name_();                                        \
-  if (NS_LIKELY(data != nullptr))                                              \
+  if (MOZ_LIKELY(data != nullptr))                                            \
     return data;                                                              \
                                                                               \
-  if (NS_UNLIKELY(!aComputeData))                                             \
-    return nullptr;                                                            \
+  if (MOZ_UNLIKELY(!aComputeData))                                            \
+    return nullptr;                                                           \
                                                                               \
   data = static_cast<const nsStyle##name_ *>                                  \
            (WalkRuleTree(eStyleStruct_##name_, aContext));                    \
                                                                               \
-  if (NS_LIKELY(data != nullptr))                                              \
+  if (MOZ_LIKELY(data != nullptr))                                            \
     return data;                                                              \
                                                                               \
   NS_NOTREACHED("could not create style struct");                             \

@@ -275,7 +275,7 @@ nsHTMLInputElement::nsFilePickerShownCallback::Done(int16_t aResult)
       if (!prefSaved) {
         // Store the last used directory using the content pref service
         nsHTMLInputElement::gUploadLastDir->StoreLastUsedDirectory(
-          mInput->OwnerDoc()->GetDocumentURI(), localFile);
+          mInput->OwnerDoc(), localFile);
         prefSaved = true;
       }
     }
@@ -293,7 +293,7 @@ nsHTMLInputElement::nsFilePickerShownCallback::Done(int16_t aResult)
         newFiles.AppendObject(domFile);
         // Store the last used directory using the content pref service
         nsHTMLInputElement::gUploadLastDir->StoreLastUsedDirectory(
-          mInput->OwnerDoc()->GetDocumentURI(), localFile);
+          mInput->OwnerDoc(), localFile);
       }
     }
   }
@@ -410,7 +410,7 @@ nsHTMLInputElement::AsyncClickHandler::Run()
   } else {
     // Attempt to retrieve the last used directory from the content pref service
     nsCOMPtr<nsIFile> localFile;
-    nsHTMLInputElement::gUploadLastDir->FetchLastUsedDirectory(doc->GetDocumentURI(),
+    nsHTMLInputElement::gUploadLastDir->FetchLastUsedDirectory(doc,
                                                                getter_AddRefs(localFile));
     if (!localFile) {
       // Default to "desktop" directory for each platform
@@ -448,10 +448,17 @@ nsHTMLInputElement::DestroyUploadLastDir() {
 }
 
 nsresult
-UploadLastDir::FetchLastUsedDirectory(nsIURI* aURI, nsIFile** aFile)
+UploadLastDir::FetchLastUsedDirectory(nsIDocument* aDoc, nsIFile** aFile)
 {
-  NS_PRECONDITION(aURI, "aURI is null");
+  NS_PRECONDITION(aDoc, "aDoc is null");
   NS_PRECONDITION(aFile, "aFile is null");
+
+  nsIURI* docURI = aDoc->GetDocumentURI();
+  NS_PRECONDITION(docURI, "docURI is null");
+
+  nsCOMPtr<nsISupports> container = aDoc->GetContainer();
+  nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(container);
+
   // Attempt to get the CPS, if it's not present we'll just return
   nsCOMPtr<nsIContentPrefService> contentPrefService =
     do_GetService(NS_CONTENT_PREF_SERVICE_CONTRACTID);
@@ -460,13 +467,13 @@ UploadLastDir::FetchLastUsedDirectory(nsIURI* aURI, nsIFile** aFile)
   nsCOMPtr<nsIWritableVariant> uri = do_CreateInstance(NS_VARIANT_CONTRACTID);
   if (!uri)
     return NS_ERROR_OUT_OF_MEMORY;
-  uri->SetAsISupports(aURI);
+  uri->SetAsISupports(docURI);
 
   // Get the last used directory, if it is stored
   bool hasPref;
-  if (NS_SUCCEEDED(contentPrefService->HasPref(uri, CPS_PREF_NAME, &hasPref)) && hasPref) {
+  if (NS_SUCCEEDED(contentPrefService->HasPref(uri, CPS_PREF_NAME, loadContext, &hasPref)) && hasPref) {
     nsCOMPtr<nsIVariant> pref;
-    contentPrefService->GetPref(uri, CPS_PREF_NAME, nullptr, getter_AddRefs(pref));
+    contentPrefService->GetPref(uri, CPS_PREF_NAME, loadContext, nullptr, getter_AddRefs(pref));
     nsString prefStr;
     pref->GetAsAString(prefStr);
 
@@ -480,10 +487,14 @@ UploadLastDir::FetchLastUsedDirectory(nsIURI* aURI, nsIFile** aFile)
 }
 
 nsresult
-UploadLastDir::StoreLastUsedDirectory(nsIURI* aURI, nsIFile* aFile)
+UploadLastDir::StoreLastUsedDirectory(nsIDocument* aDoc, nsIFile* aFile)
 {
-  NS_PRECONDITION(aURI, "aURI is null");
+  NS_PRECONDITION(aDoc, "aDoc is null");
   NS_PRECONDITION(aFile, "aFile is null");
+
+  nsCOMPtr<nsIURI> docURI = aDoc->GetDocumentURI();
+  NS_PRECONDITION(docURI, "docURI is null");
+
   nsCOMPtr<nsIFile> parentFile;
   aFile->GetParent(getter_AddRefs(parentFile));
   if (!parentFile) {
@@ -498,7 +509,7 @@ UploadLastDir::StoreLastUsedDirectory(nsIURI* aURI, nsIFile* aFile)
   nsCOMPtr<nsIWritableVariant> uri = do_CreateInstance(NS_VARIANT_CONTRACTID);
   if (!uri)
     return NS_ERROR_OUT_OF_MEMORY;
-  uri->SetAsISupports(aURI);
+  uri->SetAsISupports(docURI);
  
   // Find the parent of aFile, and store it
   nsString unicodePath;
@@ -509,7 +520,10 @@ UploadLastDir::StoreLastUsedDirectory(nsIURI* aURI, nsIFile* aFile)
   if (!prefValue)
     return NS_ERROR_OUT_OF_MEMORY;
   prefValue->SetAsAString(unicodePath);
-  return contentPrefService->SetPref(uri, CPS_PREF_NAME, prefValue);
+
+  nsCOMPtr<nsISupports> container = aDoc->GetContainer();
+  nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(container);
+  return contentPrefService->SetPref(uri, CPS_PREF_NAME, prefValue, loadContext);
 }
 
 NS_IMETHODIMP
@@ -519,7 +533,7 @@ UploadLastDir::Observe(nsISupports *aSubject, char const *aTopic, PRUnichar cons
     nsCOMPtr<nsIContentPrefService> contentPrefService =
       do_GetService(NS_CONTENT_PREF_SERVICE_CONTRACTID);
     if (contentPrefService)
-      contentPrefService->RemovePrefsByName(CPS_PREF_NAME);
+      contentPrefService->RemovePrefsByName(CPS_PREF_NAME, nullptr);
   }
   return NS_OK;
 }
@@ -990,7 +1004,7 @@ nsHTMLInputElement::GetValueInternal(nsAString& aValue) const
       return NS_OK;
 
     case VALUE_MODE_FILENAME:
-      if (nsContentUtils::CallerHasUniversalXPConnect()) {
+      if (nsContentUtils::IsCallerChrome()) {
         if (mFiles.Count()) {
           return mFiles[0]->GetMozFullPath(aValue);
         }
@@ -1052,9 +1066,9 @@ nsHTMLInputElement::SetValue(const nsAString& aValue)
   // OK and gives pages a way to clear a file input if necessary.
   if (mType == NS_FORM_INPUT_FILE) {
     if (!aValue.IsEmpty()) {
-      if (!nsContentUtils::CallerHasUniversalXPConnect()) {
-        // setting the value of a "FILE" input widget requires the
-        // UniversalXPConnect privilege
+      if (!nsContentUtils::IsCallerChrome()) {
+        // setting the value of a "FILE" input widget requires
+        // chrome privilege
         return NS_ERROR_DOM_SECURITY_ERR;
       }
       const PRUnichar *name = PromiseFlatString(aValue).get();
@@ -1270,7 +1284,7 @@ nsHTMLInputElement::StepUp(int32_t n, uint8_t optional_argc)
 NS_IMETHODIMP 
 nsHTMLInputElement::MozGetFileNameArray(uint32_t *aLength, PRUnichar ***aFileNames)
 {
-  if (!nsContentUtils::CallerHasUniversalXPConnect()) {
+  if (!nsContentUtils::IsCallerChrome()) {
     // Since this function returns full paths it's important that normal pages
     // can't call it.
     return NS_ERROR_DOM_SECURITY_ERR;
@@ -1297,9 +1311,8 @@ nsHTMLInputElement::MozGetFileNameArray(uint32_t *aLength, PRUnichar ***aFileNam
 NS_IMETHODIMP 
 nsHTMLInputElement::MozSetFileNameArray(const PRUnichar **aFileNames, uint32_t aLength)
 {
-  if (!nsContentUtils::CallerHasUniversalXPConnect()) {
-    // setting the value of a "FILE" input widget requires the
-    // UniversalXPConnect privilege
+  if (!nsContentUtils::IsCallerChrome()) {
+    // setting the value of a "FILE" input widget requires chrome privilege
     return NS_ERROR_DOM_SECURITY_ERR;
   }
 
@@ -1352,7 +1365,7 @@ nsHTMLInputElement::MozIsTextField(bool aExcludePassword, bool* aResult)
 NS_IMETHODIMP 
 nsHTMLInputElement::SetUserInput(const nsAString& aValue)
 {
-  if (!nsContentUtils::IsCallerTrustedForWrite()) {
+  if (!nsContentUtils::IsCallerChrome()) {
     return NS_ERROR_DOM_SECURITY_ERR;
   }
 

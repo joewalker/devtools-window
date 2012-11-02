@@ -41,11 +41,20 @@
 using namespace mozilla;
 
 #ifdef PR_LOGGING
-static PRLogModuleInfo *sLog = PR_NewLogModule("nsThread");
+static PRLogModuleInfo *
+GetThreadLog()
+{
+  static PRLogModuleInfo *sLog;
+  if (!sLog)
+    sLog = PR_NewLogModule("nsThread");
+  return sLog;
+}
 #endif
-#define LOG(args) PR_LOG(sLog, PR_LOG_DEBUG, args)
+#define LOG(args) PR_LOG(GetThreadLog(), PR_LOG_DEBUG, args)
 
 NS_DECL_CI_INTERFACE_GETTER(nsThread)
+
+nsIThreadObserver* nsThread::sMainThreadObserver = nullptr;
 
 namespace mozilla {
 
@@ -580,6 +589,12 @@ nsThread::ProcessNextEvent(bool mayWait, bool *result)
     }
   }
 
+  bool notifyMainThreadObserver =
+    (MAIN_THREAD == mIsMainThread) && sMainThreadObserver;
+  if (notifyMainThreadObserver) 
+   sMainThreadObserver->OnProcessNextEvent(this, mayWait && !ShuttingDown(),
+                                           mRunningEvent);
+
   nsCOMPtr<nsIThreadObserver> obs = mObserver;
   if (obs)
     obs->OnProcessNextEvent(this, mayWait && !ShuttingDown(), mRunningEvent);
@@ -623,6 +638,9 @@ nsThread::ProcessNextEvent(bool mayWait, bool *result)
 
   if (obs)
     obs->AfterProcessNextEvent(this, mRunningEvent);
+
+  if (notifyMainThreadObserver && sMainThreadObserver)
+    sMainThreadObserver->AfterProcessNextEvent(this, mRunningEvent);
 
   return rv;
 }
@@ -729,6 +747,21 @@ nsThread::RemoveObserver(nsIThreadObserver *observer)
     NS_WARNING("Removing an observer that was never added!");
   }
 
+  return NS_OK;
+}
+
+nsresult
+nsThread::SetMainThreadObserver(nsIThreadObserver* aObserver)
+{
+  if (aObserver && nsThread::sMainThreadObserver) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  if (!NS_IsMainThread()) {
+    return NS_ERROR_UNEXPECTED;
+  }
+
+  nsThread::sMainThreadObserver = aObserver;
   return NS_OK;
 }
 

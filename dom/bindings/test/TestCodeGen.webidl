@@ -13,6 +13,9 @@ interface TestExternalInterface;
 interface TestNonCastableInterface {
 };
 
+interface TestRenamedInterface {
+};
+
 callback interface TestCallbackInterface {
   readonly attribute long foo;
   void doSomething();
@@ -311,6 +314,7 @@ interface TestInterface {
   attribute byte attributeRenamedFrom;
 
   void passDictionary(optional Dict x);
+  Dict receiveDictionary();
   void passOtherDictionary(optional GrandparentDict x);
   void passSequenceOfDictionaries(sequence<Dict> x);
   void passDictionaryOrLong(optional Dict x);
@@ -330,8 +334,18 @@ interface TestInterface {
   AnotherNameForTestInterface exerciseTypedefInterfaces2(NullableTestInterface arg);
   void exerciseTypedefInterfaces3(YetAnotherNameForTestInterface arg);
 
+  // Static methods and attributes
+  static attribute boolean staticAttribute;
+  static void staticMethod(boolean arg);
+
   // Miscellania
   [LenientThis] attribute long attrWithLenientThis;
+  [Unforgeable] readonly attribute long unforgeableAttr;
+  [Unforgeable, ChromeOnly] readonly attribute long unforgeableAttr2;
+  void passRenamedInterface(TestRenamedInterface arg);
+  [PutForwards=writableByte] readonly attribute TestInterface putForwardsAttr;
+  [PutForwards=writableByte, LenientThis] readonly attribute TestInterface putForwardsAttr2;
+  [PutForwards=writableByte, ChromeOnly] readonly attribute TestInterface putForwardsAttr3;
 
   // If you add things here, add them to TestExampleGen as well
 };

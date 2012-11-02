@@ -220,12 +220,16 @@ Sanitizer.prototype = {
                                       .getService(Components.interfaces.nsIWindowMediator);
         var windows = windowManager.getEnumerator("navigator:browser");
         while (windows.hasMoreElements()) {
-          var searchBar = windows.getNext().document.getElementById("searchbar");
+          let currentDocument = windows.getNext().document;
+          let searchBar = currentDocument.getElementById("searchbar");
           if (searchBar)
             searchBar.textbox.reset();
+          let findBar = currentDocument.getElementById("FindToolbar");
+          if (findBar)
+            findBar.clear();
         }
 
-        var formHistory = Components.classes["@mozilla.org/satchel/form-history;1"]
+        let formHistory = Components.classes["@mozilla.org/satchel/form-history;1"]
                                     .getService(Components.interfaces.nsIFormHistory2);
         if (this.range)
           formHistory.removeEntriesByTimeframe(this.range[0], this.range[1]);
@@ -239,17 +243,21 @@ Sanitizer.prototype = {
                                       .getService(Components.interfaces.nsIWindowMediator);
         var windows = windowManager.getEnumerator("navigator:browser");
         while (windows.hasMoreElements()) {
-          var searchBar = windows.getNext().document.getElementById("searchbar");
+          let currentDocument = windows.getNext().document;
+          let searchBar = currentDocument.getElementById("searchbar");
           if (searchBar) {
-            var transactionMgr = searchBar.textbox.editor.transactionManager;
+            let transactionMgr = searchBar.textbox.editor.transactionManager;
             if (searchBar.value ||
                 transactionMgr.numberOfUndoItems ||
                 transactionMgr.numberOfRedoItems)
               return true;
           }
+          let findBar = currentDocument.getElementById("FindToolbar");
+          if (findBar && findBar.canClear)
+            return true;
         }
 
-        var formHistory = Components.classes["@mozilla.org/satchel/form-history;1"]
+        let formHistory = Components.classes["@mozilla.org/satchel/form-history;1"]
                                     .getService(Components.interfaces.nsIFormHistory2);
         return formHistory.hasEntries;
       }
@@ -348,7 +356,7 @@ Sanitizer.prototype = {
         // Clear site-specific settings like page-zoom level
         var cps = Components.classes["@mozilla.org/content-pref/service;1"]
                             .getService(Components.interfaces.nsIContentPrefService);
-        cps.removeGroupedPrefs();
+        cps.removeGroupedPrefs(null);
         
         // Clear "Never remember passwords for this site", which is not handled by
         // the permission manager

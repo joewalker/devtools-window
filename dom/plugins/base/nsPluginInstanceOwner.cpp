@@ -168,13 +168,18 @@ static void OnDestroyImage(void* aPluginInstanceOwner)
 already_AddRefed<ImageContainer>
 nsPluginInstanceOwner::GetImageContainer()
 {
+  if (!mInstance)
+    return nullptr;
+
+  nsRefPtr<ImageContainer> container;
+
 #if MOZ_WIDGET_ANDROID
   // Right now we only draw with Gecko layers on Honeycomb and higher. See Paint()
   // for what we do on other versions.
   if (AndroidBridge::Bridge()->GetAPIVersion() < 11)
     return NULL;
   
-  nsRefPtr<ImageContainer> container = LayerManager::CreateImageContainer();
+  container = LayerManager::CreateImageContainer();
 
   ImageFormat format = ImageFormat::SHARED_TEXTURE;
   nsRefPtr<Image> img = container->CreateImage(&format, 1);
@@ -200,24 +205,21 @@ nsPluginInstanceOwner::GetImageContainer()
   return container.forget();
 #endif
 
-  if (mInstance) {
-    nsRefPtr<ImageContainer> container;
-    // Every call to nsIPluginInstance::GetImage() creates
-    // a new image.  See nsIPluginInstance.idl.
-    mInstance->GetImageContainer(getter_AddRefs(container));
-    if (container) {
+  mInstance->GetImageContainer(getter_AddRefs(container));
+  if (container) {
 #ifdef XP_MACOSX
-      AutoLockImage autoLock(container);
-      Image* image = autoLock.GetImage();
-      if (image && image->GetFormat() == MAC_IO_SURFACE && mObjectFrame) {
-        MacIOSurfaceImage *oglImage = static_cast<MacIOSurfaceImage*>(image);
-        NS_ADDREF_THIS();
-        oglImage->SetUpdateCallback(&DrawPlugin, this);
-        oglImage->SetDestroyCallback(&OnDestroyImage);
-      }
-#endif
-      return container.forget();
+    AutoLockImage autoLock(container);
+    Image* image = autoLock.GetImage();
+    if (image && image->GetFormat() == MAC_IO_SURFACE && mObjectFrame) {
+      // With this drawing model, every call to
+      // nsIPluginInstance::GetImage() creates a new image.
+      MacIOSurfaceImage *oglImage = static_cast<MacIOSurfaceImage*>(image);
+      NS_ADDREF_THIS();
+      oglImage->SetUpdateCallback(&DrawPlugin, this);
+      oglImage->SetDestroyCallback(&OnDestroyImage);
     }
+#endif
+    return container.forget();
   }
   return nullptr;
 }
@@ -635,11 +637,14 @@ NS_IMETHODIMP nsPluginInstanceOwner::InvalidateRect(NPRect *invalidRect)
   if (!mObjectFrame || !invalidRect || !mWidgetVisible)
     return NS_ERROR_FAILURE;
 
+#if defined(XP_MACOSX) || defined(MOZ_WIDGET_ANDROID)
   // Each time an asynchronously-drawing plugin sends a new surface to display,
-  // InvalidateRect is called. We notify reftests that painting is up to
-  // date and update our ImageContainer with the new surface.
+  // the image in the ImageContainer is updated and InvalidateRect is called.
+  // MacIOSurfaceImages callbacks are attached here.
+  // There are different side effects for (sync) Android plugins.
   nsRefPtr<ImageContainer> container;
   mInstance->GetImageContainer(getter_AddRefs(container));
+#endif
 
 #ifndef XP_MACOSX
   // Windowed plugins should not be calling NPN_InvalidateRect, but
@@ -3432,30 +3437,6 @@ void nsPluginInstanceOwner::SetFrame(nsObjectFrame *aFrame)
 
   // If we already have a frame that is changing or going away...
   if (mObjectFrame) {
-    // We have an old frame.
-    // Drop image reference because the child may destroy the surface after we return.
-    nsRefPtr<ImageContainer> container = mObjectFrame->GetImageContainer();
-    if (container) {
-#ifdef XP_MACOSX
-      AutoLockImage autoLock(container);
-      Image *image = autoLock.GetImage();
-      if (image && (image->GetFormat() == MAC_IO_SURFACE) && mObjectFrame) {
-        // Undo what we did to the current image in SetCurrentImageInTransaction().
-        MacIOSurfaceImage *oglImage = static_cast<MacIOSurfaceImage*>(image);
-        oglImage->SetUpdateCallback(nullptr, nullptr);
-        oglImage->SetDestroyCallback(nullptr);
-        // If we have a current image here, its destructor hasn't yet been
-        // called, so OnDestroyImage() can't yet have been called.  So we need
-        // to do ourselves what OnDestroyImage() would have done.
-        NS_RELEASE_THIS();
-      }
-      // Important! Unlock here otherwise SetCurrentImageInTransaction will deadlock with
-      // our lock if we have a RemoteImage.
-      autoLock.Unlock();
-#endif
-      container->SetCurrentImageInTransaction(nullptr);
-    }
-
     // Make sure the old frame isn't holding a reference to us.
     mObjectFrame->SetInstanceOwner(nullptr);
   }

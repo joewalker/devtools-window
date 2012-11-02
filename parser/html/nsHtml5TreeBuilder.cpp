@@ -30,7 +30,6 @@
 
 #define nsHtml5TreeBuilder_cpp__
 
-#include "prtypes.h"
 #include "nsIAtom.h"
 #include "nsHtml5AtomTable.h"
 #include "nsITimer.h"
@@ -64,6 +63,8 @@
 #include "nsHtml5Portability.h"
 
 #include "nsHtml5TreeBuilder.h"
+
+#include "mozilla/Likely.h"
 
 PRUnichar nsHtml5TreeBuilder::REPLACEMENT_CHARACTER[] = { 0xfffd };
 static const char* const QUIRKY_PUBLIC_IDS_DATA[] = { "+//silmaril//dtd html pro v0r11 19970101//", "-//advasoft ltd//dtd html 3.0 aswedit + extensions//", "-//as//dtd html 3.0 aswedit + extensions//", "-//ietf//dtd html 2.0 level 1//", "-//ietf//dtd html 2.0 level 2//", "-//ietf//dtd html 2.0 strict level 1//", "-//ietf//dtd html 2.0 strict level 2//", "-//ietf//dtd html 2.0 strict//", "-//ietf//dtd html 2.0//", "-//ietf//dtd html 2.1e//", "-//ietf//dtd html 3.0//", "-//ietf//dtd html 3.2 final//", "-//ietf//dtd html 3.2//", "-//ietf//dtd html 3//", "-//ietf//dtd html level 0//", "-//ietf//dtd html level 1//", "-//ietf//dtd html level 2//", "-//ietf//dtd html level 3//", "-//ietf//dtd html strict level 0//", "-//ietf//dtd html strict level 1//", "-//ietf//dtd html strict level 2//", "-//ietf//dtd html strict level 3//", "-//ietf//dtd html strict//", "-//ietf//dtd html//", "-//metrius//dtd metrius presentational//", "-//microsoft//dtd internet explorer 2.0 html strict//", "-//microsoft//dtd internet explorer 2.0 html//", "-//microsoft//dtd internet explorer 2.0 tables//", "-//microsoft//dtd internet explorer 3.0 html strict//", "-//microsoft//dtd internet explorer 3.0 html//", "-//microsoft//dtd internet explorer 3.0 tables//", "-//netscape comm. corp.//dtd html//", "-//netscape comm. corp.//dtd strict html//", "-//o'reilly and associates//dtd html 2.0//", "-//o'reilly and associates//dtd html extended 1.0//", "-//o'reilly and associates//dtd html extended relaxed 1.0//", "-//softquad software//dtd hotmetal pro 6.0::19990601::extensions to html 4.0//", "-//softquad//dtd hotmetal pro 4.0::19971010::extensions to html 4.0//", "-//spyglass//dtd html 2.0 extended//", "-//sq//dtd html 2.0 hotmetal + extensions//", "-//sun microsystems corp.//dtd hotjava html//", "-//sun microsystems corp.//dtd hotjava strict html//", "-//w3c//dtd html 3 1995-03-24//", "-//w3c//dtd html 3.2 draft//", "-//w3c//dtd html 3.2 final//", "-//w3c//dtd html 3.2//", "-//w3c//dtd html 3.2s draft//", "-//w3c//dtd html 4.0 frameset//", "-//w3c//dtd html 4.0 transitional//", "-//w3c//dtd html experimental 19960712//", "-//w3c//dtd html experimental 970421//", "-//w3c//dtd w3 html//", "-//w3o//dtd w3 html 3.0//", "-//webtechs//dtd mozilla html 2.0//", "-//webtechs//dtd mozilla html//" };
@@ -747,7 +748,7 @@ nsHtml5TreeBuilder::startTag(nsHtml5ElementName* elementName, nsHtml5HtmlAttribu
                 NS_HTML5_BREAK(starttagloop);
               }
               generateImpliedEndTags();
-              if (!!NS_UNLIKELY(mViewSource) && !isCurrent(nsHtml5Atoms::table)) {
+              if (!!MOZ_UNLIKELY(mViewSource) && !isCurrent(nsHtml5Atoms::table)) {
                 errNoCheckUnclosedElementsOnStack();
               }
               while (currentPtr >= eltPos) {
@@ -814,7 +815,7 @@ nsHtml5TreeBuilder::startTag(nsHtml5ElementName* elementName, nsHtml5HtmlAttribu
               NS_HTML5_BREAK(starttagloop);
             }
             generateImpliedEndTags();
-            if (!!NS_UNLIKELY(mViewSource) && currentPtr != eltPos) {
+            if (!!MOZ_UNLIKELY(mViewSource) && currentPtr != eltPos) {
               errNoCheckUnclosedElementsOnStack();
             }
             while (currentPtr >= eltPos) {
@@ -985,7 +986,7 @@ nsHtml5TreeBuilder::startTag(nsHtml5ElementName* elementName, nsHtml5HtmlAttribu
                 nsHtml5StackNode* node = stack[eltPos];
                 if (node->getGroup() == group) {
                   generateImpliedEndTagsExceptFor(node->name);
-                  if (!!NS_UNLIKELY(mViewSource) && eltPos != currentPtr) {
+                  if (!!MOZ_UNLIKELY(mViewSource) && eltPos != currentPtr) {
                     errUnclosedElementsImplied(eltPos, name);
                   }
                   while (currentPtr >= eltPos) {
@@ -1052,7 +1053,7 @@ nsHtml5TreeBuilder::startTag(nsHtml5ElementName* elementName, nsHtml5HtmlAttribu
               if (eltPos != NS_HTML5TREE_BUILDER_NOT_FOUND_ON_STACK) {
                 errFooSeenWhenFooOpen(name);
                 generateImpliedEndTags();
-                if (!!NS_UNLIKELY(mViewSource) && !isCurrent(name)) {
+                if (!!MOZ_UNLIKELY(mViewSource) && !isCurrent(name)) {
                   errUnclosedElementsImplied(eltPos, name);
                 }
                 while (currentPtr >= eltPos) {
@@ -2192,7 +2193,7 @@ nsHtml5TreeBuilder::endTag(nsHtml5ElementName* elementName)
               NS_HTML5_BREAK(endtagloop);
             }
             generateImpliedEndTags();
-            if (!!NS_UNLIKELY(mViewSource) && currentPtr != eltPos) {
+            if (!!MOZ_UNLIKELY(mViewSource) && currentPtr != eltPos) {
               errUnclosedElements(eltPos, name);
             }
             while (currentPtr >= eltPos) {
@@ -2209,7 +2210,7 @@ nsHtml5TreeBuilder::endTag(nsHtml5ElementName* elementName)
               NS_HTML5_BREAK(endtagloop);
             }
             generateImpliedEndTags();
-            if (!!NS_UNLIKELY(mViewSource) && currentPtr != eltPos) {
+            if (!!MOZ_UNLIKELY(mViewSource) && currentPtr != eltPos) {
               errUnclosedElements(eltPos, name);
             }
             while (currentPtr >= eltPos) {
@@ -2242,7 +2243,7 @@ nsHtml5TreeBuilder::endTag(nsHtml5ElementName* elementName)
               NS_HTML5_BREAK(endtagloop);
             }
             generateImpliedEndTags();
-            if (!!NS_UNLIKELY(mViewSource) && !isCurrent(name)) {
+            if (!!MOZ_UNLIKELY(mViewSource) && !isCurrent(name)) {
               errUnclosedElements(eltPos, name);
             }
             while (currentPtr >= eltPos) {
@@ -2284,7 +2285,7 @@ nsHtml5TreeBuilder::endTag(nsHtml5ElementName* elementName)
               NS_HTML5_BREAK(endtagloop);
             }
             MOZ_ASSERT(currentPtr >= 1);
-            if (NS_UNLIKELY(mViewSource)) {
+            if (MOZ_UNLIKELY(mViewSource)) {
               for (int32_t i = 2; i <= currentPtr; i++) {
                 switch(stack[i]->getGroup()) {
                   case NS_HTML5TREE_BUILDER_DD_OR_DT:
@@ -2314,7 +2315,7 @@ nsHtml5TreeBuilder::endTag(nsHtml5ElementName* elementName)
               errStrayEndTag(name);
               NS_HTML5_BREAK(endtagloop);
             }
-            if (NS_UNLIKELY(mViewSource)) {
+            if (MOZ_UNLIKELY(mViewSource)) {
               for (int32_t i = 0; i <= currentPtr; i++) {
                 switch(stack[i]->getGroup()) {
                   case NS_HTML5TREE_BUILDER_DD_OR_DT:
@@ -2348,7 +2349,7 @@ nsHtml5TreeBuilder::endTag(nsHtml5ElementName* elementName)
               errStrayEndTag(name);
             } else {
               generateImpliedEndTags();
-              if (!!NS_UNLIKELY(mViewSource) && !isCurrent(name)) {
+              if (!!MOZ_UNLIKELY(mViewSource) && !isCurrent(name)) {
                 errUnclosedElements(eltPos, name);
               }
               while (currentPtr >= eltPos) {
@@ -2369,7 +2370,7 @@ nsHtml5TreeBuilder::endTag(nsHtml5ElementName* elementName)
               NS_HTML5_BREAK(endtagloop);
             }
             generateImpliedEndTags();
-            if (!!NS_UNLIKELY(mViewSource) && !isCurrent(name)) {
+            if (!!MOZ_UNLIKELY(mViewSource) && !isCurrent(name)) {
               errUnclosedElements(eltPos, name);
             }
             removeFromStack(eltPos);
@@ -2390,7 +2391,7 @@ nsHtml5TreeBuilder::endTag(nsHtml5ElementName* elementName)
             }
             generateImpliedEndTagsExceptFor(nsHtml5Atoms::p);
             MOZ_ASSERT(eltPos != NS_HTML5TREE_BUILDER_NOT_FOUND_ON_STACK);
-            if (!!NS_UNLIKELY(mViewSource) && eltPos != currentPtr) {
+            if (!!MOZ_UNLIKELY(mViewSource) && eltPos != currentPtr) {
               errUnclosedElements(eltPos, name);
             }
             while (currentPtr >= eltPos) {
@@ -2404,7 +2405,7 @@ nsHtml5TreeBuilder::endTag(nsHtml5ElementName* elementName)
               errNoElementToCloseButEndTagSeen(name);
             } else {
               generateImpliedEndTagsExceptFor(name);
-              if (!!NS_UNLIKELY(mViewSource) && eltPos != currentPtr) {
+              if (!!MOZ_UNLIKELY(mViewSource) && eltPos != currentPtr) {
                 errUnclosedElements(eltPos, name);
               }
               while (currentPtr >= eltPos) {
@@ -2419,7 +2420,7 @@ nsHtml5TreeBuilder::endTag(nsHtml5ElementName* elementName)
               errNoElementToCloseButEndTagSeen(name);
             } else {
               generateImpliedEndTagsExceptFor(name);
-              if (!!NS_UNLIKELY(mViewSource) && eltPos != currentPtr) {
+              if (!!MOZ_UNLIKELY(mViewSource) && eltPos != currentPtr) {
                 errUnclosedElements(eltPos, name);
               }
               while (currentPtr >= eltPos) {
@@ -2434,7 +2435,7 @@ nsHtml5TreeBuilder::endTag(nsHtml5ElementName* elementName)
               errStrayEndTag(name);
             } else {
               generateImpliedEndTags();
-              if (!!NS_UNLIKELY(mViewSource) && !isCurrent(name)) {
+              if (!!MOZ_UNLIKELY(mViewSource) && !isCurrent(name)) {
                 errUnclosedElements(eltPos, name);
               }
               while (currentPtr >= eltPos) {
@@ -2450,7 +2451,7 @@ nsHtml5TreeBuilder::endTag(nsHtml5ElementName* elementName)
               errStrayEndTag(name);
             } else {
               generateImpliedEndTags();
-              if (!!NS_UNLIKELY(mViewSource) && !isCurrent(name)) {
+              if (!!MOZ_UNLIKELY(mViewSource) && !isCurrent(name)) {
                 errUnclosedElements(eltPos, name);
               }
               while (currentPtr >= eltPos) {
@@ -2517,7 +2518,7 @@ nsHtml5TreeBuilder::endTag(nsHtml5ElementName* elementName)
               nsHtml5StackNode* node = stack[eltPos];
               if (node->name == name) {
                 generateImpliedEndTags();
-                if (!!NS_UNLIKELY(mViewSource) && !isCurrent(name)) {
+                if (!!MOZ_UNLIKELY(mViewSource) && !isCurrent(name)) {
                   errUnclosedElements(eltPos, name);
                 }
                 while (currentPtr >= eltPos) {
@@ -2997,7 +2998,7 @@ void
 nsHtml5TreeBuilder::closeTheCell(int32_t eltPos)
 {
   generateImpliedEndTags();
-  if (!!NS_UNLIKELY(mViewSource) && eltPos != currentPtr) {
+  if (!!MOZ_UNLIKELY(mViewSource) && eltPos != currentPtr) {
     errUnclosedElementsCell(eltPos);
   }
   while (currentPtr >= eltPos) {
@@ -3104,7 +3105,7 @@ nsHtml5TreeBuilder::implicitlyCloseP()
     return;
   }
   generateImpliedEndTagsExceptFor(nsHtml5Atoms::p);
-  if (!!NS_UNLIKELY(mViewSource) && eltPos != currentPtr) {
+  if (!!MOZ_UNLIKELY(mViewSource) && eltPos != currentPtr) {
     errUnclosedElementsImplied(eltPos, nsHtml5Atoms::p);
   }
   while (currentPtr >= eltPos) {

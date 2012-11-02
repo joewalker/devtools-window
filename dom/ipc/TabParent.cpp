@@ -525,7 +525,7 @@ TabParent::RecvNotifyIMEFocus(const bool& aFocus,
   nsresult rv = widget->OnIMEFocusChange(aFocus);
 
   if (aFocus) {
-    if (NS_SUCCEEDED(rv) && rv != NS_SUCCESS_IME_NO_UPDATES) {
+    if (NS_SUCCEEDED(rv)) {
       *aPreference = widget->GetIMEUpdatePreference();
     } else {
       aPreference->mWantUpdates = false;
@@ -743,18 +743,21 @@ TabParent::RecvEndIMEComposition(const bool& aCancel,
 
 bool
 TabParent::RecvGetInputContext(int32_t* aIMEEnabled,
-                               int32_t* aIMEOpen)
+                               int32_t* aIMEOpen,
+                               intptr_t* aNativeIMEContext)
 {
   nsCOMPtr<nsIWidget> widget = GetWidget();
   if (!widget) {
     *aIMEEnabled = IMEState::DISABLED;
     *aIMEOpen = IMEState::OPEN_STATE_NOT_SUPPORTED;
+    *aNativeIMEContext = 0;
     return true;
   }
 
   InputContext context = widget->GetInputContext();
   *aIMEEnabled = static_cast<int32_t>(context.mIMEState.mEnabled);
   *aIMEOpen = static_cast<int32_t>(context.mIMEState.mOpen);
+  *aNativeIMEContext = reinterpret_cast<intptr_t>(context.mNativeIMEContext);
   return true;
 }
 
@@ -884,6 +887,23 @@ TabParent::RecvPIndexedDBConstructor(PIndexedDBParent* aActor,
     NS_RUNTIMEABORT("Not supported yet!");
   }
 
+  nsresult rv;
+
+  // XXXbent Need to make sure we have a whitelist for chrome databases!
+
+  // Verify the appID in the origin first.
+  if (mApp && !aASCIIOrigin.EqualsLiteral("chrome")) {
+    uint32_t appId;
+    rv = mApp->GetLocalId(&appId);
+    NS_ENSURE_SUCCESS(rv, false);
+
+    if (!IndexedDatabaseManager::OriginMatchesApp(aASCIIOrigin, appId)) {
+      NS_WARNING("App attempted to open databases that it does not have "
+                 "permission to access!");
+      return false;
+    }
+  }
+
   nsCOMPtr<nsINode> node = do_QueryInterface(GetOwnerElement());
   NS_ENSURE_TRUE(node, false);
 
@@ -897,9 +917,8 @@ TabParent::RecvPIndexedDBConstructor(PIndexedDBParent* aActor,
   NS_ASSERTION(contentParent, "Null manager?!");
 
   nsRefPtr<IDBFactory> factory;
-  nsresult rv =
-    IDBFactory::Create(window, aASCIIOrigin, contentParent,
-                       getter_AddRefs(factory));
+  rv = IDBFactory::Create(window, aASCIIOrigin, contentParent,
+                          getter_AddRefs(factory));
   NS_ENSURE_SUCCESS(rv, false);
 
   if (!factory) {

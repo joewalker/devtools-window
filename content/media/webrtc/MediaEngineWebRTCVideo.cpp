@@ -10,8 +10,8 @@
 namespace mozilla {
 
 #ifdef PR_LOGGING
-extern PRLogModuleInfo* gMediaManagerLog;
-#define LOG(msg) PR_LOG(gMediaManagerLog, PR_LOG_DEBUG, msg)
+extern PRLogModuleInfo* GetMediaManagerLog();
+#define LOG(msg) PR_LOG(GetMediaManagerLog(), PR_LOG_DEBUG, msg)
 #else
 #define LOG(msg)
 #endif
@@ -251,6 +251,7 @@ MediaEngineWebRTCVideoSource::Start(SourceMediaStream* aStream, TrackID aID)
   mSource->AddTrack(aID, USECS_PER_S, 0, new VideoSegment());
   mSource->AdvanceKnownTracksTime(STREAM_TIME_MAX);
   mLastEndTime = 0;
+  mState = kStarted;
 
   error = mViERender->AddRenderer(mCaptureIndex, webrtc::kVideoI420, (webrtc::ExternalRenderer*)this);
   if (error == -1) {
@@ -266,7 +267,6 @@ MediaEngineWebRTCVideoSource::Start(SourceMediaStream* aStream, TrackID aID)
     return NS_ERROR_FAILURE;
   }
 
-  mState = kStarted;
   return NS_OK;
 }
 

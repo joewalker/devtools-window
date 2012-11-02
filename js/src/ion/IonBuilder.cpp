@@ -815,12 +815,6 @@ IonBuilder::inspectOpcode(JSOp op)
       case JSOP_DEFCONST:
         return jsop_defvar(GET_UINT32_INDEX(pc));
 
-      case JSOP_LOCALINC:
-      case JSOP_INCLOCAL:
-      case JSOP_LOCALDEC:
-      case JSOP_DECLOCAL:
-        return jsop_localinc(op);
-
       case JSOP_EQ:
       case JSOP_NE:
       case JSOP_STRICTEQ:
@@ -830,12 +824,6 @@ IonBuilder::inspectOpcode(JSOp op)
       case JSOP_GT:
       case JSOP_GE:
         return jsop_compare(op);
-
-      case JSOP_ARGINC:
-      case JSOP_INCARG:
-      case JSOP_ARGDEC:
-      case JSOP_DECARG:
-        return jsop_arginc(op);
 
       case JSOP_DOUBLE:
         return pushConstant(info().getConst(pc));
@@ -3841,62 +3829,6 @@ IonBuilder::makeCall(HandleFunction target, uint32 argc, bool constructing)
 }
 
 bool
-IonBuilder::jsop_incslot(JSOp op, uint32 slot)
-{
-    int32 amt = (js_CodeSpec[op].format & JOF_INC) ? 1 : -1;
-    bool post = !!(js_CodeSpec[op].format & JOF_POST);
-    TypeOracle::BinaryTypes types = oracle->incslot(script_, pc);
-
-    // Grab the value at the local slot, and convert it to a number. Currently,
-    // we use ToInt32 or ToNumber which are fallible but idempotent. This whole
-    // operation must be idempotent because we cannot resume in the middle of
-    // an INC op.
-    current->pushSlot(slot);
-    MDefinition *value = current->pop();
-    MInstruction *lhs;
-
-    JSValueType knownType = types.lhsTypes->getKnownTypeTag();
-    if (knownType == JSVAL_TYPE_INT32) {
-        lhs = MToInt32::New(value);
-    } else if (knownType == JSVAL_TYPE_DOUBLE) {
-        lhs = MToDouble::New(value);
-    } else {
-        // Don't compile effectful incslot ops.
-        return abort("INCSLOT non-int/double lhs");
-    }
-    current->add(lhs);
-
-    // If this is a post operation, save the original value.
-    if (post)
-        current->push(lhs);
-
-    MConstant *rhs = MConstant::New(Int32Value(amt));
-    current->add(rhs);
-
-    MAdd *result = MAdd::New(lhs, rhs);
-    current->add(result);
-    result->infer(cx, types);
-    current->push(result);
-    current->setSlot(slot);
-
-    if (post)
-        current->pop();
-    return true;
-}
-
-bool
-IonBuilder::jsop_localinc(JSOp op)
-{
-    return jsop_incslot(op, info().localSlot(GET_SLOTNO(pc)));
-}
-
-bool
-IonBuilder::jsop_arginc(JSOp op)
-{
-    return jsop_incslot(op, info().argSlot(GET_SLOTNO(pc)));
-}
-
-bool
 IonBuilder::jsop_compare(JSOp op)
 {
     MDefinition *right = current->pop();
@@ -4418,7 +4350,8 @@ TestSingletonProperty(JSContext *cx, HandleObject obj, HandleId id, bool *isKnow
 static inline bool
 TestSingletonPropertyTypes(JSContext *cx, types::StackTypeSet *types,
                            HandleObject globalObj, HandleId id,
-                           bool *isKnownConstant, bool *testObject)
+                           bool *isKnownConstant, bool *testObject,
+                           bool *testString)
 {
     // As for TestSingletonProperty, but the input is any value in a type set
     // rather than a specific object. If testObject is set then the constant
@@ -4426,6 +4359,7 @@ TestSingletonPropertyTypes(JSContext *cx, types::StackTypeSet *types,
 
     *isKnownConstant = false;
     *testObject = false;
+    *testString = false;
 
     if (!types || types->unknownObject())
         return true;
@@ -4455,6 +4389,15 @@ TestSingletonPropertyTypes(JSContext *cx, types::StackTypeSet *types,
 
       case JSVAL_TYPE_OBJECT:
       case JSVAL_TYPE_UNKNOWN: {
+        if (types->hasType(types::Type::StringType())) {
+            // Do not optimize if the object is either a String or an Object.
+            if (types->maybeObject())
+                return true;
+            key = JSProto_String;
+            *testString = true;
+            break;
+        }
+
         // For property accesses which may be on many objects, we just need to
         // find a prototype common to all the objects; if that prototype
         // has the singleton property, the access will not be on a missing property.
@@ -5054,6 +4997,9 @@ IonBuilder::jsop_getelem_string()
     MStringLength *length = MStringLength::New(str);
     current->add(length);
 
+    // This will cause an invalidation of this script once the 'undefined' type
+    // is monitored by the interpreter.
+    JS_ASSERT(oracle->propertyRead(script_, pc)->getKnownTypeTag() == JSVAL_TYPE_STRING);
     id = addBoundsCheck(id, length);
 
     MCharCodeAt *charCode = MCharCodeAt::New(str, id);
@@ -5881,8 +5827,9 @@ IonBuilder::getPropTryConstant(bool *emitted, HandleId id, types::StackTypeSet *
 
     RootedObject global(cx, &script_->global());
 
-    bool isConstant, testObject;
-    if (!TestSingletonPropertyTypes(cx, unaryTypes.inTypes, global, id, &isConstant, &testObject))
+    bool isConstant, testObject, testString;
+    if (!TestSingletonPropertyTypes(cx, unaryTypes.inTypes, global, id,
+                                    &isConstant, &testObject, &testString))
         return false;
 
     if (!isConstant)
@@ -5891,8 +5838,11 @@ IonBuilder::getPropTryConstant(bool *emitted, HandleId id, types::StackTypeSet *
     MDefinition *obj = current->pop();
 
     // Property access is a known constant -- safe to emit.
+	JS_ASSERT(!testString || !testObject);
     if (testObject)
         current->add(MGuardObject::New(obj));
+	else if (testString)
+        current->add(MGuardString::New(obj));
 
     MConstant *known = MConstant::New(ObjectValue(*singleton));
     if (singleton->isFunction()) {

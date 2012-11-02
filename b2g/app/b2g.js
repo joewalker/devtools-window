@@ -191,6 +191,7 @@ pref("app.creditsURL", "http://www.mozilla.org/credits/");
 pref("app.featuresURL", "http://www.mozilla.com/%LOCALE%/b2g/features/");
 pref("app.faqURL", "http://www.mozilla.com/%LOCALE%/b2g/faq/");
 // Whether we want to report crashes (headless)
+//XXX Remove this pref when bug 801932 is fixed
 pref("app.reportCrashes", true);
 
 // Name of alternate about: page for certificate errors (when undefined, defaults to about:neterror)
@@ -273,7 +274,7 @@ pref("image.mem.min_discard_timeout_ms", 10000);
 pref("image.mem.max_decoded_image_kb", 5120); /* 5MB */
 
 // enable touch events interfaces
-pref("dom.w3c_touch_events.enabled", true);
+pref("dom.w3c_touch_events.enabled", 1);
 pref("dom.w3c_touch_events.safetyX", 0); // escape borders in units of 1/240"
 pref("dom.w3c_touch_events.safetyY", 120); // escape borders in units of 1/240"
 
@@ -508,7 +509,7 @@ pref("dom.experimental_forms", true);
 pref("gfx.gralloc.enabled", false);
 
 // XXXX REMOVE FOR PRODUCTION. Turns on GC and CC logging
-pref("javascript.options.mem.log", true);
+pref("javascript.options.mem.log", false);
 
 // Increase mark slice time from 10ms to 30ms
 pref("javascript.options.mem.gc_incremental_slice_ms", 30);
@@ -519,6 +520,7 @@ pref("javascript.options.mem.gc_high_frequency_high_limit_mb", 40);
 pref("javascript.options.mem.gc_high_frequency_low_limit_mb", 10);
 pref("javascript.options.mem.gc_low_frequency_heap_growth", 105);
 pref("javascript.options.mem.high_water_mark", 6);
+pref("javascript.options.mem.gc_allocation_threshold_mb", 3);
 
 // Show/Hide scrollbars when active/inactive
 pref("ui.showHideScrollbars", 1);

@@ -44,6 +44,7 @@
 #include "nsThreadUtils.h"
 #include "xpcpublic.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/Likely.h"
 
 #ifdef ANDROID
 #include <android/log.h>
@@ -2515,11 +2516,7 @@ WorkerPrivate::Create(JSContext* aCx, JSObject* aObj, WorkerPrivate* aParent,
     nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
     NS_ASSERTION(ssm, "This should never be null!");
 
-    bool isChrome;
-    if (NS_FAILED(ssm->IsCapabilityEnabled("UniversalXPConnect", &isChrome))) {
-      NS_WARNING("IsCapabilityEnabled failed!");
-      isChrome = false;
-    }
+    bool isChrome = nsContentUtils::IsCallerChrome();
 
     // First check to make sure the caller has permission to make a
     // ChromeWorker if they called the ChromeWorker constructor.
@@ -3682,7 +3679,7 @@ WorkerPrivate::SetTimeout(JSContext* aCx, unsigned aArgc, jsval* aVp,
   newInfo->mIsInterval = aIsInterval;
   newInfo->mId = timerId;
 
-  if (NS_UNLIKELY(timerId == UINT32_MAX)) {
+  if (MOZ_UNLIKELY(timerId == UINT32_MAX)) {
     NS_WARNING("Timeout ids overflowed!");
     mNextTimeoutId = 1;
   }

@@ -39,7 +39,6 @@ import android.view.inputmethod.ExtractedTextRequest;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 
-import java.util.Locale;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -89,7 +88,6 @@ class GeckoInputConnection
     private static String mIMETypeHint = "";
     private static String mIMEModeHint = "";
     private static String mIMEActionHint = "";
-    private static Boolean sIsPreJellyBeanAsusTransformer;
 
     private String mCurrentInputMethod;
 
@@ -828,14 +826,16 @@ class GeckoInputConnection
                                  InputType.TYPE_NUMBER_FLAG_DECIMAL;
         else if (mIMEModeHint.equalsIgnoreCase("digit"))
             outAttrs.inputType = InputType.TYPE_CLASS_NUMBER;
-        else if (mIMEModeHint.equalsIgnoreCase("uppercase"))
-            outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS;
-        else if (mIMEModeHint.equalsIgnoreCase("lowercase"))
-            outAttrs.inputType = InputType.TYPE_CLASS_TEXT; 
-        else if (mIMEModeHint.equalsIgnoreCase("titlecase"))
-            outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_WORDS;
-        else if (mIMEModeHint.equalsIgnoreCase("autocapitalized"))
-            outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_SENTENCES;
+        else {
+            outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_AUTO_CORRECT;
+            if (mIMEModeHint.equalsIgnoreCase("uppercase"))
+                outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS;
+            else if (mIMEModeHint.equalsIgnoreCase("titlecase"))
+                outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_WORDS;
+            else if (mIMEModeHint.equalsIgnoreCase("autocapitalized"))
+                outAttrs.inputType |= InputType.TYPE_TEXT_FLAG_CAP_SENTENCES;
+            // lowercase mode is the default
+        }
 
         if (mIMEActionHint.equalsIgnoreCase("go"))
             outAttrs.imeOptions = EditorInfo.IME_ACTION_GO;
@@ -871,6 +871,9 @@ class GeckoInputConnection
 
         String prevInputMethod = mCurrentInputMethod;
         mCurrentInputMethod = InputMethods.getCurrentInputMethod(app);
+        if (DEBUG) {
+            Log.d(LOGTAG, "IME: CurrentInputMethod=" + mCurrentInputMethod);
+        }
 
         // If the user has changed IMEs, then notify input method observers.
         if (mCurrentInputMethod != prevInputMethod) {
@@ -885,7 +888,7 @@ class GeckoInputConnection
     }
 
     public boolean onKeyPreIme(int keyCode, KeyEvent event) {
-        if (hasBuggyHardwareKeyboardLayout())
+        if (InputMethods.canUseInputMethodOnHKB(mCurrentInputMethod))
             return false;
 
         switch (event.getAction()) {
@@ -1202,18 +1205,6 @@ class GeckoInputConnection
     private static String prettyPrintString(CharSequence s) {
         // Quote string and replace newlines with CR arrows.
         return "\"" + s.toString().replace('\n', UNICODE_CRARR) + "\"";
-    }
-
-    private static boolean hasBuggyHardwareKeyboardLayout() {
-        // Asus Transformers generate en-US keycodes for HKB keys, regardless of system locale or
-        // keyboard layout. This bug is reportedly fixed in JB. See bug 669361 and bug 712018.
-        if (sIsPreJellyBeanAsusTransformer == null) {
-            sIsPreJellyBeanAsusTransformer = Build.VERSION.SDK_INT < 16 &&
-                                             "asus".equals(Build.BRAND) &&
-                                             "EeePad".equals(Build.BOARD);
-        }
-        // The locale may change while Firefox is running, but the device and OS should not. :)
-        return sIsPreJellyBeanAsusTransformer && !Locale.getDefault().equals(Locale.US);
     }
 
     private static final class Span {

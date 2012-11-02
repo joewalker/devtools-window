@@ -12,9 +12,9 @@
 #include "js/MemoryMetrics.h"
 #include "jsclass.h"
 #include "jsfriendapi.h"
-#include "jsgc.h"
 #include "jspubtd.h"
 #include "jsproxy.h"
+#include "js/HeapAPI.h"
 
 #include "nsISupports.h"
 #include "nsIPrincipal.h"
@@ -40,17 +40,12 @@ JSObject *
 TransplantObjectWithWrapper(JSContext *cx,
                             JSObject *origobj, JSObject *origwrapper,
                             JSObject *targetobj, JSObject *targetwrapper);
-
-nsresult
-CreateGlobalObject(JSContext *cx, JSClass *clasp, nsIPrincipal *principal,
-                   bool wantXrays, JSObject **global,
-                   JSCompartment **compartment);
 } /* namespace xpc */
 
 #define XPCONNECT_GLOBAL_FLAGS                                                \
-    JSCLASS_DOM_GLOBAL | JSCLASS_XPCONNECT_GLOBAL | JSCLASS_HAS_PRIVATE |     \
+    JSCLASS_DOM_GLOBAL | JSCLASS_HAS_PRIVATE |                                \
     JSCLASS_PRIVATE_IS_NSISUPPORTS | JSCLASS_IMPLEMENTS_BARRIERS |            \
-    JSCLASS_GLOBAL_FLAGS_WITH_SLOTS(3)
+    JSCLASS_GLOBAL_FLAGS_WITH_SLOTS(2)
 
 void
 TraceXPCGlobal(JSTracer *trc, JSObject *obj);
@@ -304,31 +299,19 @@ namespace dom {
 extern int HandlerFamily;
 inline void* ProxyFamily() { return &HandlerFamily; }
 
-class DOMBaseProxyHandler : public js::BaseProxyHandler {
-protected:
-    DOMBaseProxyHandler(bool aNewDOMProxy) : js::BaseProxyHandler(ProxyFamily()),
-                                             mNewDOMProxy(aNewDOMProxy)
-    {
-    }
-
-public:
-    bool mNewDOMProxy;
-};
-
-inline bool IsNewProxyBinding(js::BaseProxyHandler* handler)
+inline bool IsDOMProxy(JSObject *obj, const js::Class* clasp)
 {
-  MOZ_ASSERT(handler->family() == ProxyFamily());
-  return static_cast<DOMBaseProxyHandler*>(handler)->mNewDOMProxy;
+    MOZ_ASSERT(js::GetObjectClass(obj) == clasp);
+    return (js::IsObjectProxyClass(clasp) || js::IsFunctionProxyClass(clasp)) &&
+           js::GetProxyHandler(obj)->family() == ProxyFamily();
 }
 
 inline bool IsDOMProxy(JSObject *obj)
 {
-    return js::IsProxy(obj) &&
-           js::GetProxyHandler(obj)->family() == ProxyFamily() &&
-           IsNewProxyBinding(js::GetProxyHandler(obj));
+    return IsDOMProxy(obj, js::GetObjectClass(obj));
 }
 
-typedef bool
+typedef JSObject*
 (*DefineInterface)(JSContext *cx, JSObject *global, bool *enabled);
 
 typedef bool
@@ -338,21 +321,6 @@ extern bool
 DefineStaticJSVals(JSContext *cx);
 void
 Register(nsScriptNameSpaceManager* aNameSpaceManager);
-
-namespace oldproxybindings {
-
-inline bool instanceIsProxy(JSObject *obj)
-{
-    return js::IsProxy(obj) &&
-           js::GetProxyHandler(obj)->family() == ProxyFamily() &&
-           !IsNewProxyBinding(js::GetProxyHandler(obj));
-}
-extern bool
-DefineStaticJSVals(JSContext *cx);
-void
-Register(nsScriptNameSpaceManager* aNameSpaceManager);
-
-} // namespace oldproxybindings
 
 } // namespace dom
 } // namespace mozilla

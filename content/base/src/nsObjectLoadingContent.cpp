@@ -75,11 +75,18 @@
 static NS_DEFINE_CID(kAppShellCID, NS_APPSHELL_CID);
 
 #ifdef PR_LOGGING
-static PRLogModuleInfo* gObjectLog = PR_NewLogModule("objlc");
+static PRLogModuleInfo*
+GetObjectLog()
+{
+  static PRLogModuleInfo *sLog;
+  if (!sLog)
+    sLog = PR_NewLogModule("objlc");
+  return sLog;
+}
 #endif
 
-#define LOG(args) PR_LOG(gObjectLog, PR_LOG_DEBUG, args)
-#define LOG_ENABLED() PR_LOG_TEST(gObjectLog, PR_LOG_DEBUG)
+#define LOG(args) PR_LOG(GetObjectLog(), PR_LOG_DEBUG, args)
+#define LOG_ENABLED() PR_LOG_TEST(GetObjectLog(), PR_LOG_DEBUG)
 
 static bool
 InActiveDocument(nsIContent *aContent)
@@ -1296,6 +1303,14 @@ nsObjectLoadingContent::UpdateObjectParameters()
     }
   }
 
+  // For eAllowPluginSkipChannel tags, if we have a non-plugin type, but can get
+  // a plugin type from the extension, prefer that to falling back to a channel.
+  if (GetTypeOfContent(newMime) != eType_Plugin && newURI &&
+      (caps & eAllowPluginSkipChannel) &&
+      IsPluginEnabledByExtension(newURI, newMime)) {
+    LOG(("OBJLC [%p]: Using extension as type hint (%s)", this, newMime.get()));
+  }
+
   ///
   /// Check if the original (pre-channel) content-type or URI changed, and
   /// record mOriginal{ContentType,URI}
@@ -1869,8 +1884,20 @@ nsObjectLoadingContent::LoadObject(bool aNotify,
     // (this is otherwise unset by the stack class)
     mIsLoading = false;
     mFinalListener = finalListener;
-    finalListener->OnStartRequest(mChannel, nullptr);
+    rv = finalListener->OnStartRequest(mChannel, nullptr);
     mSrcStreamLoading = false;
+    if (NS_FAILED(rv)) {
+      // Failed to load new content, but since we've already notified of our
+      // transition, we can just Unload and call LoadFallback (which will notify
+      // again)
+      mType = eType_Null;
+      // This could *also* technically re-enter if OnStartRequest fails after
+      // spawning a plugin.
+      mIsLoading = true;
+      UnloadObject(false);
+      NS_ENSURE_TRUE(mIsLoading, NS_OK);
+      LoadFallback(fallbackType, true);
+    }
   }
 
   return NS_OK;
@@ -2104,7 +2131,7 @@ nsObjectLoadingContent::GetTypeOfContent(const nsCString& aMIMEType)
 
   // SVGs load as documents, but are their own capability
   bool isSVG = aMIMEType.LowerCaseEqualsLiteral("image/svg+xml");
-  bool supportType = isSVG ? eSupportSVG : eSupportDocuments;
+  Capabilities supportType = isSVG ? eSupportSVG : eSupportDocuments;
   if ((caps & supportType) && IsSupportedDocument(aMIMEType)) {
     return eType_Document;
   }

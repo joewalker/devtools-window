@@ -30,6 +30,8 @@
 #include "nsBidiUtils.h"
 #include "nsUnicodeRange.h"
 #include "nsStyleConsts.h"
+#include "mozilla/FloatingPoint.h"
+#include "mozilla/Likely.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Services.h"
 #include "mozilla/Telemetry.h"
@@ -423,14 +425,14 @@ hb_blob_t *
 gfxFontEntry::ShareFontTableAndGetBlob(uint32_t aTag,
                                        FallibleTArray<uint8_t>* aBuffer)
 {
-    if (NS_UNLIKELY(!mFontTableCache.IsInitialized())) {
+    if (MOZ_UNLIKELY(!mFontTableCache.IsInitialized())) {
         // we do this here rather than on fontEntry construction
         // because not all shapers will access the table cache at all
         mFontTableCache.Init(10);
     }
 
     FontTableHashEntry *entry = mFontTableCache.PutEntry(aTag);
-    if (NS_UNLIKELY(!entry)) { // OOM
+    if (MOZ_UNLIKELY(!entry)) { // OOM
         return nullptr;
     }
 
@@ -842,7 +844,7 @@ gfxFontFamily::FindFontForChar(GlobalFontMatch *aMatchData)
 #ifdef PR_LOGGING
             PRLogModuleInfo *log = gfxPlatform::GetLog(eGfxLog_textrun);
 
-            if (NS_UNLIKELY(log)) {
+            if (MOZ_UNLIKELY(log)) {
                 uint32_t charRange = gfxFontUtils::CharRangeBit(aMatchData->mCh);
                 uint32_t unicodeRange = FindCharUnicodeRange(aMatchData->mCh);
                 uint32_t script = GetScriptCode(aMatchData->mCh);
@@ -1281,6 +1283,9 @@ gfxFontCache::AddNew(gfxFont *aFont)
         return;
     gfxFont *oldFont = entry->mFont;
     entry->mFont = aFont;
+    // Assert that we can find the entry we just put in (this fails if the key
+    // has a NaN float value in it, e.g. 'sizeAdjust').
+    MOZ_ASSERT(entry == mFonts.GetEntry(key));
     // If someone's asked us to replace an existing font entry, then that's a
     // bit weird, but let it happen, and expire the old font if it's not used.
     if (oldFont && oldFont->GetExpirationState()->IsTracked()) {
@@ -1319,8 +1324,9 @@ gfxFontCache::DestroyFont(gfxFont *aFont)
 {
     Key key(aFont->GetFontEntry(), aFont->GetStyle());
     HashEntry *entry = mFonts.GetEntry(key);
-    if (entry && entry->mFont == aFont)
+    if (entry && entry->mFont == aFont) {
         mFonts.RemoveEntry(key);
+    }
     NS_ASSERTION(aFont->GetRefCount() == 0,
                  "Destroying with non-zero ref count!");
     delete aFont;
@@ -1750,7 +1756,7 @@ gfxFont::Draw(gfxTextRun *aTextRun, uint32_t aStart, uint32_t aEnd,
 
     if (aContext->IsCairo()) {
       bool success = SetupCairoFont(aContext);
-      if (NS_UNLIKELY(!success))
+      if (MOZ_UNLIKELY(!success))
           return;
 
       ::GlyphBuffer glyphs;
@@ -3473,7 +3479,7 @@ gfxFontGroup::MakeSpaceTextRun(const Parameters *aParams, uint32_t aFlags)
     }
 
     gfxFont *font = GetFontAt(0);
-    if (NS_UNLIKELY(GetStyle()->size == 0)) {
+    if (MOZ_UNLIKELY(GetStyle()->size == 0)) {
         // Short-circuit for size-0 fonts, as Windows and ATSUI can't handle
         // them, and always create at least size 1 fonts, i.e. they still
         // render something for size 0 fonts.
@@ -3634,7 +3640,7 @@ gfxFontGroup::InitTextRun(gfxContext *aContext,
         while (scriptRuns.Next(runStart, runLimit, runScript)) {
 
 #ifdef PR_LOGGING
-            if (NS_UNLIKELY(log)) {
+            if (MOZ_UNLIKELY(log)) {
                 nsAutoCString lang;
                 mStyle.language->ToUTF8String(lang);
                 uint32_t runLen = runLimit - runStart;
@@ -4218,6 +4224,9 @@ gfxFontStyle::gfxFontStyle(uint8_t aStyle, uint16_t aWeight, int16_t aStretch,
     systemFont(aSystemFont), printerFont(aPrinterFont),
     style(aStyle)
 {
+    MOZ_ASSERT(!MOZ_DOUBLE_IS_NaN(size));
+    MOZ_ASSERT(!MOZ_DOUBLE_IS_NaN(sizeAdjust));
+
     if (weight > 900)
         weight = 900;
     if (weight < 100)

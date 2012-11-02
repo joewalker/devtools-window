@@ -21,6 +21,7 @@
 #include "nsStringBuffer.h"
 #include "nsTArray.h"
 #include "nsStyleConsts.h"
+#include "mozilla/FloatingPoint.h"
 
 class imgIRequest;
 class nsIDocument;
@@ -209,6 +210,12 @@ enum nsCSSUnit {
   eCSSUnit_PhysicalMillimeter = 200,   // (float) 1/25.4 inch
 
   // Length units - relative
+  // Viewport relative measure
+  eCSSUnit_ViewportWidth  = 700,    // (float) 1% of the width of the initial containing block
+  eCSSUnit_ViewportHeight = 701,    // (float) 1% of the height of the initial containing block
+  eCSSUnit_ViewportMin    = 702,    // (float) smaller of ViewportWidth and ViewportHeight
+  eCSSUnit_ViewportMax    = 703,    // (float) larger of ViewportWidth and ViewportHeight
+
   // Font relative measure
   eCSSUnit_EM           = 800,    // (float) == current font size
   eCSSUnit_XHeight      = 801,    // (float) distance from top of lower case x to baseline
@@ -348,6 +355,7 @@ public:
   float GetFloatValue() const
   {
     NS_ABORT_IF_FALSE(eCSSUnit_Number <= mUnit, "not a float value");
+    MOZ_ASSERT(!MOZ_DOUBLE_IS_NaN(mValue.mFloat));
     return mValue.mFloat;
   }
 

@@ -13,6 +13,7 @@
 #include "nsGfxCIID.h"
 #include "nsIInterfaceRequestor.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/Likely.h"
 #include "nsXULPopupManager.h"
 #include "nsIWidgetListener.h"
 
@@ -713,7 +714,7 @@ void nsView::SetZIndex(bool aAuto, int32_t aZIndex, bool aTopMost)
 void nsView::AssertNoWindow()
 {
   // XXX: it would be nice to make this a strong assert
-  if (NS_UNLIKELY(mWindow)) {
+  if (MOZ_UNLIKELY(mWindow)) {
     NS_ERROR("We already have a window for this view? BAD");
     mWindow->SetWidgetListener(nullptr);
     mWindow->Destroy();
@@ -1027,7 +1028,8 @@ nsView::RequestWindowClose(nsIWidget* aWidget)
 void
 nsView::WillPaintWindow(nsIWidget* aWidget, bool aWillSendDidPaint)
 {
-  mViewManager->WillPaintWindow(aWidget, aWillSendDidPaint);
+  nsCOMPtr<nsViewManager> vm = mViewManager;
+  vm->WillPaintWindow(aWidget, aWillSendDidPaint);
 }
 
 bool
@@ -1043,7 +1045,8 @@ nsView::PaintWindow(nsIWidget* aWidget, nsIntRegion aRegion, uint32_t aFlags)
 void
 nsView::DidPaintWindow()
 {
-  mViewManager->DidPaintWindow();
+  nsCOMPtr<nsViewManager> vm = mViewManager;
+  vm->DidPaintWindow();
 }
 
 nsEventStatus

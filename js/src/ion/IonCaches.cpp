@@ -158,6 +158,52 @@ IsCacheableGetPropReadSlot(JSObject *obj, JSObject *holder, const Shape *shape)
 }
 
 static bool
+IsCacheableNoProperty(JSObject *obj, JSObject *holder, const Shape *shape, jsbytecode *pc,
+                      const TypedOrValueRegister &output)
+{
+    if (shape)
+        return false;
+
+    JS_ASSERT(!holder);
+
+    // Just because we didn't find the property on the object doesn't mean it
+    // won't magically appear through various engine hacks:
+    if (obj->getClass()->getProperty && obj->getClass()->getProperty != JS_PropertyStub)
+        return false;
+
+    // Don't generate missing property ICs if we skipped a non-native object, as
+    // lookups may extend beyond the prototype chain (e.g.  for ListBase
+    // proxies).
+    JSObject *obj2 = obj;
+    while (obj2) {
+        if (!obj2->isNative())
+            return false;
+        obj2 = obj2->getProto();
+    }
+
+#if JS_HAS_NO_SUCH_METHOD
+    // This case cannot appear with an idempotent cache.
+    if (pc) {
+        // The __noSuchMethod__ hook may substitute in a valid method.  Since,
+        // if o.m is missing, o.m() will probably be an error, just mark all
+        // missing callprops as uncacheable.
+        if (JSOp(*pc) == JSOP_CALLPROP ||
+            JSOp(*pc) == JSOP_CALLELEM)
+        {
+            return false;
+        }
+    }
+#endif
+
+    // TI has not yet monitored an Undefined value. The fallback path will
+    // monitor and invalidate the script.
+    if (!output.hasValue())
+        return false;
+
+    return true;
+}
+
+static bool
 IsCacheableGetPropCallNative(JSObject *obj, JSObject *holder, const Shape *shape)
 {
     if (!shape || !IsCacheableProtoChain(obj, holder))
@@ -226,26 +272,55 @@ struct GetNativePropertyStub
             // Note: this may clobber the object register if it's used as scratch.
             GeneratePrototypeGuards(cx, masm, obj, holder, object, scratchReg, &prototypeFailures);
 
-            // Guard on the holder's shape.
-            holderReg = scratchReg;
-            masm.movePtr(ImmGCPtr(holder), holderReg);
-            masm.branchPtr(Assembler::NotEqual,
-                           Address(holderReg, JSObject::offsetOfShape()),
-                           ImmGCPtr(holder->lastProperty()),
-                           &prototypeFailures);
+            if (holder) {
+                // Guard on the holder's shape.
+                holderReg = scratchReg;
+                masm.movePtr(ImmGCPtr(holder), holderReg);
+                masm.branchPtr(Assembler::NotEqual,
+                               Address(holderReg, JSObject::offsetOfShape()),
+                               ImmGCPtr(holder->lastProperty()),
+                               &prototypeFailures);
+            } else {
+                // The property does not exist. Guard on everything in the
+                // prototype chain.
+                JSObject *proto = obj->getTaggedProto().toObjectOrNull();
+                Register lastReg = object;
+                JS_ASSERT(scratchReg != object);
+                while (proto) {
+                    Address addrType(lastReg, JSObject::offsetOfType());
+                    masm.loadPtr(addrType, scratchReg);
+                    Address addrProto(scratchReg, offsetof(types::TypeObject, proto));
+                    masm.loadPtr(addrProto, scratchReg);
+                    Address addrShape(scratchReg, JSObject::offsetOfShape());
+
+                    // Guard the shape of the current prototype.
+                    masm.branchPtr(Assembler::NotEqual,
+                                   Address(scratchReg, JSObject::offsetOfShape()),
+                                   ImmGCPtr(proto->lastProperty()),
+                                   &prototypeFailures);
+
+                    proto = proto->getProto();
+                    lastReg = scratchReg;
+                }
+
+                holderReg = InvalidReg;
+            }
         } else {
             holderReg = object;
         }
 
         // Slot access.
-        if (holder->isFixedSlot(shape->slot())) {
+        if (holder && holder->isFixedSlot(shape->slot())) {
             Address addr(holderReg, JSObject::getFixedSlotOffset(shape->slot()));
             masm.loadTypedOrValue(addr, output);
-        } else {
+        } else if (holder) {
             masm.loadPtr(Address(holderReg, JSObject::offsetOfSlots()), scratchReg);
 
             Address addr(scratchReg, holder->dynamicSlotIndex(shape->slot()) * sizeof(Value));
             masm.loadTypedOrValue(addr, output);
+        } else {
+            JS_ASSERT(!holder);
+            masm.moveValue(UndefinedValue(), output.valueReg());
         }
 
         if (restoreScratch)
@@ -273,7 +348,7 @@ struct GetNativePropertyStub
     bool generateCallGetter(JSContext *cx, MacroAssembler &masm, JSObject *obj,
                             PropertyName *propName, JSObject *holder, const Shape *shape,
                             RegisterSet &liveRegs, Register object, TypedOrValueRegister output,
-                            types::TypeSet *outputTypes, void *returnAddr, jsbytecode *pc,
+                            void *returnAddr, jsbytecode *pc,
                             RepatchLabel *failures, Label *nonRepatchFailures = NULL)
     {
         // Initial shape check.
@@ -401,10 +476,7 @@ struct GetNativePropertyStub
         // WARNING: if the IonCode object ever moved, since we'd be rooting a nonsense
         // WARNING: value here.
         // WARNING:
-        stubCodePatchOffset = masm.pushWithPatch(ImmWord(uintptr_t(-1)));
-        // Manually adjust framePushed to account for this push which is not otherwise
-        // accounted for.
-        masm.setFramePushed(masm.framePushed() + sizeof(uintptr_t));
+        stubCodePatchOffset = masm.PushWithPatch(ImmWord(uintptr_t(-1)));
 
         if (callNative) {
             JS_ASSERT(shape->hasGetterValue() && shape->getterValue().isObject() &&
@@ -588,13 +660,9 @@ IonCacheGetProperty::attachCallGetter(JSContext *cx, IonScript *ion, JSObject *o
     // properly constructed.
     masm.setFramePushed(ion->frameSize());
 
-    // Generating a call getter may need the pushed typeset.
-    types::StackTypeSet *outputTypes = script->analysis()->pushedTypes(pc, 0);
-
     GetNativePropertyStub getprop;
     if (!getprop.generateCallGetter(cx, masm, obj, name(), holder, shape, liveRegs,
-                                    object(), output(), outputTypes, returnAddr, pc,
-                                    &failures))
+                                    object(), output(), returnAddr, pc, &failures))
     {
          return false;
     }
@@ -629,10 +697,11 @@ IonCacheGetProperty::attachCallGetter(JSContext *cx, IonScript *ion, JSObject *o
 }
 
 static bool
-TryAttachNativeStub(JSContext *cx, IonScript *ion,
-                    IonCacheGetProperty &cache, HandleObject obj,
-                    HandlePropertyName name, const SafepointIndex *safepointIndex,
-                    void *returnAddr, bool *isCacheable)
+TryAttachNativeGetPropStub(JSContext *cx, IonScript *ion,
+                           IonCacheGetProperty &cache, HandleObject obj,
+                           HandlePropertyName name,
+                           const SafepointIndex *safepointIndex,
+                           void *returnAddr, bool *isCacheable)
 {
     JS_ASSERT(!*isCacheable);
 
@@ -660,7 +729,13 @@ TryAttachNativeStub(JSContext *cx, IonScript *ion,
     bool readSlot = false;
     bool callGetter = false;
 
-    if (IsCacheableGetPropReadSlot(checkObj, holder, shape)) {
+    RootedScript script(cx);
+    jsbytecode *pc;
+    cache.getScriptedLocation(&script, &pc);
+
+    if (IsCacheableGetPropReadSlot(checkObj, holder, shape) ||
+        IsCacheableNoProperty(checkObj, holder, shape, pc, cache.output()))
+    {
         readSlot = true;
     } else if (IsCacheableGetPropCallNative(checkObj, holder, shape) ||
                IsCacheableGetPropCallPropertyOp(checkObj, holder, shape))
@@ -681,6 +756,7 @@ TryAttachNativeStub(JSContext *cx, IonScript *ion,
     // monitor the return type inside an idempotent cache though, so we don't
     // handle this case.
     if (cache.idempotent() &&
+        holder &&
         holder->hasSingletonType() &&
         holder->getSlot(shape->slot()).isUndefined())
     {
@@ -732,8 +808,12 @@ js::ion::GetPropertyCache(JSContext *cx, size_t cacheIndex, HandleObject obj, Mu
     // limit. Once we can make calls from within generated stubs, a new call
     // stub will be generated instead and the previous stubs unlinked.
     bool isCacheable = false;
-    if (!TryAttachNativeStub(cx, ion, cache, obj, name, safepointIndex, returnAddr, &isCacheable))
+    if (!TryAttachNativeGetPropStub(cx, ion, cache, obj, name,
+                                    safepointIndex, returnAddr,
+                                    &isCacheable))
+    {
         return false;
+    }
 
     if (cache.idempotent() && !isCacheable) {
         // Invalidate the cache if the property was not found, or was found on
@@ -800,7 +880,8 @@ IonCache::reset()
 }
 
 bool
-IonCacheSetProperty::attachNativeExisting(JSContext *cx, IonScript *ion, JSObject *obj, const Shape *shape)
+IonCacheSetProperty::attachNativeExisting(JSContext *cx, IonScript *ion,
+                                          HandleObject obj, HandleShape shape)
 {
     MacroAssembler masm;
 
@@ -855,6 +936,194 @@ IonCacheSetProperty::attachNativeExisting(JSContext *cx, IonScript *ion, JSObjec
     updateLastJump(exitJump);
 
     IonSpew(IonSpew_InlineCaches, "Generated native SETPROP setting case stub at %p", code->raw());
+
+    return true;
+}
+
+bool
+IonCacheSetProperty::attachSetterCall(JSContext *cx, IonScript *ion,
+                                      HandleObject obj, HandleObject holder, HandleShape shape,
+                                      void *returnAddr)
+{
+    MacroAssembler masm;
+
+    // Need to set correct framePushed on the masm so that exit frame descriptors are
+    // properly constructed.
+    masm.setFramePushed(ion->frameSize());
+
+    Label failure;
+    masm.branchPtr(Assembler::NotEqual,
+                   Address(object(), JSObject::offsetOfShape()),
+                   ImmGCPtr(obj->lastProperty()),
+                   &failure);
+
+    // Generate prototype guards if needed.
+    // Take a scratch register for use, save on stack.
+    {
+        RegisterSet regSet(RegisterSet::All());
+        regSet.take(AnyRegister(object()));
+        if (!value().constant())
+            regSet.maybeTake(value().reg());
+        Register scratchReg = regSet.takeGeneral();
+        masm.push(scratchReg);
+
+        Label protoFailure;
+        Label protoSuccess;
+
+        // Generate prototype/shape guards.
+        if (obj != holder)
+            GeneratePrototypeGuards(cx, masm, obj, holder, object(), scratchReg, &protoFailure);
+
+        masm.movePtr(ImmGCPtr(holder), scratchReg);
+        masm.branchPtr(Assembler::NotEqual,
+                       Address(scratchReg, JSObject::offsetOfShape()),
+                       ImmGCPtr(holder->lastProperty()),
+                       &protoFailure);
+
+        masm.jump(&protoSuccess);
+
+        masm.bind(&protoFailure);
+        masm.pop(scratchReg);
+        masm.jump(&failure);
+
+        masm.bind(&protoSuccess);
+        masm.pop(scratchReg);
+    }
+
+    // Good to go for invoking setter.
+
+    // saveLive()
+    masm.PushRegsInMask(liveRegs);
+
+    // Remaining registers should basically be free, but we need to use |object| still
+    // so leave it alone.
+    RegisterSet regSet(RegisterSet::All());
+    regSet.take(AnyRegister(object()));
+
+    // This is a slower stub path, and we're going to be doing a call anyway.  Don't need
+    // to try so hard to not use the stack.  Scratch regs are just taken from the register
+    // set not including the input, current value saved on the stack, and restored when
+    // we're done with it.
+    Register scratchReg     = regSet.takeGeneral();
+    Register argJSContextReg = regSet.takeGeneral();
+    Register argObjReg       = regSet.takeGeneral();
+    Register argIdReg        = regSet.takeGeneral();
+    Register argStrictReg    = regSet.takeGeneral();
+    Register argVpReg        = regSet.takeGeneral();
+
+    // Ensure stack is aligned.
+    DebugOnly<uint32> initialStack = masm.framePushed();
+    masm.checkStackAlignment();
+
+    Label success, exception;
+
+    // Push the IonCode pointer for the stub we're generating.
+    // WARNING:
+    // WARNING: If IonCode ever becomes relocatable, the following code is incorrect.
+    // WARNING: Note that we're not marking the pointer being pushed as an ImmGCPtr.
+    // WARNING: This is not a marking issue since the stub IonCode won't be collected
+    // WARNING: between the time it's called and when we get here, but it would fail
+    // WARNING: if the IonCode object ever moved, since we'd be rooting a nonsense
+    // WARNING: value here.
+    // WARNING:
+    CodeOffsetLabel stubCodePatchOffset = masm.PushWithPatch(ImmWord(uintptr_t(-1)));
+
+    StrictPropertyOp target = shape->setterOp();
+    JS_ASSERT(target);
+    // JSStrictPropertyOp: JSBool fn(JSContext *cx, JSHandleObject obj,
+    //                               JSHandleId id, JSBool strict, JSMutableHandleValue vp);
+
+    // Push args on stack first so we can take pointers to make handles.
+    if (value().constant())
+        masm.Push(value().value());
+    else
+        masm.Push(value().reg());
+    masm.movePtr(StackPointer, argVpReg);
+
+    masm.move32(Imm32(strict() ? 1 : 0), argStrictReg);
+
+    // push canonical jsid from shape instead of propertyname.
+    jsid propId;
+    if (!shape->getUserId(cx, &propId))
+        return false;
+    masm.Push(propId, argIdReg);
+    masm.movePtr(StackPointer, argIdReg);
+
+    masm.Push(object());
+    masm.movePtr(StackPointer, argObjReg);
+
+    masm.loadJSContext(argJSContextReg);
+
+    if (!masm.buildOOLFakeExitFrame(returnAddr))
+        return false;
+    masm.enterFakeExitFrame(ION_FRAME_OOL_PROPERTY_OP);
+
+    // Make the call.
+    masm.setupUnalignedABICall(5, scratchReg);
+    masm.passABIArg(argJSContextReg);
+    masm.passABIArg(argObjReg);
+    masm.passABIArg(argIdReg);
+    masm.passABIArg(argStrictReg);
+    masm.passABIArg(argVpReg);
+    masm.callWithABI(JS_FUNC_TO_DATA_PTR(void *, target));
+
+    // Test for failure.
+    masm.branchTest32(Assembler::Zero, ReturnReg, ReturnReg, &exception);
+
+    masm.jump(&success);
+
+    // Handle exception case.
+    masm.bind(&exception);
+    masm.handleException();
+
+    // Handle success case.
+    masm.bind(&success);
+
+    // The next instruction is removing the footer of the exit frame, so there
+    // is no need for leaveFakeExitFrame.
+
+    // Move the StackPointer back to its original location, unwinding the exit frame.
+    masm.adjustStack(IonOOLPropertyOpExitFrameLayout::Size());
+    JS_ASSERT(masm.framePushed() == initialStack);
+
+    // restoreLive()
+    masm.PopRegsInMask(liveRegs);
+
+    // Rejoin jump.
+    RepatchLabel rejoin;
+    CodeOffsetJump rejoinOffset = masm.jumpWithPatch(&rejoin);
+    masm.bind(&rejoin);
+
+    // Exit jump.
+    masm.bind(&failure);
+    RepatchLabel exit;
+    CodeOffsetJump exitOffset = masm.jumpWithPatch(&exit);
+    masm.bind(&exit);
+
+    Linker linker(masm);
+    IonCode *code = linker.newCode(cx);
+    if (!code)
+        return false;
+
+    rejoinOffset.fixup(&masm);
+    exitOffset.fixup(&masm);
+    stubCodePatchOffset.fixup(&masm);
+
+    if (ion->invalidated())
+        return true;
+
+    Assembler::patchDataWithValueCheck(CodeLocationLabel(code, stubCodePatchOffset),
+                                       ImmWord(uintptr_t(code)), ImmWord(uintptr_t(-1)));
+
+    CodeLocationJump rejoinJump(code, rejoinOffset);
+    CodeLocationJump exitJump(code, exitOffset);
+    CodeLocationJump lastJump_ = lastJump();
+    PatchJump(lastJump_, CodeLocationLabel(code));
+    PatchJump(rejoinJump, rejoinLabel());
+    PatchJump(exitJump, cacheLabel());
+    updateLastJump(exitJump);
+
+    IonSpew(IonSpew_InlineCaches, "Generated SETPROP calling case stub at %p", code->raw());
 
     return true;
 }
@@ -968,13 +1237,9 @@ IsPropertyInlineable(JSObject *obj, IonCacheSetProperty &cache)
 }
 
 static bool
-IsPropertySetInlineable(JSContext *cx, HandleObject obj, JSAtom *atom, jsid *pId, const Shape **pShape)
+IsPropertySetInlineable(JSContext *cx, HandleObject obj, HandleId id, MutableHandleShape pshape)
 {
-    jsid id = AtomToId(atom);
-    *pId = id;
-
-    const Shape *shape = obj->nativeLookup(cx, id);
-    *pShape = shape;
+    Shape *shape = obj->nativeLookup(cx, id);
 
     if (!shape)
         return false;
@@ -988,18 +1253,41 @@ IsPropertySetInlineable(JSContext *cx, HandleObject obj, JSAtom *atom, jsid *pId
     if (!shape->writable())
         return false;
 
+    pshape.set(shape);
+
+    return true;
+}
+
+static bool
+IsPropertySetterCallInlineable(JSContext *cx, HandleObject obj, HandleObject holder,
+                               jsid id, HandleShape shape)
+{
+    if (!shape)
+        return false;
+
+    if (shape->hasSlot())
+        return false;
+
+    if (shape->hasDefaultSetter())
+        return false;
+
+    // We only handle propertyOps for now, so fail if we have SetterValue
+    // (which implies JSNative setter).
+    if (shape->hasSetterValue())
+        return false;
+
     return true;
 }
 
 static bool
 IsPropertyAddInlineable(JSContext *cx, HandleObject obj, jsid id, uint32_t oldSlots,
-                       const Shape **pShape)
+                        MutableHandleShape pShape)
 {
     // This is not a Add, the property exists.
-    if (*pShape)
+    if (pShape.get())
         return false;
 
-    const Shape *shape = obj->nativeLookup(cx, id);
+    Shape *shape = obj->nativeLookup(cx, id);
     if (!shape || shape->inDictionary() || !shape->hasSlot() || !shape->hasDefaultSetter())
         return false;
 
@@ -1032,7 +1320,7 @@ IsPropertyAddInlineable(JSContext *cx, HandleObject obj, jsid id, uint32_t oldSl
     if (obj->numDynamicSlots() != oldSlots)
         return false;
 
-    *pShape = shape;
+    pShape.set(shape);
     return true;
 }
 
@@ -1042,17 +1330,34 @@ js::ion::SetPropertyCache(JSContext *cx, size_t cacheIndex, HandleObject obj, Ha
 {
     AutoFlushCache afc ("SetPropertyCache");
 
-    IonScript *ion = GetTopIonJSScript(cx)->ion;
+    void *returnAddr;
+    const SafepointIndex *safepointIndex;
+    JSScript *script = GetTopIonJSScript(cx, &safepointIndex, &returnAddr);
+    IonScript *ion = script->ion;
     IonCacheSetProperty &cache = ion->getCache(cacheIndex).toSetProperty();
     RootedPropertyName name(cx, cache.name());
-    jsid id;
-    const Shape *shape = NULL;
+    RootedId id(cx, AtomToId(name));
+    RootedShape shape(cx);
+    RootedObject holder(cx);
 
     bool inlinable = IsPropertyInlineable(obj, cache);
-    if (inlinable && IsPropertySetInlineable(cx, obj, name, &id, &shape)) {
-        cache.incrementStubCount();
-        if (!cache.attachNativeExisting(cx, ion, obj, shape))
-            return false;
+    if (inlinable) {
+        RootedShape shape(cx);
+        if (IsPropertySetInlineable(cx, obj, id, &shape)) {
+            cache.incrementStubCount();
+            if (!cache.attachNativeExisting(cx, ion, obj, shape))
+                return false;
+        } else {
+            RootedObject holder(cx);
+            if (!JSObject::lookupProperty(cx, obj, name, &holder, &shape))
+                return false;
+
+            if (IsPropertySetterCallInlineable(cx, obj, holder, id, shape)) {
+                cache.incrementStubCount();
+                if (!cache.attachSetterCall(cx, ion, obj, holder, shape, returnAddr))
+                    return false;
+            }
+        }
     }
 
     uint32_t oldSlots = obj->numDynamicSlots();
@@ -1083,7 +1388,12 @@ IonCacheGetElement::attachGetProp(JSContext *cx, IonScript *ion, HandleObject ob
     if (!JSObject::lookupProperty(cx, obj, name, &holder, &shape))
         return false;
 
-    if (!IsCacheableGetPropReadSlot(obj, holder, shape)) {
+    RootedScript script(cx);
+    jsbytecode *pc;
+    getScriptedLocation(&script, &pc);
+
+    if (!IsCacheableGetPropReadSlot(obj, holder, shape) &&
+        !IsCacheableNoProperty(obj, holder, shape, pc, output())) {
         IonSpew(IonSpew_InlineCaches, "GETELEM uncacheable property");
         return true;
     }
@@ -1538,7 +1848,7 @@ IonCacheName::attach(JSContext *cx, IonScript *ion, HandleObject scopeChain, Han
 
 static bool
 IsCacheableName(JSContext *cx, HandleObject scopeChain, HandleObject obj, HandleObject holder,
-                HandleShape shape)
+                HandleShape shape, const TypedOrValueRegister &output)
 {
     if (!shape)
         return false;
@@ -1549,7 +1859,8 @@ IsCacheableName(JSContext *cx, HandleObject scopeChain, HandleObject obj, Handle
 
     if (obj->isGlobal()) {
         // Support only simple property lookups.
-        if (!IsCacheableGetPropReadSlot(obj, holder, shape))
+        if (!IsCacheableGetPropReadSlot(obj, holder, shape) &&
+            !IsCacheableNoProperty(obj, holder, shape, NULL, output))
             return false;
     } else if (obj->isCall()) {
         if (!shape->hasDefaultGetter())
@@ -1595,7 +1906,7 @@ js::ion::GetNameCache(JSContext *cx, size_t cacheIndex, HandleObject scopeChain,
         return false;
 
     if (cache.stubCount() < MAX_STUBS &&
-        IsCacheableName(cx, scopeChain, obj, holder, shape))
+        IsCacheableName(cx, scopeChain, obj, holder, shape, cache.outputReg()))
     {
         if (!cache.attach(cx, ion, scopeChain, obj, shape))
             return false;

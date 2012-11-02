@@ -38,6 +38,7 @@
 #include "nsRuleNode.h"
 #include "nsMediaFeatures.h"
 #include "nsDOMClassInfoID.h"
+#include "mozilla/Likely.h"
 
 using namespace mozilla;
 
@@ -1489,7 +1490,7 @@ nsCSSStyleSheet::ReplaceStyleRule(css::Rule* aOld, css::Rule* aNew)
 
   if (NS_SUCCEEDED(WillDirty())) {
     int32_t index = mInner->mOrderedRules.IndexOf(aOld);
-    if (NS_UNLIKELY(index == -1)) {
+    if (MOZ_UNLIKELY(index == -1)) {
       NS_NOTREACHED("Couldn't find old rule");
       return;
     }
@@ -1705,7 +1706,7 @@ nsCSSStyleSheet::SubjectSubsumesInnerPrincipal()
     return NS_OK;
   }
   
-  if (!nsContentUtils::IsCallerTrustedForWrite()) {
+  if (!nsContentUtils::IsCallerChrome()) {
     // Allow access only if CORS mode is not NONE
     if (GetCORSMode() == CORS_NONE) {
       return NS_ERROR_DOM_SECURITY_ERR;

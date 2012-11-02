@@ -6,6 +6,7 @@
 package org.mozilla.gecko;
 
 import org.mozilla.gecko.db.BrowserDB;
+import org.mozilla.gecko.db.BrowserContract;
 
 import android.content.BroadcastReceiver;
 import android.content.ComponentCallbacks2;
@@ -108,7 +109,7 @@ class MemoryMonitor extends BroadcastReceiver {
         if (Intent.ACTION_DEVICE_STORAGE_LOW.equals(intent.getAction())) {
             Log.d(LOGTAG, "Device storage is low");
             mStoragePressure = true;
-            GeckoAppShell.getHandler().post(new StorageReducer());
+            GeckoAppShell.getHandler().post(new StorageReducer(context));
         } else if (Intent.ACTION_DEVICE_STORAGE_OK.equals(intent.getAction())) {
             Log.d(LOGTAG, "Device storage is ok");
             mStoragePressure = false;
@@ -204,6 +205,11 @@ class MemoryMonitor extends BroadcastReceiver {
     }
 
     class StorageReducer implements Runnable {
+        private final Context mContext;
+        public StorageReducer(final Context context) {
+            this.mContext = context;
+        }
+
         @Override
         public void run() {
             // this might get run right on startup, if so wait 10 seconds and try again
@@ -217,6 +223,8 @@ class MemoryMonitor extends BroadcastReceiver {
                 return;
             }
 
+            BrowserDB.expireHistory(mContext.getContentResolver(),
+                                    BrowserContract.ExpirePriority.AGGRESSIVE);
             BrowserDB.removeThumbnails(Tabs.getInstance().getContentResolver());
             // TODO: drop or shrink disk caches
         }

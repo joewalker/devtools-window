@@ -105,10 +105,8 @@ public:
   unsigned int GetTileCount() const { return mRetainedTiles.Length(); }
 
   const nsIntRegion& GetValidRegion() const { return mValidRegion; }
-  const nsIntRegion& GetLastPaintRegion() const { return mLastPaintRegion; }
-  void SetLastPaintRegion(const nsIntRegion& aLastPaintRegion) {
-    mLastPaintRegion = aLastPaintRegion;
-  }
+  const nsIntRegion& GetPaintedRegion() const { return mPaintedRegion; }
+  void ClearPaintedRegion() { mPaintedRegion.SetEmpty(); }
 
   // Given a position i, this function returns the position inside the current tile.
   int GetTileStart(int i) const {
@@ -127,7 +125,7 @@ protected:
   void Update(const nsIntRegion& aNewValidRegion, const nsIntRegion& aPaintRegion);
 
   nsIntRegion     mValidRegion;
-  nsIntRegion     mLastPaintRegion;
+  nsIntRegion     mPaintedRegion;
 
   /**
    * mRetainedTiles is a rectangular buffer of mRetainedWidth x mRetainedHeight
@@ -161,6 +159,8 @@ public:
    * is retained until it has been uploaded/copyed and unlocked.
    */
   virtual void PaintedTiledLayerBuffer(const BasicTiledLayerBuffer* aTiledBuffer) = 0;
+
+  virtual void MemoryPressure() = 0;
 };
 
 // Normal integer division truncates towards zero,
@@ -246,7 +246,7 @@ TiledLayerBuffer<Derived, Tile>::Update(const nsIntRegion& aNewValidRegion,
   // which we will allocate in pass 2.
   // TODO: Add a tile pool to reduce new allocation
   int tileX = 0;
-  int tileY;
+  int tileY = 0;
   // Iterate over the new drawing bounds in steps of tiles.
   for (int32_t x = newBound.x; x < newBound.XMost(); tileX++) {
     // Compute tileRect(x,y,width,height) in layer space coordinate
@@ -403,7 +403,7 @@ TiledLayerBuffer<Derived, Tile>::Update(const nsIntRegion& aNewValidRegion,
 
   mRetainedTiles = newRetainedTiles;
   mValidRegion = aNewValidRegion;
-  mLastPaintRegion = aPaintRegion;
+  mPaintedRegion.Or(mPaintedRegion, aPaintRegion);
 }
 
 } // layers

@@ -815,7 +815,7 @@ TISInputSourceWrapper::InitKeyEvent(NSEvent *aNativeKeyEvent,
     if (!aKeyEvent.IsMeta() && !aKeyEvent.IsControl() && IsOpenedIMEMode()) {
       UInt32 state =
         nsCocoaUtils::ConvertToCarbonModifier([aNativeKeyEvent modifierFlags]);
-      PRUint32 ch = TranslateToChar(nativeKeyCode, state, kbType);
+      uint32_t ch = TranslateToChar(nativeKeyCode, state, kbType);
       if (ch) {
         insertString = ch;
       }
@@ -2971,8 +2971,6 @@ IMEInputHandler::OnFocusChangeInGecko(bool aFocus)
 
   // This is called when the native focus is changed and when the native focus
   // isn't changed but the focus is changed in Gecko.
-  // XXX currently, we're not called this method with false, we need to
-  // improve the nsIMEStateManager implementation.
   if (!aFocus) {
     if (sFocusedIMEHandler == this)
       sFocusedIMEHandler = nullptr;

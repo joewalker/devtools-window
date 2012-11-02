@@ -13,6 +13,7 @@
 #include "jsapi.h"
 #include "mozAutoDocUpdate.h"
 #include "mozilla/CORSMode.h"
+#include "mozilla/Likely.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Util.h"
 #include "nsAsyncDOMEvent.h"
@@ -1142,7 +1143,7 @@ nsINode::UnoptimizableCCNode() const
 bool
 nsINode::Traverse(nsINode *tmp, nsCycleCollectionTraversalCallback &cb)
 {
-  if (NS_LIKELY(!cb.WantAllTraces())) {
+  if (MOZ_LIKELY(!cb.WantAllTraces())) {
     nsIDocument *currentDoc = tmp->GetCurrentDoc();
     if (currentDoc &&
         nsCCUncollectableMarker::InGeneration(currentDoc->GetMarkedCCGeneration())) {
@@ -2310,14 +2311,9 @@ nsINode::WrapObject(JSContext *aCx, JSObject *aScope, bool *aTriedToWrap)
   // If the document has never had a script handling object, untrusted
   // scripts (3) shouldn't touch it!
   bool hasHadScriptHandlingObject = false;
-  bool enabled;
-  nsIScriptSecurityManager* securityManager;
   if (!OwnerDoc()->GetScriptHandlingObject(hasHadScriptHandlingObject) &&
       !hasHadScriptHandlingObject &&
-      !((securityManager = nsContentUtils::GetSecurityManager()) &&
-        NS_SUCCEEDED(securityManager->IsCapabilityEnabled("UniversalXPConnect",
-                                                          &enabled)) &&
-        enabled)) {
+      !nsContentUtils::IsCallerChrome()) {
     Throw<true>(aCx, NS_ERROR_UNEXPECTED);
     *aTriedToWrap = true;
     return nullptr;

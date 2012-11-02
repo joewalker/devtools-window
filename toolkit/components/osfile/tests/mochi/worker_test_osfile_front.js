@@ -202,8 +202,11 @@ function compare_files(test, sourcePath, destPath, prefix)
 
 function test_readall_writeall_file()
 {
-  let src_file_name = "chrome/toolkit/components/osfile/tests/mochi/worker_test_osfile_unix.js";
-  let tmp_file_name = "test_osfile_front.tmp";
+  let src_file_name =
+    OS.Path.join("chrome", "toolkit", "components", "osfile", "tests", "mochi",
+                 "worker_test_osfile_front.js");
+  let tmp_file_name =
+    OS.Path.join(OS.Constants.Path.tmpDir, "test_osfile_front.tmp");
   ok(true, "Starting test_readall_writeall_file");
 
   // read, ArrayBuffer
@@ -226,7 +229,6 @@ function test_readall_writeall_file()
   OS.File.remove(tmp_file_name);
 
   // read, C buffer
-
   source = OS.File.open(src_file_name);
   dest = OS.File.open(tmp_file_name, {write: true, trunc:true});
   buf = new ArrayBuffer(size);
@@ -319,7 +321,6 @@ function test_readall_writeall_file()
   }
   ok(!!exn, "readAll + writeAtomic cleaned up after itself");
 
-
   // File.writeAtomic on top of existing file
   // Remove content and set arbitrary size, to avoid potential false negatives
   dest = OS.File.open(tmp_file_name, {write: true, trunc:true});
@@ -356,6 +357,9 @@ function test_readall_writeall_file()
     exn = x;
   }
   ok(!!exn && exn instanceof TypeError, "writeAtomic fails if tmpPath is not provided");
+
+  // Cleanup.
+  OS.File.remove(tmp_file_name);
 }
 
 /**
@@ -363,7 +367,9 @@ function test_readall_writeall_file()
  */
 function test_copy_existing_file()
 {
-  let src_file_name = "chrome/toolkit/components/osfile/tests/mochi/worker_test_osfile_unix.js";
+  let src_file_name =
+    OS.Path.join("chrome", "toolkit", "components", "osfile", "tests", "mochi",
+                 "worker_test_osfile_front.js");
   let tmp_file_name = "test_osfile_front.tmp";
   ok(true, "Starting test_copy_existing");
   OS.File.copy(src_file_name, tmp_file_name);
@@ -391,7 +397,6 @@ function test_copy_existing_file()
   }
   ok(!!exn, "test_copy_existing: noOverwrite prevents overwriting existing files");
 
-
   ok(true, "test_copy_existing: Cleaning up");
   OS.File.remove(tmp_file_name);
 }
@@ -403,7 +408,9 @@ function test_move_file()
 {
   ok(true, "test_move_file: Starting");
   // 1. Copy file into a temporary file
-  let src_file_name = "chrome/toolkit/components/osfile/tests/mochi/worker_test_osfile_unix.js";
+  let src_file_name =
+    OS.Path.join("chrome", "toolkit", "components", "osfile", "tests", "mochi",
+                 "worker_test_osfile_front.js");
   let tmp_file_name = "test_osfile_front.tmp";
   let tmp2_file_name = "test_osfile_front.tmp2";
   OS.File.copy(src_file_name, tmp_file_name);
@@ -430,7 +437,6 @@ function test_move_file()
   ok(true, "test_move_file: Cleaning up");
   OS.File.remove(tmp2_file_name);
 }
-
 
 function test_iter_dir()
 {
@@ -547,6 +553,28 @@ function test_iter_dir()
   });
   iterator.close();
 
+  //test for prototype |OS.File.DirectoryIterator.unixAsFile|
+  if ("unixAsFile" in OS.File.DirectoryIterator.prototype) {
+    ok(true, "testing property unixAsFile");
+    let path = OS.Path.join("chrome", "toolkit", "components", "osfile", "tests", "mochi");
+    iterator = new OS.File.DirectoryIterator(path);
+
+    let dir_file = iterator.unixAsFile();// return |File|
+    let stat0 = dir_file.stat();
+    let stat1 = OS.File.stat(path);
+
+    let unix_info_to_string = function unix_info_to_string(info) {
+      return "| " + info.unixMode + " | " + info.unixOwner + " | " + info.unixGroup + " | " + info.creationDate + " | " + info.lastModificationDate + " | " + info.lastAccessDate + " | " + info.size + " |";
+    };
+
+    let s0_string = unix_info_to_string(stat0);
+    let s1_string = unix_info_to_string(stat1);
+
+    ok(stat0.isDir, "unixAsFile returned a directory");
+    is(s0_string, s1_string, "unixAsFile returned the correct file");
+    dir_file.close();
+    iterator.close();
+  }
   ok(true, "test_iter_dir: Complete");
 }
 
@@ -558,8 +586,9 @@ function test_position() {
   ok("POS_END" in OS.File, "test_position: POS_END exists");
 
   let ARBITRARY_POSITION = 321;
-  let src_file_name = "chrome/toolkit/components/osfile/tests/mochi/worker_test_osfile_unix.js";
-
+  let src_file_name =
+    OS.Path.join("chrome", "toolkit", "components", "osfile", "tests", "mochi",
+                 "worker_test_osfile_front.js");
 
   let file = OS.File.open(src_file_name);
   is(file.getPosition(), 0, "test_position: Initial position is 0");
@@ -715,6 +744,15 @@ function test_mkdir()
     exn = x;
   }
   ok(exn && exn instanceof OS.File.Error && exn.becauseExists, "test_mkdir: makeDir over an existing directory failed for all the right reasons");
+
+  ok(true, "test_mkdir: Creating directory that already exists with ignoreExisting");
+  exn = null;
+  try {
+    OS.File.makeDir(dirName, {ignoreExisting: true});
+  } catch(x) {
+    exn = x;
+  }
+  ok(!exn, "test_mkdir: makeDir over an existing directory with ignoreExisting is successful");
 
   // Cleanup - and check that we have cleaned up
   OS.File.removeEmptyDir(dirName);

@@ -110,6 +110,16 @@ public class LayerView extends FrameLayout {
         GeckoAccessibility.setDelegate(this);
     }
 
+    public void show() {
+        // Fix this if TextureView support is turned back on above
+        mSurfaceView.setVisibility(View.VISIBLE);
+    }
+
+    public void hide() {
+        // Fix this if TextureView support is turned back on above
+        mSurfaceView.setVisibility(View.INVISIBLE);
+    }
+
     public void destroy() {
         if (mLayerClient != null) {
             mLayerClient.destroy();
@@ -276,7 +286,6 @@ public class LayerView extends FrameLayout {
 
     /* paintState must be a PAINT_xxx constant. */
     public void setPaintState(int paintState) {
-        Log.d(LOGTAG, "LayerView paint state set to " + paintState);
         mPaintState = paintState;
     }
 

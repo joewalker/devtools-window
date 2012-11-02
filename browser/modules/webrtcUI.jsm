@@ -77,14 +77,11 @@ function prompt(aBrowser, aCallID, aAudioRequested, aVideoRequested, aDevices) {
   let message = stringBundle.getFormattedString("getUserMedia." + requestType + ".message",
                                                 [ host ]);
 
-  let responseSent = false;
-
   let mainAction = {
     label: stringBundle.getString("getUserMedia." + requestType + ".label"),
     accessKey: stringBundle.getString("getUserMedia." + requestType + ".accesskey"),
     callback: function () {
       Services.obs.notifyObservers(null, "getUserMedia:response:allow", aCallID);
-      responseSent = true;
     }
   };
 
@@ -93,6 +90,8 @@ function prompt(aBrowser, aCallID, aAudioRequested, aVideoRequested, aDevices) {
   if (selectableDevices.length > 1) {
     let selectableDeviceNumber = 0;
     for (let device of selectableDevices) {
+      // See bug 449811 for why we do this
+      let actual_device = device;
       selectableDeviceNumber++;
       secondaryActions.push({
         label: stringBundle.getFormattedString(
@@ -102,19 +101,20 @@ function prompt(aBrowser, aCallID, aAudioRequested, aVideoRequested, aDevices) {
                  [ device.name ]),
         accessKey: selectableDeviceNumber,
         callback: function () {
-          Services.obs.notifyObservers(device, "getUserMedia:response:allow", aCallID);
-          responseSent = true;
+          Services.obs.notifyObservers(actual_device, "getUserMedia:response:allow", aCallID);
         }
       });
     }
   }
+  secondaryActions.push({
+    label: stringBundle.getString("getUserMedia.denyRequest.label"),
+    accessKey: stringBundle.getString("getUserMedia.denyRequest.accesskey"),
+    callback: function () {
+      Services.obs.notifyObservers(null, "getUserMedia:response:deny", aCallID);
+    }
+  });
 
   let options = {
-    removeOnDismissal: true,
-    eventCallback: function (aType) {
-      if (!responseSent && aType == "removed")
-        Services.obs.notifyObservers(null, "getUserMedia:response:deny", aCallID);
-    }
   };
 
   chromeWin.PopupNotifications.show(aBrowser, "webRTC-shareDevices", message,

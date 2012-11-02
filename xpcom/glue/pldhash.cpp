@@ -16,6 +16,7 @@
 #include "mozilla/HashFunctions.h"
 #include "nsDebug.h"     /* for PR_ASSERT */
 #include "nsAlgorithm.h"
+#include "mozilla/Likely.h"
 
 #ifdef PL_DHASHMETER
 # if defined MOZILLA_CLIENT && defined DEBUG_XXXbrendan
@@ -216,7 +217,7 @@ PL_DHashTableInit(PLDHashTable *table, const PLDHashTableOps *ops, void *data,
 
     PR_CEILING_LOG2(log2, capacity);
 
-    capacity = PR_BIT(log2);
+    capacity = 1u << log2;
     if (capacity >= PL_DHASH_SIZE_LIMIT)
         return false;
     table->hashShift = PL_DHASH_BITS - log2;
@@ -406,13 +407,13 @@ SearchTable(PLDHashTable *table, const void *key, PLDHashNumber keyHash,
     /* Collision: double hash. */
     sizeLog2 = PL_DHASH_BITS - table->hashShift;
     hash2 = HASH2(keyHash, sizeLog2, hashShift);
-    sizeMask = PR_BITMASK(sizeLog2);
+    sizeMask = (1u << sizeLog2) - 1;
 
     /* Save the first removed entry pointer so PL_DHASH_ADD can recycle it. */
     firstRemoved = NULL;
 
     for (;;) {
-        if (NS_UNLIKELY(ENTRY_IS_REMOVED(entry))) {
+        if (MOZ_UNLIKELY(ENTRY_IS_REMOVED(entry))) {
             if (!firstRemoved)
                 firstRemoved = entry;
         } else {
@@ -477,7 +478,7 @@ FindFreeEntry(PLDHashTable *table, PLDHashNumber keyHash)
     /* Collision: double hash. */
     sizeLog2 = PL_DHASH_BITS - table->hashShift;
     hash2 = HASH2(keyHash, sizeLog2, hashShift);
-    sizeMask = PR_BITMASK(sizeLog2);
+    sizeMask = (1u << sizeLog2) - 1;
 
     for (;;) {
         NS_ASSERTION(!ENTRY_IS_REMOVED(entry),
@@ -515,8 +516,8 @@ ChangeTable(PLDHashTable *table, int deltaLog2)
     /* Look, but don't touch, until we succeed in getting new entry store. */
     oldLog2 = PL_DHASH_BITS - table->hashShift;
     newLog2 = oldLog2 + deltaLog2;
-    oldCapacity = PR_BIT(oldLog2);
-    newCapacity = PR_BIT(newLog2);
+    oldCapacity = 1u << oldLog2;
+    newCapacity = 1u << newLog2;
     if (newCapacity >= PL_DHASH_SIZE_LIMIT)
         return false;
     entrySize = table->entrySize;
@@ -828,7 +829,7 @@ PL_DHashTableDumpMeter(PLDHashTable *table, PLDHashEnumerator dump, FILE *fp)
     hashShift = table->hashShift;
     sizeLog2 = PL_DHASH_BITS - hashShift;
     tableSize = PL_DHASH_TABLE_SIZE(table);
-    sizeMask = PR_BITMASK(sizeLog2);
+    sizeMask = (1u << sizeLog2) - 1;
     chainCount = maxChainLen = 0;
     hash2 = 0;
     sqsum = 0;

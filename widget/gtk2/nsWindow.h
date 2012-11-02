@@ -82,10 +82,6 @@ public:
     
     void CommonCreate(nsIWidget *aParent, bool aListenForResizes);
     
-    // event handling code
-    void DispatchActivateEvent(void);
-    void DispatchDeactivateEvent(void);
-
     virtual nsresult DispatchEvent(nsGUIEvent *aEvent, nsEventStatus &aStatus);
     
     // called when we are destroyed
@@ -148,8 +144,7 @@ public:
     NS_IMETHOD         EnableDragDrop(bool aEnable);
     NS_IMETHOD         CaptureMouse(bool aCapture);
     NS_IMETHOD         CaptureRollupEvents(nsIRollupListener *aListener,
-                                           bool aDoCapture,
-                                           bool aConsumeRollupEvent);
+                                           bool aDoCapture);
     NS_IMETHOD         GetAttention(int32_t aCycleCount);
 
     virtual bool       HasPendingInputEvent();
@@ -175,33 +170,20 @@ public:
 #endif
     gboolean           OnConfigureEvent(GtkWidget *aWidget,
                                         GdkEventConfigure *aEvent);
-    void               OnContainerUnrealize(GtkWidget *aWidget);
-    void               OnSizeAllocate(GtkWidget *aWidget,
-                                      GtkAllocation *aAllocation);
-    void               OnDeleteEvent(GtkWidget *aWidget,
-                                     GdkEventAny *aEvent);
-    void               OnEnterNotifyEvent(GtkWidget *aWidget,
-                                          GdkEventCrossing *aEvent);
-    void               OnLeaveNotifyEvent(GtkWidget *aWidget,
-                                          GdkEventCrossing *aEvent);
-    void               OnMotionNotifyEvent(GtkWidget *aWidget,
-                                           GdkEventMotion *aEvent);
-    void               OnButtonPressEvent(GtkWidget *aWidget,
-                                          GdkEventButton *aEvent);
-    void               OnButtonReleaseEvent(GtkWidget *aWidget,
-                                            GdkEventButton *aEvent);
-    void               OnContainerFocusInEvent(GtkWidget *aWidget,
-                                               GdkEventFocus *aEvent);
-    void               OnContainerFocusOutEvent(GtkWidget *aWidget,
-                                                GdkEventFocus *aEvent);
-    gboolean           OnKeyPressEvent(GtkWidget *aWidget,
-                                       GdkEventKey *aEvent);
-    gboolean           OnKeyReleaseEvent(GtkWidget *aWidget,
-                                         GdkEventKey *aEvent);
-    void               OnScrollEvent(GtkWidget *aWidget,
-                                     GdkEventScroll *aEvent);
-    void               OnVisibilityNotifyEvent(GtkWidget *aWidget,
-                                               GdkEventVisibility *aEvent);
+    void               OnContainerUnrealize();
+    void               OnSizeAllocate(GtkAllocation *aAllocation);
+    void               OnDeleteEvent();
+    void               OnEnterNotifyEvent(GdkEventCrossing *aEvent);
+    void               OnLeaveNotifyEvent(GdkEventCrossing *aEvent);
+    void               OnMotionNotifyEvent(GdkEventMotion *aEvent);
+    void               OnButtonPressEvent(GdkEventButton *aEvent);
+    void               OnButtonReleaseEvent(GdkEventButton *aEvent);
+    void               OnContainerFocusInEvent(GdkEventFocus *aEvent);
+    void               OnContainerFocusOutEvent(GdkEventFocus *aEvent);
+    gboolean           OnKeyPressEvent(GdkEventKey *aEvent);
+    gboolean           OnKeyReleaseEvent(GdkEventKey *aEvent);
+    void               OnScrollEvent(GdkEventScroll *aEvent);
+    void               OnVisibilityNotifyEvent(GdkEventVisibility *aEvent);
     void               OnWindowStateEvent(GtkWidget *aWidget,
                                           GdkEventWindowState *aEvent);
     void               OnDragDataReceivedEvent(GtkWidget       *aWidget,
@@ -310,6 +292,11 @@ public:
     { return SynthesizeNativeMouseEvent(aPoint, GDK_MOTION_NOTIFY, 0); }
 
 protected:
+    // event handling code
+    void DispatchActivateEvent(void);
+    void DispatchDeactivateEvent(void);
+    void DispatchResized(int32_t aWidth, int32_t aHeight);
+
     // Helper for SetParent and ReparentNativeWidget.
     void ReparentNativeWidgetInternal(nsIWidget* aNewParent,
                                       GtkWidget* aNewContainer,
@@ -349,6 +336,8 @@ private:
     bool               DispatchContentCommandEvent(int32_t aMsg);
     void               SetWindowClipRegion(const nsTArray<nsIntRect>& aRects,
                                            bool aIntersectWithExisting);
+    bool               CheckForRollup(gdouble aMouseX, gdouble aMouseY,
+                                      bool aIsWheel, bool aAlwaysRollup);
     bool               GetDragInfo(nsMouseEvent* aMouseEvent,
                                    GdkWindow** aWindow, gint* aButton,
                                    gint* aRootX, gint* aRootY);

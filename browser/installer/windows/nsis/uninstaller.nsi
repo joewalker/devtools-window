@@ -666,14 +666,19 @@ FunctionEnd
 # Initialization Functions
 
 Function .onInit
+  ; Remove the current exe directory from the search order.
+  ; This only effects LoadLibrary calls and not implicitly loaded DLLs.
+  System::Call 'kernel32::SetDllDirectoryW(w "")'
+
   ; We need this set up for most of the helper.exe operations.
-  !ifdef AppName
-  ${InitHashAppModelId} "$INSTDIR" "Software\Mozilla\${AppName}\TaskBarIDs"
-  !endif
   ${UninstallOnInitCommon}
 FunctionEnd
 
 Function un.onInit
+  ; Remove the current exe directory from the search order.
+  ; This only effects LoadLibrary calls and not implicitly loaded DLLs.
+  System::Call 'kernel32::SetDllDirectoryW(w "")'
+
   StrCpy $LANGUAGE 0
 
   ${un.UninstallUnOnInitCommon}

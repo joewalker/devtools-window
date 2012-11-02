@@ -273,7 +273,8 @@ protected:
   static JSPropertyOp sXrayWrapperPropertyHolderGetPropertyOp;
 };
 
-
+// THIS ONE ISN'T SAFE!! It assumes that the private of the JSObject is
+// an nsISupports.
 inline
 const nsQueryInterface
 do_QueryWrappedNative(nsIXPConnectWrappedNative *wrapper, JSObject *obj)
@@ -281,6 +282,8 @@ do_QueryWrappedNative(nsIXPConnectWrappedNative *wrapper, JSObject *obj)
   return nsQueryInterface(nsDOMClassInfo::GetNative(wrapper, obj));
 }
 
+// THIS ONE ISN'T SAFE!! It assumes that the private of the JSObject is
+// an nsISupports.
 inline
 const nsQueryInterfaceWithError
 do_QueryWrappedNative(nsIXPConnectWrappedNative *wrapper, JSObject *obj,
@@ -516,13 +519,6 @@ protected:
 
   virtual ~nsNodeSH()
   {
-  }
-
-  // Helper to check whether a capability is enabled
-  bool IsCapabilityEnabled(const char* aCapability);
-
-  inline bool IsPrivilegedScript() {
-    return IsCapabilityEnabled("UniversalXPConnect");
   }
 
 public:
@@ -1165,34 +1161,6 @@ public:
     return new nsCSSValueListSH(aData);
   }
 };
-
-
-// CSSStyleDeclaration helper
-
-class nsCSSStyleDeclSH : public nsStringArraySH
-{
-protected:
-  nsCSSStyleDeclSH(nsDOMClassInfoData* aData) : nsStringArraySH(aData)
-  {
-  }
-
-  virtual ~nsCSSStyleDeclSH()
-  {
-  }
-
-  virtual nsresult GetStringAt(nsISupports *aNative, int32_t aIndex,
-                               nsAString& aResult);
-
-public:
-  NS_IMETHOD PreCreate(nsISupports *nativeObj, JSContext *cx,
-                       JSObject *globalObj, JSObject **parentObj);
-
-  static nsIClassInfo *doCreate(nsDOMClassInfoData* aData)
-  {
-    return new nsCSSStyleDeclSH(aData);
-  }
-};
-
 
 // CSSRuleList helper
 

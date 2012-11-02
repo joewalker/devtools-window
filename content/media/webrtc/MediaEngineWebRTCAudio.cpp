@@ -15,8 +15,8 @@
 namespace mozilla {
 
 #ifdef PR_LOGGING
-extern PRLogModuleInfo* gMediaManagerLog;
-#define LOG(msg) PR_LOG(gMediaManagerLog, PR_LOG_DEBUG, msg)
+extern PRLogModuleInfo* GetMediaManagerLog();
+#define LOG(msg) PR_LOG(GetMediaManagerLog(), PR_LOG_DEBUG, msg)
 #else
 #define LOG(msg)
 #endif
@@ -139,6 +139,13 @@ MediaEngineWebRTCAudioSource::NotifyPull(MediaStreamGraph* aGraph,
                                          StreamTime aDesiredTime)
 {
   // Ignore - we push audio data
+#ifdef DEBUG
+  static TrackTicks mLastEndTime = 0;
+  TrackTicks target = TimeToTicksRoundUp(SAMPLE_FREQUENCY, aDesiredTime);
+  TrackTicks delta = target - mLastEndTime;
+  LOG(("Audio:NotifyPull: target %lu, delta %lu",(uint32_t) target, (uint32_t) delta));
+  mLastEndTime = target;
+#endif
 }
 
 nsresult
@@ -240,7 +247,7 @@ MediaEngineWebRTCAudioSource::Process(const int channel,
   AudioSegment segment;
   segment.Init(CHANNELS);
   segment.AppendFrames(
-    buffer.forget(), length, 0, length, nsAudioStream::FORMAT_S16
+    buffer.forget(), length, 0, length, AUDIO_FORMAT_S16
   );
   mSource->AppendToTrack(mTrackID, &segment);
 

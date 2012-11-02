@@ -339,48 +339,40 @@ nsViewSourceChannel::SetContentCharset(const nsACString &aContentCharset)
     return mChannel->SetContentCharset(aContentCharset);
 }
 
+// We don't forward these methods becacuse content-disposition isn't whitelisted
+// (see GetResponseHeader/VisitResponseHeaders).
 NS_IMETHODIMP
 nsViewSourceChannel::GetContentDisposition(uint32_t *aContentDisposition)
 {
-    NS_ENSURE_TRUE(mChannel, NS_ERROR_FAILURE);
-
-    return mChannel->GetContentDisposition(aContentDisposition);
+    return NS_ERROR_NOT_AVAILABLE;
 }
 
 NS_IMETHODIMP
 nsViewSourceChannel::SetContentDisposition(uint32_t aContentDisposition)
 {
-    NS_ENSURE_TRUE(mChannel, NS_ERROR_FAILURE);
-
-    return mChannel->SetContentDisposition(aContentDisposition);
+    return NS_ERROR_NOT_AVAILABLE;
 }
 
 NS_IMETHODIMP
 nsViewSourceChannel::GetContentDispositionFilename(nsAString &aContentDispositionFilename)
 {
-    NS_ENSURE_TRUE(mChannel, NS_ERROR_FAILURE);
-
-    return mChannel->GetContentDispositionFilename(aContentDispositionFilename);
+    return NS_ERROR_NOT_AVAILABLE;
 }
 
 NS_IMETHODIMP
 nsViewSourceChannel::SetContentDispositionFilename(const nsAString &aContentDispositionFilename)
 {
-    NS_ENSURE_TRUE(mChannel, NS_ERROR_FAILURE);
-
-    return mChannel->SetContentDispositionFilename(aContentDispositionFilename);
+    return NS_ERROR_NOT_AVAILABLE;
 }
 
 NS_IMETHODIMP
 nsViewSourceChannel::GetContentDispositionHeader(nsACString &aContentDispositionHeader)
 {
-    NS_ENSURE_TRUE(mChannel, NS_ERROR_FAILURE);
-
-    return mChannel->GetContentDispositionHeader(aContentDispositionHeader);
+    return NS_ERROR_NOT_AVAILABLE;
 }
 
 NS_IMETHODIMP
-nsViewSourceChannel::GetContentLength(int32_t *aContentLength)
+nsViewSourceChannel::GetContentLength(int64_t *aContentLength)
 {
     NS_ENSURE_TRUE(mChannel, NS_ERROR_FAILURE);
 
@@ -388,7 +380,7 @@ nsViewSourceChannel::GetContentLength(int32_t *aContentLength)
 }
 
 NS_IMETHODIMP
-nsViewSourceChannel::SetContentLength(int32_t aContentLength)
+nsViewSourceChannel::SetContentLength(int64_t aContentLength)
 {
     NS_ENSURE_TRUE(mChannel, NS_ERROR_FAILURE);
 

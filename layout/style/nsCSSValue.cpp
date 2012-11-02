@@ -16,6 +16,7 @@
 #include "CSSCalc.h"
 #include "nsNetUtil.h"
 #include "mozilla/css/ImageLoader.h"
+#include "mozilla/Likely.h"
 
 namespace css = mozilla::css;
 
@@ -40,6 +41,7 @@ nsCSSValue::nsCSSValue(float aValue, nsCSSUnit aUnit)
   NS_ABORT_IF_FALSE(eCSSUnit_Percent <= aUnit, "not a float value");
   if (eCSSUnit_Percent <= aUnit) {
     mValue.mFloat = aValue;
+    MOZ_ASSERT(!MOZ_DOUBLE_IS_NaN(mValue.mFloat));
   }
   else {
     mUnit = eCSSUnit_Null;
@@ -53,7 +55,7 @@ nsCSSValue::nsCSSValue(const nsString& aValue, nsCSSUnit aUnit)
   NS_ABORT_IF_FALSE(UnitHasStringValue(), "not a string value");
   if (UnitHasStringValue()) {
     mValue.mString = BufferFromString(aValue).get();
-    if (NS_UNLIKELY(!mValue.mString)) {
+    if (MOZ_UNLIKELY(!mValue.mString)) {
       // XXXbz not much we can do here; just make sure that our promise of a
       // non-null mValue.mString holds for string units.
       mUnit = eCSSUnit_Null;
@@ -102,6 +104,7 @@ nsCSSValue::nsCSSValue(const nsCSSValue& aCopy)
   }
   else if (eCSSUnit_Percent <= mUnit) {
     mValue.mFloat = aCopy.mValue.mFloat;
+    MOZ_ASSERT(!MOZ_DOUBLE_IS_NaN(mValue.mFloat));
   }
   else if (UnitHasStringValue()) {
     mValue.mString = aCopy.mValue.mString;
@@ -319,6 +322,7 @@ void nsCSSValue::SetPercentValue(float aValue)
   Reset();
   mUnit = eCSSUnit_Percent;
   mValue.mFloat = aValue;
+  MOZ_ASSERT(!MOZ_DOUBLE_IS_NaN(mValue.mFloat));
 }
 
 void nsCSSValue::SetFloatValue(float aValue, nsCSSUnit aUnit)
@@ -328,6 +332,7 @@ void nsCSSValue::SetFloatValue(float aValue, nsCSSUnit aUnit)
   if (eCSSUnit_Number <= aUnit) {
     mUnit = aUnit;
     mValue.mFloat = aValue;
+    MOZ_ASSERT(!MOZ_DOUBLE_IS_NaN(mValue.mFloat));
   }
 }
 
@@ -339,7 +344,7 @@ void nsCSSValue::SetStringValue(const nsString& aValue,
   NS_ABORT_IF_FALSE(UnitHasStringValue(), "not a string unit");
   if (UnitHasStringValue()) {
     mValue.mString = BufferFromString(aValue).get();
-    if (NS_UNLIKELY(!mValue.mString)) {
+    if (MOZ_UNLIKELY(!mValue.mString)) {
       // XXXbz not much we can do here; just make sure that our promise of a
       // non-null mValue.mString holds for string units.
       mUnit = eCSSUnit_Null;
@@ -629,7 +634,7 @@ nsCSSValue::BufferFromString(const nsString& aValue)
   // NOTE: Alloc prouduces a new, already-addref'd (refcnt = 1) buffer.
   // NOTE: String buffer allocation is currently fallible.
   buffer = nsStringBuffer::Alloc((length + 1) * sizeof(PRUnichar));
-  if (NS_UNLIKELY(!buffer)) {
+  if (MOZ_UNLIKELY(!buffer)) {
     NS_RUNTIMEABORT("out of memory");
   }
 
@@ -1067,7 +1072,7 @@ nsCSSValue::AppendToString(nsCSSProperty aProperty, nsAString& aResult) const
     case eCSSUnit_Null:         break;
     case eCSSUnit_Auto:         aResult.AppendLiteral("auto");     break;
     case eCSSUnit_Inherit:      aResult.AppendLiteral("inherit");  break;
-    case eCSSUnit_Initial:      aResult.AppendLiteral("-moz-initial"); break;
+    case eCSSUnit_Initial:      aResult.AppendLiteral("initial");  break;
     case eCSSUnit_None:         aResult.AppendLiteral("none");     break;
     case eCSSUnit_Normal:       aResult.AppendLiteral("normal");   break;
     case eCSSUnit_System_Font:  aResult.AppendLiteral("-moz-use-system-font"); break;
@@ -1119,6 +1124,11 @@ nsCSSValue::AppendToString(nsCSSProperty aProperty, nsAString& aResult) const
     case eCSSUnit_Centimeter:   aResult.AppendLiteral("cm");   break;
     case eCSSUnit_Point:        aResult.AppendLiteral("pt");   break;
     case eCSSUnit_Pica:         aResult.AppendLiteral("pc");   break;
+
+    case eCSSUnit_ViewportWidth:  aResult.AppendLiteral("vw");   break;
+    case eCSSUnit_ViewportHeight: aResult.AppendLiteral("vh");   break;
+    case eCSSUnit_ViewportMin:    aResult.AppendLiteral("vmin"); break;
+    case eCSSUnit_ViewportMax:    aResult.AppendLiteral("vmax"); break;
 
     case eCSSUnit_EM:           aResult.AppendLiteral("em");   break;
     case eCSSUnit_XHeight:      aResult.AppendLiteral("ex");   break;
@@ -1248,6 +1258,10 @@ nsCSSValue::SizeOfExcludingThis(nsMallocSizeOfFun aMallocSizeOf) const
     case eCSSUnit_Percent:
     case eCSSUnit_Number:
     case eCSSUnit_PhysicalMillimeter:
+    case eCSSUnit_ViewportWidth:
+    case eCSSUnit_ViewportHeight:
+    case eCSSUnit_ViewportMin:
+    case eCSSUnit_ViewportMax:
     case eCSSUnit_EM:
     case eCSSUnit_XHeight:
     case eCSSUnit_Char:

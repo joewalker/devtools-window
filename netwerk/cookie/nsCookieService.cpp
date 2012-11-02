@@ -48,6 +48,7 @@
 #include "mozilla/storage.h"
 #include "mozilla/Util.h" // for DebugOnly
 #include "mozilla/Attributes.h"
+#include "mozilla/Likely.h"
 #include "nsIAppsService.h"
 #include "mozIApplication.h"
 
@@ -176,48 +177,55 @@ struct nsListIter
 #define GET_COOKIE false
 
 #ifdef PR_LOGGING
-static PRLogModuleInfo *sCookieLog = PR_NewLogModule("cookie");
+static PRLogModuleInfo *
+GetCookieLog()
+{
+  static PRLogModuleInfo *sCookieLog;
+  if (!sCookieLog)
+    sCookieLog = PR_NewLogModule("cookie");
+  return sCookieLog;
+}
 
 #define COOKIE_LOGFAILURE(a, b, c, d)    LogFailure(a, b, c, d)
 #define COOKIE_LOGSUCCESS(a, b, c, d, e) LogSuccess(a, b, c, d, e)
 
 #define COOKIE_LOGEVICTED(a, details)          \
   PR_BEGIN_MACRO                               \
-    if (PR_LOG_TEST(sCookieLog, PR_LOG_DEBUG)) \
+  if (PR_LOG_TEST(GetCookieLog(), PR_LOG_DEBUG))  \
       LogEvicted(a, details);                  \
   PR_END_MACRO
 
 #define COOKIE_LOGSTRING(lvl, fmt)   \
   PR_BEGIN_MACRO                     \
-    PR_LOG(sCookieLog, lvl, fmt);    \
-    PR_LOG(sCookieLog, lvl, ("\n")); \
+    PR_LOG(GetCookieLog(), lvl, fmt);  \
+    PR_LOG(GetCookieLog(), lvl, ("\n")); \
   PR_END_MACRO
 
 static void
 LogFailure(bool aSetCookie, nsIURI *aHostURI, const char *aCookieString, const char *aReason)
 {
   // if logging isn't enabled, return now to save cycles
-  if (!PR_LOG_TEST(sCookieLog, PR_LOG_WARNING))
+  if (!PR_LOG_TEST(GetCookieLog(), PR_LOG_WARNING))
     return;
 
   nsAutoCString spec;
   if (aHostURI)
     aHostURI->GetAsciiSpec(spec);
 
-  PR_LOG(sCookieLog, PR_LOG_WARNING,
+  PR_LOG(GetCookieLog(), PR_LOG_WARNING,
     ("===== %s =====\n", aSetCookie ? "COOKIE NOT ACCEPTED" : "COOKIE NOT SENT"));
-  PR_LOG(sCookieLog, PR_LOG_WARNING,("request URL: %s\n", spec.get()));
+  PR_LOG(GetCookieLog(), PR_LOG_WARNING,("request URL: %s\n", spec.get()));
   if (aSetCookie)
-    PR_LOG(sCookieLog, PR_LOG_WARNING,("cookie string: %s\n", aCookieString));
+    PR_LOG(GetCookieLog(), PR_LOG_WARNING,("cookie string: %s\n", aCookieString));
 
   PRExplodedTime explodedTime;
   PR_ExplodeTime(PR_Now(), PR_GMTParameters, &explodedTime);
   char timeString[40];
   PR_FormatTimeUSEnglish(timeString, 40, "%c GMT", &explodedTime);
 
-  PR_LOG(sCookieLog, PR_LOG_WARNING,("current time: %s", timeString));
-  PR_LOG(sCookieLog, PR_LOG_WARNING,("rejected because %s\n", aReason));
-  PR_LOG(sCookieLog, PR_LOG_WARNING,("\n"));
+  PR_LOG(GetCookieLog(), PR_LOG_WARNING,("current time: %s", timeString));
+  PR_LOG(GetCookieLog(), PR_LOG_WARNING,("rejected because %s\n", aReason));
+  PR_LOG(GetCookieLog(), PR_LOG_WARNING,("\n"));
 }
 
 static void
@@ -228,27 +236,27 @@ LogCookie(nsCookie *aCookie)
   char timeString[40];
   PR_FormatTimeUSEnglish(timeString, 40, "%c GMT", &explodedTime);
 
-  PR_LOG(sCookieLog, PR_LOG_DEBUG,("current time: %s", timeString));
+  PR_LOG(GetCookieLog(), PR_LOG_DEBUG,("current time: %s", timeString));
 
   if (aCookie) {
-    PR_LOG(sCookieLog, PR_LOG_DEBUG,("----------------\n"));
-    PR_LOG(sCookieLog, PR_LOG_DEBUG,("name: %s\n", aCookie->Name().get()));
-    PR_LOG(sCookieLog, PR_LOG_DEBUG,("value: %s\n", aCookie->Value().get()));
-    PR_LOG(sCookieLog, PR_LOG_DEBUG,("%s: %s\n", aCookie->IsDomain() ? "domain" : "host", aCookie->Host().get()));
-    PR_LOG(sCookieLog, PR_LOG_DEBUG,("path: %s\n", aCookie->Path().get()));
+    PR_LOG(GetCookieLog(), PR_LOG_DEBUG,("----------------\n"));
+    PR_LOG(GetCookieLog(), PR_LOG_DEBUG,("name: %s\n", aCookie->Name().get()));
+    PR_LOG(GetCookieLog(), PR_LOG_DEBUG,("value: %s\n", aCookie->Value().get()));
+    PR_LOG(GetCookieLog(), PR_LOG_DEBUG,("%s: %s\n", aCookie->IsDomain() ? "domain" : "host", aCookie->Host().get()));
+    PR_LOG(GetCookieLog(), PR_LOG_DEBUG,("path: %s\n", aCookie->Path().get()));
 
     PR_ExplodeTime(aCookie->Expiry() * int64_t(PR_USEC_PER_SEC),
                    PR_GMTParameters, &explodedTime);
     PR_FormatTimeUSEnglish(timeString, 40, "%c GMT", &explodedTime);
-    PR_LOG(sCookieLog, PR_LOG_DEBUG,
+    PR_LOG(GetCookieLog(), PR_LOG_DEBUG,
       ("expires: %s%s", timeString, aCookie->IsSession() ? " (at end of session)" : ""));
 
     PR_ExplodeTime(aCookie->CreationTime(), PR_GMTParameters, &explodedTime);
     PR_FormatTimeUSEnglish(timeString, 40, "%c GMT", &explodedTime);
-    PR_LOG(sCookieLog, PR_LOG_DEBUG,("created: %s", timeString));
+    PR_LOG(GetCookieLog(), PR_LOG_DEBUG,("created: %s", timeString));
 
-    PR_LOG(sCookieLog, PR_LOG_DEBUG,("is secure: %s\n", aCookie->IsSecure() ? "true" : "false"));
-    PR_LOG(sCookieLog, PR_LOG_DEBUG,("is httpOnly: %s\n", aCookie->IsHttpOnly() ? "true" : "false"));
+    PR_LOG(GetCookieLog(), PR_LOG_DEBUG,("is secure: %s\n", aCookie->IsSecure() ? "true" : "false"));
+    PR_LOG(GetCookieLog(), PR_LOG_DEBUG,("is httpOnly: %s\n", aCookie->IsHttpOnly() ? "true" : "false"));
   }
 }
 
@@ -256,7 +264,7 @@ static void
 LogSuccess(bool aSetCookie, nsIURI *aHostURI, const char *aCookieString, nsCookie *aCookie, bool aReplacing)
 {
   // if logging isn't enabled, return now to save cycles
-  if (!PR_LOG_TEST(sCookieLog, PR_LOG_DEBUG)) {
+  if (!PR_LOG_TEST(GetCookieLog(), PR_LOG_DEBUG)) {
     return;
   }
 
@@ -264,27 +272,27 @@ LogSuccess(bool aSetCookie, nsIURI *aHostURI, const char *aCookieString, nsCooki
   if (aHostURI)
     aHostURI->GetAsciiSpec(spec);
 
-  PR_LOG(sCookieLog, PR_LOG_DEBUG,
+  PR_LOG(GetCookieLog(), PR_LOG_DEBUG,
     ("===== %s =====\n", aSetCookie ? "COOKIE ACCEPTED" : "COOKIE SENT"));
-  PR_LOG(sCookieLog, PR_LOG_DEBUG,("request URL: %s\n", spec.get()));
-  PR_LOG(sCookieLog, PR_LOG_DEBUG,("cookie string: %s\n", aCookieString));
+  PR_LOG(GetCookieLog(), PR_LOG_DEBUG,("request URL: %s\n", spec.get()));
+  PR_LOG(GetCookieLog(), PR_LOG_DEBUG,("cookie string: %s\n", aCookieString));
   if (aSetCookie)
-    PR_LOG(sCookieLog, PR_LOG_DEBUG,("replaces existing cookie: %s\n", aReplacing ? "true" : "false"));
+    PR_LOG(GetCookieLog(), PR_LOG_DEBUG,("replaces existing cookie: %s\n", aReplacing ? "true" : "false"));
 
   LogCookie(aCookie);
 
-  PR_LOG(sCookieLog, PR_LOG_DEBUG,("\n"));
+  PR_LOG(GetCookieLog(), PR_LOG_DEBUG,("\n"));
 }
 
 static void
 LogEvicted(nsCookie *aCookie, const char* details)
 {
-  PR_LOG(sCookieLog, PR_LOG_DEBUG,("===== COOKIE EVICTED =====\n"));
-  PR_LOG(sCookieLog, PR_LOG_DEBUG,("%s\n", details));
+  PR_LOG(GetCookieLog(), PR_LOG_DEBUG,("===== COOKIE EVICTED =====\n"));
+  PR_LOG(GetCookieLog(), PR_LOG_DEBUG,("%s\n", details));
 
   LogCookie(aCookie);
 
-  PR_LOG(sCookieLog, PR_LOG_DEBUG,("\n"));
+  PR_LOG(GetCookieLog(), PR_LOG_DEBUG,("\n"));
 }
 
 // inline wrappers to make passing in nsAFlatCStrings easier
@@ -465,11 +473,10 @@ public:
 
   NS_IMETHOD HandleResult(mozIStorageResultSet *aResult)
   {
-    nsresult rv;
     nsCOMPtr<mozIStorageRow> row;
 
     while (1) {
-      rv = aResult->GetNextRow(getter_AddRefs(row));
+      DebugOnly<nsresult> rv = aResult->GetNextRow(getter_AddRefs(row));
       NS_ASSERT_SUCCESS(rv);
 
       if (!row)
@@ -1423,7 +1430,7 @@ nsCookieService::RebuildCorruptDB(DBState* aDBState)
   }
 
   // Execute the statement. If any errors crop up, we won't try again.
-  nsresult rv = stmt->BindParameters(paramsArray);
+  DebugOnly<nsresult> rv = stmt->BindParameters(paramsArray);
   NS_ASSERT_SUCCESS(rv);
   nsCOMPtr<mozIStoragePendingStatement> handle;
   rv = stmt->ExecuteAsync(aDBState->insertListener, getter_AddRefs(handle));
@@ -1976,7 +1983,7 @@ nsCookieService::GetCookieFromRow(T &aRow)
 {
   // Skip reading 'baseDomain' -- up to the caller.
   nsCString name, value, host, path;
-  nsresult rv = aRow->GetUTF8String(0, name);
+  DebugOnly<nsresult> rv = aRow->GetUTF8String(0, name);
   NS_ASSERT_SUCCESS(rv);
   rv = aRow->GetUTF8String(1, value);
   NS_ASSERT_SUCCESS(rv);
@@ -2052,7 +2059,7 @@ nsCookieService::CancelAsyncRead(bool aPurgeReadSet)
   // Cancel the pending read, kill the read listener, and empty the array
   // of data already read in on the background thread.
   mDefaultDBState->readListener->Cancel();
-  mozilla::DebugOnly<nsresult> rv = mDefaultDBState->pendingRead->Cancel();
+  DebugOnly<nsresult> rv = mDefaultDBState->pendingRead->Cancel();
   NS_ASSERT_SUCCESS(rv);
 
   mDefaultDBState->stmtReadDomain = nullptr;
@@ -2073,11 +2080,11 @@ nsCookieService::EnsureReadDomain(const nsCookieKey &aKey)
     "not in default db state");
 
   // Fast path 1: nothing to read, or we've already finished reading.
-  if (NS_LIKELY(!mDBState->dbConn || !mDefaultDBState->pendingRead))
+  if (MOZ_LIKELY(!mDBState->dbConn || !mDefaultDBState->pendingRead))
     return;
 
   // Fast path 2: already read in this particular domain.
-  if (NS_LIKELY(mDefaultDBState->readSet.GetEntry(aKey)))
+  if (MOZ_LIKELY(mDefaultDBState->readSet.GetEntry(aKey)))
     return;
 
   // Read in the data synchronously.
@@ -2168,7 +2175,7 @@ nsCookieService::EnsureReadComplete()
     "not in default db state");
 
   // Fast path 1: nothing to read, or we've already finished reading.
-  if (NS_LIKELY(!mDBState->dbConn || !mDefaultDBState->pendingRead))
+  if (MOZ_LIKELY(!mDBState->dbConn || !mDefaultDBState->pendingRead))
     return;
 
   // Cancel the pending read, so we don't get any more results.
@@ -2602,7 +2609,7 @@ nsCookieService::GetCookieStringInternal(nsIURI *aHostURI,
       uint32_t length;
       paramsArray->GetLength(&length);
       if (length) {
-        nsresult rv = stmt->BindParameters(paramsArray);
+        DebugOnly<nsresult> rv = stmt->BindParameters(paramsArray);
         NS_ASSERT_SUCCESS(rv);
         nsCOMPtr<mozIStoragePendingStatement> handle;
         rv = stmt->ExecuteAsync(mDBState->updateListener,
@@ -3620,7 +3627,7 @@ nsCookieService::PurgeCookies(int64_t aCurrentTimeInUsec)
     uint32_t length;
     paramsArray->GetLength(&length);
     if (length) {
-      nsresult rv = stmt->BindParameters(paramsArray);
+      DebugOnly<nsresult> rv = stmt->BindParameters(paramsArray);
       NS_ASSERT_SUCCESS(rv);
       nsCOMPtr<mozIStoragePendingStatement> handle;
       rv = stmt->ExecuteAsync(mDBState->removeListener, getter_AddRefs(handle));
@@ -3816,8 +3823,7 @@ nsCookieService::GetCookiesForApp(uint32_t aAppId, bool aOnlyBrowserElement,
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  NS_ENSURE_TRUE(aAppId != NECKO_NO_APP_ID && aAppId != NECKO_UNKNOWN_APP_ID,
-                 NS_ERROR_INVALID_ARG);
+  NS_ENSURE_TRUE(aAppId != NECKO_UNKNOWN_APP_ID, NS_ERROR_INVALID_ARG);
 
   GetCookiesForAppStruct data(aAppId, aOnlyBrowserElement);
   mDBState->hostTable.EnumerateEntries(GetCookiesForApp, &data);
@@ -4059,7 +4065,7 @@ nsCookieService::AddCookieToList(const nsCookieKey             &aKey,
     // If we were supplied an array to store parameters, we shouldn't call
     // executeAsync - someone up the stack will do this for us.
     if (!aParamsArray) {
-      nsresult rv = stmt->BindParameters(paramsArray);
+      DebugOnly<nsresult> rv = stmt->BindParameters(paramsArray);
       NS_ASSERT_SUCCESS(rv);
       nsCOMPtr<mozIStoragePendingStatement> handle;
       rv = stmt->ExecuteAsync(mDBState->insertListener, getter_AddRefs(handle));
@@ -4085,8 +4091,9 @@ nsCookieService::UpdateCookieInList(nsCookie                      *aCookie,
     aParamsArray->NewBindingParams(getter_AddRefs(params));
 
     // Bind our parameters.
-    nsresult rv = params->BindInt64ByName(NS_LITERAL_CSTRING("lastAccessed"),
-                                          aLastAccessed);
+    DebugOnly<nsresult> rv =
+      params->BindInt64ByName(NS_LITERAL_CSTRING("lastAccessed"),
+                              aLastAccessed);
     NS_ASSERT_SUCCESS(rv);
 
     rv = params->BindUTF8StringByName(NS_LITERAL_CSTRING("name"),

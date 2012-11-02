@@ -825,10 +825,6 @@ nsDocShell::~nsDocShell()
                gNumberOfDocShells, mHistoryID);
     }
 #endif
-
-    if (mInPrivateBrowsing) {
-        DecreasePrivateDocShellCount();
-    }
 }
 
 nsresult
@@ -1661,26 +1657,10 @@ bool
 nsDocShell::ValidateOrigin(nsIDocShellTreeItem* aOriginTreeItem,
                            nsIDocShellTreeItem* aTargetTreeItem)
 {
-    nsCOMPtr<nsIScriptSecurityManager> securityManager =
-        do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID);
-    NS_ENSURE_TRUE(securityManager, false);
-
-    nsCOMPtr<nsIPrincipal> subjectPrincipal;
-    nsresult rv =
-        securityManager->GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
-    NS_ENSURE_SUCCESS(rv, false);
-
-    if (subjectPrincipal) {
-        // We're called from JS, check if UniversalXPConnect is
-        // enabled.
-        bool ubwEnabled = false;
-        rv = securityManager->IsCapabilityEnabled("UniversalXPConnect",
-                                                  &ubwEnabled);
-        NS_ENSURE_SUCCESS(rv, false);
-
-        if (ubwEnabled) {
-            return true;
-        }
+    // We want to bypass this check for chrome callers, but only if there's
+    // JS on the stack. System callers still need to do it.
+    if (nsContentUtils::GetCurrentJSContext() && nsContentUtils::IsCallerChrome()) {
+        return true;
     }
 
     // Get origin document principal
@@ -1692,8 +1672,8 @@ nsDocShell::ValidateOrigin(nsIDocShellTreeItem* aOriginTreeItem,
     NS_ENSURE_TRUE(targetDocument, false);
 
     bool equal;
-    rv = originDocument->NodePrincipal()->
-            Equals(targetDocument->NodePrincipal(), &equal);
+    nsresult rv = originDocument->NodePrincipal()->Equals(targetDocument->NodePrincipal(),
+                                                          &equal);
     if (NS_SUCCEEDED(rv) && equal) {
         return true;
     }
@@ -2166,8 +2146,8 @@ nsDocShell::GetFullscreenAllowed(bool* aFullscreenAllowed)
     *aFullscreenAllowed = false;
 
     // For non-content boundaries, check that the enclosing iframe element
-    // has the mozallowfullscreen attribute set to true. If any ancestor
-    // iframe does not have mozallowfullscreen=true, then fullscreen is
+    // has the allowfullscreen attribute set to true. If any ancestor
+    // iframe does not have allowfullscreen=true, then fullscreen is
     // prohibited.
     nsCOMPtr<nsPIDOMWindow> win = do_GetInterface(GetAsSupports(this));
     if (!win) {
@@ -2176,12 +2156,13 @@ nsDocShell::GetFullscreenAllowed(bool* aFullscreenAllowed)
     nsCOMPtr<nsIContent> frameElement = do_QueryInterface(win->GetFrameElementInternal());
     if (frameElement &&
         frameElement->IsHTML(nsGkAtoms::iframe) &&
+        !frameElement->HasAttr(kNameSpaceID_None, nsGkAtoms::allowfullscreen) &&
         !frameElement->HasAttr(kNameSpaceID_None, nsGkAtoms::mozallowfullscreen)) {
         return NS_OK;
     }
 
     // If we have no parent then we're the root docshell; no ancestor of the
-    // original docshell doesn't have a mozallowfullscreen attribute, so
+    // original docshell doesn't have a allowfullscreen attribute, so
     // report fullscreen as allowed.
     nsCOMPtr<nsIDocShellTreeItem> dsti = do_GetInterface(GetAsSupports(this));
     NS_ENSURE_TRUE(dsti, NS_OK);
@@ -4930,6 +4911,12 @@ nsDocShell::Destroy()
     // Cancel any timers that were set for this docshell; this is needed
     // to break the cycle between us and the timers.
     CancelRefreshURITimers();
+
+    if (mInPrivateBrowsing) {
+        mInPrivateBrowsing = false;
+        DecreasePrivateDocShellCount();
+    }
+
     return NS_OK;
 }
 
@@ -8187,21 +8174,13 @@ nsDocShell::CheckLoadingPermissions()
         return rv;
     }
 
+    nsCOMPtr<nsIScriptSecurityManager> securityManager =
+      do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
+    NS_ENSURE_SUCCESS(rv, rv);
+
     // We're a frame. Check that the caller has write permission to
     // the parent before allowing it to load anything into this
     // docshell.
-
-    nsCOMPtr<nsIScriptSecurityManager> securityManager =
-        do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    bool ubwEnabled = false;
-    rv = securityManager->IsCapabilityEnabled("UniversalXPConnect",
-                                              &ubwEnabled);
-    if (NS_FAILED(rv) || ubwEnabled) {
-        return rv;
-    }
-
     nsCOMPtr<nsIPrincipal> subjPrincipal;
     rv = securityManager->GetSubjectPrincipal(getter_AddRefs(subjPrincipal));
     NS_ENSURE_TRUE(NS_SUCCEEDED(rv) && subjPrincipal, rv);
