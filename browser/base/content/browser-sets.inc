@@ -92,7 +92,6 @@
     <command id="Tools:DevToolbar" oncommand="DeveloperToolbar.toggle();" disabled="true" hidden="true"/>
     <command id="Tools:DevToolbarFocus" oncommand="DeveloperToolbar.focusToggle();" disabled="true"/>
     <command id="Tools:RemoteWebConsole" oncommand="HUDConsoleUI.toggleRemoteHUD();" disabled="true" hidden="true"/>
-    <command id="Tools:Inspect" oncommand="InspectorUI.toggleInspectorUI();"/>
     <command id="Tools:Scratchpad" oncommand="Scratchpad.openScratchpad();" disabled="true" hidden="true"/>
     <command id="Tools:ResponsiveUI" oncommand="ResponsiveUI.toggle();" disabled="true" hidden="true"/>
     <command id="Tools:Addons" oncommand="BrowserOpenAddonsMgr();"/>
@@ -120,27 +119,6 @@
              oncommand="PlacesCommandHook.showPlacesOrganizer('AllBookmarks');"/>
     <command id="Browser:ShowAllHistory"
              oncommand="PlacesCommandHook.showPlacesOrganizer('History');"/>
-  </commandset>
-
-  <commandset id="inspectorCommands">
-    <command id="Inspector:Inspect"
-             oncommand="InspectorUI.toggleInspection();"/>
-    <command id="Inspector:Sidebar"
-             oncommand="InspectorUI.toggleSidebar();"/>
-    <command id="Inspector:Tilt"
-             oncommand="Tilt.initialize();"/>
-    <command id="Inspector:HTMLPanel"
-             oncommand="InspectorUI.toggleHTMLPanel();"/>
-    <command id="Inspector:CopyInner"
-             oncommand="InspectorUI.copyInnerHTML();"/>
-    <command id="Inspector:CopyOuter"
-             oncommand="InspectorUI.copyOuterHTML();"/>
-    <command id="Inspector:DeleteNode"
-             oncommand="InspectorUI.deleteNode();"/>
-    <command id="Inspector:ToggleVeil"
-             oncommand="InspectorUI.toggleVeil();"/>
-    <command id="Inspector:ToggleInfobar"
-             oncommand="InspectorUI.toggleInfobar();"/>
   </commandset>
 
   <broadcasterset id="mainBroadcasterSet">
@@ -204,11 +182,6 @@
                  label="&remoteWebConsoleCmd.label;"
                  type="checkbox" autocheck="false"
                  command="Tools:RemoteWebConsole"/>
-    <broadcaster id="devtoolsMenuBroadcaster_Inspect"
-                 label="&inspectMenu.label;"
-                 type="checkbox" autocheck="false"
-                 command="Tools:Inspect"
-                 key="key_inspect"/>
     <broadcaster id="devtoolsMenuBroadcaster_Scratchpad"
                  label="&scratchpad.label;"
                  command="Tools:Scratchpad"
@@ -278,13 +251,6 @@
     <key id="key_errorConsole" key="&errorConsoleCmd.commandkey;" command="Tools:ErrorConsole" modifiers="accel,shift"/>
     <key id="key_devToolbar" keycode="&devToolbar.keycode;" modifiers="shift"
          keytext="&devToolbar.keytext;" command="Tools:DevToolbarFocus"/>
-    <key id="key_inspect" key="&inspectMenu.commandkey;" command="Inspector:Inspect"
-#ifdef XP_MACOSX
-        modifiers="accel,alt"
-#else
-        modifiers="accel,shift"
-#endif
-    />
     <key id="key_responsiveUI" key="&responsiveDesignTool.commandkey;" command="Tools:ResponsiveUI"
 #ifdef XP_MACOSX
         modifiers="accel,alt"

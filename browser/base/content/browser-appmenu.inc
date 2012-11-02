@@ -154,7 +154,6 @@
           <menuseparator id="appmenu_devtools_separator"/>
           <menuitem id="appmenu_devToolbar" observes="devtoolsMenuBroadcaster_DevToolbar"/>
           <menuitem id="appmenu_remoteWebConsole" observes="devtoolsMenuBroadcaster_RemoteWebConsole"/>
-          <menuitem id="appmenu_pageinspect" observes="devtoolsMenuBroadcaster_Inspect"/>
           <menuitem id="appmenu_responsiveUI" observes="devtoolsMenuBroadcaster_ResponsiveUI"/>
           <menuitem id="appmenu_scratchpad" observes="devtoolsMenuBroadcaster_Scratchpad"/>
           <menuitem id="appmenu_pageSource" observes="devtoolsMenuBroadcaster_PageSource"/>

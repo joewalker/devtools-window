@@ -16,23 +16,14 @@ Cu.import("resource:///modules/devtools/Toolbox.jsm");
 Cu.import("resource:///modules/devtools/Target.jsm");
 
 /**
- * gDevTools is a singleton that controls Firefox Developer Tools.
- *
- * It is an instance of a DevTools class that holds a set of tools. This lets us
- * have alternative sets of tools, for example to allow a Firebug type
- * alternative. It has the same lifetime as the browser.
+ * DevTools is a singleton that represents a set of developer tools, it holds a
+ * set of tools and keeps track of open toolboxes in the browser.
  */
 function DevTools() {
   this._tools = new Map();
   this._toolboxes = new Map();
 
-  // We need access to the browser window in order to add menu items. Because
-  // this object is instantiated inside this jsm we need to use
-  // getMostRecentWindow in order to do so.
-  this._win = Services.wm.getMostRecentWindow("navigator:browser");
-
-  Services.obs.addObserver(this._newWindowObserver,
-    "xul-window-registered", false);
+  this.init = this.init.bind(this);
 
   new EventEmitter(this);
 }
@@ -54,12 +45,27 @@ function DevTools() {
 DevTools.HostType = {
   BOTTOM: "bottom",
   SIDE: "side",
-  WINDOW: "window",
-  TAB: "tab"
+  WINDOW: "window"
 };
 
 DevTools.prototype = {
   HostType: DevTools.HostType,
+
+  /**
+   * Initialize the DevTools class.
+   *
+   * @param  {XULDocument} doc
+   *         The document to which any menu items are to be added
+   */
+  init: function DT_init(doc) {
+    /**
+     * Register the set of default tools
+     */
+    for (let definition of defaultTools) {
+      gDevTools.registerTool(definition);
+    }
+    this._addAllToolsToMenu(doc);
+  },
 
   /**
    * Register a new developer tool.
@@ -91,7 +97,7 @@ DevTools.prototype = {
       "devtools." + toolId + ".enabled";
     this._tools.set(toolId, toolDefinition);
 
-    this._addToolToMenu(toolDefinition);
+    this._addToolToWindows(toolDefinition);
 
     this.emit("tool-registered", toolId);
   },
@@ -105,6 +111,8 @@ DevTools.prototype = {
    */
   unregisterTool: function DT_unregisterTool(toolId) {
     this._tools.delete(toolId);
+
+    this._removeToolFromWindows(toolId);
 
     this.emit("tool-unregistered", toolId);
   },
@@ -271,14 +279,26 @@ DevTools.prototype = {
   },
 
   /**
-   * Add all tools to the developer tools menu of a window.
-   * Used when a new Firefox window is opened.
+   * Add the menuitem for a tool to all open browser windows.
    *
-   * @param {XULDocument} [chromeDoc]
+   * @param {object} toolDefinition
+   *        properties of the tool to add
+   */
+  _addToolToWindows: function DT_addToolToWindows(toolDefinition) {
+    let enumerator = Services.wm.getEnumerator("navigator:browser");
+    while (enumerator.hasMoreElements()) {
+      let win = enumerator.getNext();
+      this._addToolToMenu(toolDefinition, win.document);
+    }
+  },
+
+  /**
+   * Add all tools to the developer tools menu of a window.
+   *
+   * @param {XULDocument} doc
    *        The document to which the tool items are to be added.
    */
-  _addAllToolsToMenu: function DT_addAllToolsToMenu(chromeDoc) {
-    let doc = chromeDoc || this._win.document;
+  _addAllToolsToMenu: function DT_addAllToolsToMenu(doc) {
     let fragCommands = doc.createDocumentFragment();
     let fragKeys = doc.createDocumentFragment();
     let fragBroadcasters = doc.createDocumentFragment();
@@ -286,17 +306,21 @@ DevTools.prototype = {
     let fragMenuItems = doc.createDocumentFragment();
 
     for (let [key, toolDefinition] of this._tools) {
-      let [cmd, key, bc, item] =
-        this._addToolToMenu(toolDefinition, chromeDoc, true);
+      let frags = this._addToolToMenu(toolDefinition, doc, true);
+
+      if (!frags) {
+        return;
+      }
+
+      let [cmd, key, bc, appmenuitem, menuitem] = frags;
 
       fragCommands.appendChild(cmd);
       if (key) {
         fragKeys.appendChild(key);
       }
       fragBroadcasters.appendChild(bc);
-      fragAppMenuItems.appendChild(item);
-      item = item.cloneNode();
-      fragMenuItems.appendChild(item);
+      fragAppMenuItems.appendChild(appmenuitem);
+      fragMenuItems.appendChild(menuitem);
     }
 
     let mcs = doc.getElementById("mainCommandSet");
@@ -324,14 +348,13 @@ DevTools.prototype = {
    *
    * @param {string} toolDefinition
    *        Tool definition of the tool to add a menu entry.
-   * @param {XULDocument} [chromeDoc]
+   * @param {XULDocument} doc
    *        The document to which the tool menu item is to be added.
    * @param {Boolean} [noAppend]
    *        Return an array of elements instead of appending them to the
    *        document. Default is false.
    */
-  _addToolToMenu: function DT_addToolToMenu(toolDefinition, chromeDoc, noAppend) {
-    let doc = chromeDoc || this._win.document;
+  _addToolToMenu: function DT_addToolToMenu(toolDefinition, doc, noAppend) {
     let id = toolDefinition.id;
 
     // Prevent multiple entries for the same tool.
@@ -340,14 +363,14 @@ DevTools.prototype = {
     }
 
     let cmd = doc.createElement("command");
-    cmd.setAttribute("id", "Tools:" + id);
+    cmd.id = "Tools:" + id;
     cmd.setAttribute("oncommand",
       'gDevTools.openToolboxForTab(gBrowser.selectedTab, "' + id + '");');
 
     let key = null;
     if (toolDefinition.key) {
       key = doc.createElement("key");
-      key.setAttribute("id", "key_" + id);
+      key.id = "key_" + id;
 
       if (toolDefinition.key.startsWith("VK_")) {
         key.setAttribute("keycode", toolDefinition.key);
@@ -369,16 +392,21 @@ DevTools.prototype = {
       bc.setAttribute("key", "key_" + id);
     }
 
-    let item = doc.createElement("menuitem");
-    item.id = "appmenu_devToolbar" + id;
-    item.setAttribute("observes", "devtoolsMenuBroadcaster_" + id);
+    let appmenuitem = doc.createElement("menuitem");
+    appmenuitem.id = "appmenuitem_" + id;
+    appmenuitem.setAttribute("observes", "devtoolsMenuBroadcaster_" + id);
+
+    let menuitem = doc.createElement("menuitem");
+    menuitem.id = "menuitem_" + id;
+    menuitem.setAttribute("observes", "devtoolsMenuBroadcaster_" + id);
 
     if (toolDefinition.accesskey) {
-      item.setAttribute("accesskey", toolDefinition.accesskey);
+      appmenuitem.setAttribute("accesskey", toolDefinition.accesskey);
+      menuitem.setAttribute("accesskey", toolDefinition.accesskey);
     }
 
     if (noAppend) {
-      return [cmd, key, bc, item];
+      return [cmd, key, bc, appmenuitem, menuitem];
     } else {
       let mcs = doc.getElementById("mainCommandSet");
       mcs.appendChild(cmd);
@@ -394,41 +422,103 @@ DevTools.prototype = {
       let amp = doc.getElementById("appmenu_webDeveloper_popup");
       if (amp) {
         let amps = doc.getElementById("appmenu_devtools_separator");
-        amp.insertBefore(item, amps);
+        amp.insertBefore(appmenuitem, amps);
       }
-
-      item = item.cloneNode();
 
       let mp = doc.getElementById("menuWebDeveloperPopup");
       let mps = doc.getElementById("menu_devtools_separator");
-      mp.insertBefore(item, mps);
+      mp.insertBefore(menuitem, mps);
     }
   },
 
   /**
-   * Observer for the event fired when a new Firefox window is opened
+   * Add the menuitem for a tool to all open browser windows.
+   *
+   * @param {object} toolId
+   *        id of the tool to remove
    */
-  _newWindowObserver: function DT_newWindowObserver(subject, topic, data) {
-    let win = aSubject.QueryInterface(Ci.nsIInterfaceRequestor)
-                      .getInterface(Ci.nsIDOMWindow);
+  _removeToolFromWindows: function DT_removeToolFromWindows(toolId) {
+    this._forEachBrowserWindow(function(win) {
+      this._removeToolFromMenu(toolId, win.document);
+    });
+  },
 
-    let winLoad = function winLoad() {
-      win.removeEventListener("load", winLoad, false);
-      this._addAllToolsToMenu(win.document);
-    }.bind(this);
+  /**
+   * Iterate browser windows.
+   *
+   * @param  {Function} callback
+   *         Method to be called for each window. An instance of each window
+   *         will be passed to this function.
+   */
+  _forEachBrowserWindow: function DT_forEachBrowserWindow(callback) {
+    let enumerator = Services.wm.getEnumerator("navigator:browser");
+    while (enumerator.hasMoreElements()) {
+      let win = enumerator.getNext();
+      callback(win);
+    }
+  },
 
-    win.addEventListener("load", winLoad, false);
+  /**
+   * Remove a tool's menuitem from a window
+   *
+   * @param {string} toolId
+   *        Id of the tool to add a menu entry for
+   * @param {XULDocument} doc
+   *        The document to which the tool menu item is to be removed from
+   */
+  _removeToolFromMenu: function DT_removeToolFromMenu(toolId, doc) {
+    let command = doc.getElementById("Tools:" + toolId);
+    command.parentNode.removeChild(command);
+
+    let key = doc.getElementById("key_" + toolId);
+    if (key) {
+      key.parentNode.removeChild(key);
+    }
+
+    let bc = doc.getElementById("devtoolsMenuBroadcaster_" + toolId);
+    bc.parentNode.removeChild(bc);
+
+    let item = doc.getElementById("appmenu_devToolbar" + toolId);
+    item.parentNode.removeChild(item);
   },
 
   /**
    * Destroy this DevTools instance.
    */
-  destroy: function DT_destroy() {
-    Services.obs.removeObserver(this._newWindowObserver, "xul-window-registered");
+  destroy: function DT_destroy(doc) {
+    let nodeids = [
+      "Tools:",
+      "key_",
+      "devtoolsMenuBroadcaster_",
+      "appmenuitem_",
+      "menuitem_"
+    ];
 
-    delete this._tools;
-    delete this._toolboxes;
-    delete this._win;
+    // Remove menu entries
+    for (let [id, value] of this._tools) {
+      for each (let nodeid in nodeids) {
+        let node = doc.getElementById(nodeid + id);
+        if (node) {
+          node.parentNode.removeChild(node);
+        }
+      }
+    }
+
+    // Destroy toolboxes for closed window
+    for (let [target, toolbox] of this._toolboxes) {
+      if (target.ownerDocument.defaultView == window) {
+        toolbox.destroy();
+      }
+    }
+
+    let numWindows = 0;
+    this._forEachBrowserWindow(function(win) {
+      numWindows++;
+    });
+    if(numWindows == 0) {
+      delete this._tools;
+      delete this._toolboxes;
+    }
   }
 };
 
@@ -439,10 +529,3 @@ DevTools.prototype = {
  * same lifetime as the browser.
  */
 const gDevTools = new DevTools();
-
-/**
- * Register the set of default tools
- */
-for (let definition of defaultTools) {
-  gDevTools.registerTool(definition)
-}

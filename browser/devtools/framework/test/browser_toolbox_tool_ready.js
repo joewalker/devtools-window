@@ -11,10 +11,7 @@ function test() {
   }, true);
 
   function openAllTools() {
-    let target = {
-      type: gDevTools.TargetType.TAB,
-      value: gBrowser.selectedTab
-    }
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
 
     let tools = gDevTools.getToolDefinitions();
     let expectedCallbacksCount = tools.size();

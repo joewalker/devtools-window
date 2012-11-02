@@ -107,8 +107,7 @@ pref("browser.sessionhistory.max_entries", 50);
 
 /* session store */
 pref("browser.sessionstore.resume_session_once", false);
-pref("browser.sessionstore.resume_from_crash", false);
-pref("browser.sessionstore.resume_from_crash_timeout", 60); // minutes
+pref("browser.sessionstore.resume_from_crash", true);
 pref("browser.sessionstore.interval", 10000); // milliseconds
 pref("browser.sessionstore.max_tabs_undo", 1);
 pref("browser.sessionstore.max_resumed_crashes", 1);
@@ -399,6 +398,7 @@ pref("javascript.options.mem.gc_high_frequency_high_limit_mb", 40);
 pref("javascript.options.mem.gc_high_frequency_low_limit_mb", 10);
 pref("javascript.options.mem.gc_low_frequency_heap_growth", 105);
 pref("javascript.options.mem.high_water_mark", 16);
+pref("javascript.options.mem.gc_allocation_threshold_mb", 3);
 #else
 pref("javascript.options.mem.high_water_mark", 32);
 #endif

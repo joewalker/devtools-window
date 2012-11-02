@@ -52,6 +52,7 @@ let DebuggerController = {
     window.removeEventListener("load", this._startupDebugger, true);
 
     DebuggerView.initialize(function() {
+      DebuggerView._isInitialized = true;
       window.dispatchEvent("Debugger:Loaded");
       this._connect();
     }.bind(this));
@@ -68,6 +69,7 @@ let DebuggerController = {
     window.removeEventListener("unload", this._shutdownDebugger, true);
 
     DebuggerView.destroy(function() {
+      DebuggerView._isDestroyed = true;
       this.SourceScripts.disconnect();
       this.StackFrames.disconnect();
       this.ThreadState.disconnect();
@@ -156,8 +158,13 @@ let DebuggerController = {
 
     client.connect(function(aType, aTraits) {
       client.listTabs(function(aResponse) {
-        let tab = aResponse.tabs[aResponse.selected];
-        this._startDebuggingTab(client, tab);
+        if (window._isChromeDebugger) {
+          let dbg = aResponse.chromeDebugger;
+          this._startChromeDebugging(client, dbg);
+        } else {
+          let tab = aResponse.tabs[aResponse.selected];
+          this._startDebuggingTab(client, tab);
+        }
         window.dispatchEvent("Debugger:Connected");
       }.bind(this));
     }.bind(this));
@@ -232,6 +239,36 @@ let DebuggerController = {
         aThreadClient.resume();
 
       }.bind(this));
+    }.bind(this));
+  },
+
+  /**
+   * Sets up a chrome debugging session.
+   *
+   * @param DebuggerClient aClient
+   *        The debugger client.
+   * @param object aChromeDebugger
+   *        The remote protocol grip of the chrome debugger.
+   */
+  _startChromeDebugging: function DC__startChromeDebugging(aClient, aChromeDebugger) {
+    if (!aClient) {
+      Cu.reportError("No client found!");
+      return;
+    }
+    this.client = aClient;
+
+    aClient.attachThread(aChromeDebugger, function(aResponse, aThreadClient) {
+      if (!aThreadClient) {
+        Cu.reportError("Couldn't attach to thread: " + aResponse.error);
+        return;
+      }
+      this.activeThread = aThreadClient;
+
+      this.ThreadState.connect();
+      this.StackFrames.connect();
+      this.SourceScripts.connect();
+      aThreadClient.resume();
+
     }.bind(this));
   },
 
@@ -686,6 +723,7 @@ StackFrames.prototype = {
  */
 function SourceScripts() {
   this._onNewScript = this._onNewScript.bind(this);
+  this._onNewGlobal = this._onNewGlobal.bind(this);
   this._onScriptsAdded = this._onScriptsAdded.bind(this);
 }
 
@@ -698,6 +736,7 @@ SourceScripts.prototype = {
    */
   connect: function SS_connect() {
     this.debuggerClient.addListener("newScript", this._onNewScript);
+    this.debuggerClient.addListener("newGlobal", this._onNewGlobal);
     this._handleTabNavigation();
   },
 
@@ -709,6 +748,7 @@ SourceScripts.prototype = {
       return;
     }
     this.debuggerClient.removeListener("newScript", this._onNewScript);
+    this.debuggerClient.removeListener("newGlobal", this._onNewGlobal);
   },
 
   /**
@@ -768,6 +808,14 @@ SourceScripts.prototype = {
 
     // Signal that a new script has been added.
     window.dispatchEvent("Debugger:AfterNewScript");
+  },
+
+  /**
+   * Handler for the debugger client's unsolicited newGlobal notification.
+   */
+  _onNewGlobal: function SS__onNewGlobal(aNotification, aPacket) {
+    // TODO: bug 806775, update the globals list using aPacket.hostAnnotations
+    // from bug 801084.
   },
 
   /**

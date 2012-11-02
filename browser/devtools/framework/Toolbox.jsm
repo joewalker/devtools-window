@@ -84,7 +84,7 @@ Toolbox.prototype = {
 
   /**
    * Get/alter the target of a Toolbox so we're debugging something different.
-   * See TargetType for more details.
+   * See Target.jsm for more details.
    * TODO: Do we allow |toolbox.target = null;| ?
    */
   get target() {
@@ -311,7 +311,7 @@ Toolbox.prototype = {
   _createHost: function TBOX_createHost(hostType) {
     let hostTab = this._getHostTab();
     if (!Hosts[hostType]) {
-      throw new Error('Unknown host: '+ hostType);
+      throw new Error('Unknown hostType: '+ hostType);
     }
     let newHost = new Hosts[hostType](hostTab);
 

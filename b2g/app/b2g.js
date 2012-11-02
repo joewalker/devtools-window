@@ -191,6 +191,7 @@ pref("app.creditsURL", "http://www.mozilla.org/credits/");
 pref("app.featuresURL", "http://www.mozilla.com/%LOCALE%/b2g/features/");
 pref("app.faqURL", "http://www.mozilla.com/%LOCALE%/b2g/faq/");
 // Whether we want to report crashes (headless)
+//XXX Remove this pref when bug 801932 is fixed
 pref("app.reportCrashes", true);
 
 // Name of alternate about: page for certificate errors (when undefined, defaults to about:neterror)
@@ -519,6 +520,7 @@ pref("javascript.options.mem.gc_high_frequency_high_limit_mb", 40);
 pref("javascript.options.mem.gc_high_frequency_low_limit_mb", 10);
 pref("javascript.options.mem.gc_low_frequency_heap_growth", 105);
 pref("javascript.options.mem.high_water_mark", 6);
+pref("javascript.options.mem.gc_allocation_threshold_mb", 3);
 
 // Show/Hide scrollbars when active/inactive
 pref("ui.showHideScrollbars", 1);

@@ -53,7 +53,8 @@ ToolbarView.prototype = {
     this._stepInButton.setAttribute("tooltiptext", this._stepInTooltip);
     this._stepOutButton.setAttribute("tooltiptext", this._stepOutTooltip);
 
-    this.toggleChromeGlobalsContainer(window._isChromeDebugger);
+    // TODO: bug 806775
+    // this.toggleChromeGlobalsContainer(window._isChromeDebugger);
   },
 
   /**
@@ -569,11 +570,12 @@ FilterView.prototype = {
     this._lineOperatorLabel.setAttribute("value",
       L10N.getFormatStr("searchPanelLine", [this._lineSearchKey]));
 
-    if (window._isChromeDebugger) {
-      this.target = DebuggerView.ChromeGlobals;
-    } else {
-      this.target = DebuggerView.Sources;
-    }
+    // TODO: bug 806775
+    // if (window._isChromeDebugger) {
+    //   this.target = DebuggerView.ChromeGlobals;
+    // } else {
+    this.target = DebuggerView.Sources;
+    // }
   },
 
   /**
