@@ -33,3 +33,5 @@ browser.jar:
     content/browser/devtools/framework/toolbox-window.xul    (framework/toolbox-window.xul)
     content/browser/devtools/framework/toolbox.xul           (framework/toolbox.xul)
     content/browser/devtools/framework/toolbox.css           (framework/toolbox.css)
+    content/browser/devtools/inspector/inspector.xul         (inspector/inspector.xul)
+    content/browser/devtools/inspector/inspector.css         (inspector/inspector.css)

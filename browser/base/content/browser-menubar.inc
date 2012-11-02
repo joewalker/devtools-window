@@ -548,7 +548,6 @@
                   <menuseparator id="menu_devtools_separator"/>
                   <menuitem id="menu_devToolbar" observes="devtoolsMenuBroadcaster_DevToolbar" accesskey="&devToolbarMenu.accesskey;"/>
                   <menuitem id="menu_remoteWebConsole" observes="devtoolsMenuBroadcaster_RemoteWebConsole"/>
-                  <menuitem id="menu_pageinspect" observes="devtoolsMenuBroadcaster_Inspect" accesskey="&inspectMenu.accesskey;"/>
                   <menuitem id="menu_responsiveUI" observes="devtoolsMenuBroadcaster_ResponsiveUI" accesskey="&responsiveDesignTool.accesskey;"/>
                   <menuitem id="menu_scratchpad" observes="devtoolsMenuBroadcaster_Scratchpad" accesskey="&scratchpad.accesskey;"/>
                   <menuitem id="menu_pageSource" observes="devtoolsMenuBroadcaster_PageSource" accesskey="&pageSourceCmd.accesskey;"/>

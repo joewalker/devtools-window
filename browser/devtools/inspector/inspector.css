@@ -1,0 +1,26 @@
+.inspector-breadcrumbs-button {
+  direction: ltr;
+}
+
+#inspector-option-toolbarbutton > .toolbarbutton-menu-dropmarker {
+  display: none;
+}
+
+#inspector-layoutview-container > iframe {
+  /* header size */
+  height: 28px;
+}
+
+#inspector-layoutview-container:not([disable-transitions]) > iframe {
+  transition-property: height;
+  transition-duration: 0.2s;
+}
+
+#inspector-layoutview-container > iframe[open] {
+  /* header size + layout view size: 28px + 145px */
+  height: 173px;
+}
+
+.devtools-toolbarbutton:not([label]) > .toolbarbutton-text {
+  display: none;
+}

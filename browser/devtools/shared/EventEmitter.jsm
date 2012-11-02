@@ -67,7 +67,9 @@ EventEmitter.prototype = {
     if (!this._eventEmitterListeners)
       return;
     let listeners = this._eventEmitterListeners.get(aEvent);
-    this._eventEmitterListeners.set(aEvent, listeners.filter(function(l) aListener != l));
+    if (listeners) {
+      this._eventEmitterListeners.set(aEvent, listeners.filter(function(l) aListener != l));
+    }
   },
 
   /**
