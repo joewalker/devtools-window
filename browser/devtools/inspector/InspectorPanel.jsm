@@ -19,6 +19,7 @@ Cu.import("resource:///modules/devtools/gDevTools.jsm");
 Cu.import("resource:///modules/devtools/Selection.jsm");
 Cu.import("resource:///modules/devtools/Breadcrumbs.jsm");
 Cu.import("resource:///modules/devtools/Highlighter.jsm");
+Cu.import("resource:///modules/devtools/Sidebar.jsm");
 
 /**
  * Represents an open instance of the Inspector for a tab.
@@ -94,6 +95,15 @@ function InspectorPanel(iframeWindow, toolbox) {
 
     this.emit("ready");
   }.bind(this));
+
+  let tabbox = this.panelDoc.querySelector("#inspector-sidebar");
+  this.sidebar = new InspectorSidebar(tabbox, this);
+
+  this.sidebar.addView("chrome://browser/content/devtools/cssruleview.xul");
+  this.sidebar.addView("chrome://browser/content/devtools/csshtmltree.xul");
+  this.sidebar.addView("chrome://browser/content/devtools/layoutview/view.xhtml");
+
+  this.sidebar.show();
 }
 
 InspectorPanel.prototype = {

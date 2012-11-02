@@ -3396,17 +3396,6 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
   padding-right: 18px; /* use -moz-padding-end when/if bug 631729 gets fixed */
 }
 
-#devtools-side-splitter {
-  background-image: none !important;
-  border: 0;
-  -moz-border-start: 1px solid #242b33;
-  min-width: 0;
-  width: 3px;
-  background-color: transparent;
-  -moz-margin-end: -3px;
-  position: relative;
-}
-
 /* Lion Fullscreen window styling */
 @media (-moz-mac-lion-theme) {
   #navigator-toolbox[inFullscreen][tabsontop="true"]:not(:-moz-lwtheme)::before {
@@ -3419,10 +3408,6 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
     padding-top: 11px;
     background-position: right -11px;
   }
-}
-
-#devtools-sidebar-box {
-  background-color: -moz-Field;
 }
 
 /* Highlighter - Node Infobar */

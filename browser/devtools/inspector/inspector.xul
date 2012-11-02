@@ -13,7 +13,7 @@
 
 <window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
 
-  <popupset>
+  <popupset id="inspectorPopupSet">
     <!-- Used by the Markup Panel, the Highlighter and the Breadcrumbs -->
     <menupopup id="inspector-node-popup">
       <menuitem id="node-menu-copyinner"
@@ -42,33 +42,36 @@
     </menupopup>
   </popupset>
 
-  <toolbar id="inspector-toolbar"
-           class="devtools-toolbar"
-           nowindowdrag="true">
-    <toolbarbutton id="inspector-inspect-toolbutton"
-                   tooltiptext="&inspector.selectButton.tooltip;"
-                   class="devtools-toolbarbutton"
-                   hidden="true"
-                   oncommand="inspector.highlighter.unlock()"/>
-    <arrowscrollbox id="inspector-breadcrumbs"
-                    flex="1" orient="horizontal"
-                    clicktoscroll="true"/>
-    <hbox id="inspector-tools">
-      <toolbarbutton id="inspector-3D-button"
-                     class="devtools-toolbarbutton"
-                     hidden="true"
-                     label="&inspect3DViewButton.label;"
-                     accesskey="&inspect3DViewButton.accesskey;"
-                     tabindex="0"
-                     command="Inspector:Tilt"/>
-      <toolbarbutton id="inspector-style-button"
-                     class="devtools-toolbarbutton"
-                     label="&inspectStyleButton.label;"
-                     accesskey="&inspectStyleButton.accesskey;"
-                     tabindex="0"
-                     command="Inspector:Sidebar"/>
-    </hbox>
-  </toolbar>
-  <vbox flex="1" id="markup-box">
-  </vbox>
+  <hbox flex="1">
+    <vbox flex="1">
+      <toolbar id="inspector-toolbar"
+        class="devtools-toolbar"
+        nowindowdrag="true">
+        <toolbarbutton id="inspector-inspect-toolbutton"
+          tooltiptext="&inspector.selectButton.tooltip;"
+          class="devtools-toolbarbutton"
+          hidden="true"
+          oncommand="inspector.highlighter.unlock()"/>
+        <arrowscrollbox id="inspector-breadcrumbs"
+          flex="1" orient="horizontal"
+          clicktoscroll="true"/>
+        <hbox id="inspector-tools">
+          <toolbarbutton id="inspector-3D-button"
+            class="devtools-toolbarbutton"
+            hidden="true"
+            label="&inspect3DViewButton.label;"
+            accesskey="&inspect3DViewButton.accesskey;"
+            tabindex="0"
+            command="Inspector:Tilt"/>
+        </hbox>
+      </toolbar>
+      <vbox flex="1" id="markup-box">
+      </vbox>
+    </vbox>
+    <splitter class="devtools-side-splitter"/>
+    <tabbox id="inspector-sidebar" class="devtools-sidebar-tabs" hidden="true">
+      <tabs/>
+      <tabpanels flex="1"/>
+    </tabbox>
+  </hbox>
 </window>

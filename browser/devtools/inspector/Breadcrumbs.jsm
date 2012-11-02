@@ -7,7 +7,6 @@
 const Cc = Components.classes;
 const Cu = Components.utils;
 const Ci = Components.interfaces;
-const Cr = Components.results;
 
 const PSEUDO_CLASSES = [":hover", ":active", ":focus"];
 

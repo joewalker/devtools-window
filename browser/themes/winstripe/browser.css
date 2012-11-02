@@ -2678,20 +2678,6 @@ toolbarbutton.bookmark-item[dragover="true"][open="true"] {
   border-top: 1px solid hsla(211,68%,6%,.65) !important;
 }
 
-#devtools-side-splitter {
-  border: 0;
-  -moz-border-start: 1px solid #242b33;
-  min-width: 0;
-  width: 3px;
-  background-color: transparent;
-  -moz-margin-end: -3px;
-  position: relative;
-}
-
-#devtools-sidebar-box {
-  background-color: -moz-Field;
-}
-
 /* Highlighter - Node Infobar */
 
 .highlighter-nodeinfobar {

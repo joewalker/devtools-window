@@ -1044,19 +1044,6 @@
       <chatbar id="pinnedchats" layer="true" mousethrough="always"/>
       <statuspanel id="statusbar-display" inactive="true"/>
     </vbox>
-    <splitter id="devtools-side-splitter" hidden="true"/>
-    <vbox id="devtools-sidebar-box" hidden="true"
-          style="min-width: 18em; width: 22em; max-width: 42em;" persist="width">
-      <toolbar id="devtools-sidebar-toolbar"
-               class="devtools-toolbar"
-               nowindowdrag="true">
-        <spacer flex="1"/>
-        <toolbarbutton tooltiptext="&inspectSidebarCloseButton.tooltiptext;"
-                       class="devtools-closebutton"
-                       command="Inspector:Sidebar"/>
-      </toolbar>
-      <deck id="devtools-sidebar-deck" flex="1"/>
-    </vbox>
     <splitter id="social-sidebar-splitter"
               class="chromeclass-extrachrome sidebar-splitter"
               observes="socialSidebarBroadcaster"/>

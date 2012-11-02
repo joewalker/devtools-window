@@ -13,7 +13,4 @@
 <!ENTITY inspect3DViewButton.label     "3D View">
 <!ENTITY inspect3DViewButton.accesskey "W">
 
-<!ENTITY inspectStyleButton.label     "Style">
-<!ENTITY inspectStyleButton.accesskey "S">
-
 <!ENTITY inspector.selectButton.tooltip     "Select element with mouse">

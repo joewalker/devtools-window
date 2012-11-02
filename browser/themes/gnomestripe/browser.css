@@ -1998,21 +1998,6 @@ toolbar[mode="text"] toolbarbutton.chevron > .toolbarbutton-icon {
   border-top: 1px solid hsla(210, 8%, 5%, .65);
 }
 
-#devtools-side-splitter {
-  -moz-appearance: none;
-  border: 0;
-  -moz-border-start: 1px solid #242b33;
-  min-width: 0;
-  width: 3px;
-  background-color: transparent;
-  -moz-margin-end: -3px;
-  position: relative;
-}
-
-#devtools-sidebar-box {
-  background-color: -moz-Field;
-}
-
 /* Highlighter - Node Infobar */
 
 .highlighter-nodeinfobar {
