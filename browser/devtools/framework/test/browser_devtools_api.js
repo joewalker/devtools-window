@@ -44,7 +44,7 @@ function runTests(aTab) {
 
   gDevTools.openToolbox(target, "bottom", toolId);
 
-  let toolBoxes = gDevTools.getToolBoxes(gBrowser.selectedTab);
+  let toolBoxes = gDevTools.getToolboxes(gBrowser.selectedTab);
 
   let tb = toolBoxes.get(gBrowser.selectedTab);
   is(tb.target, target, "toolbox target is correct");

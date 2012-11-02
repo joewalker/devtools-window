@@ -21,7 +21,7 @@ function loadWebConsole(aTab) {
     value: gBrowser.selectedTab
   };
   toolbox = gDevTools.openToolbox(target, "bottom", "webconsole");
-  toolbox.once("load", checkToolLoading);
+  toolbox.once("webconsole-ready", checkToolLoading);
 }
 
 function checkToolLoading() {
@@ -46,7 +46,7 @@ function testToggle() {
       value: gBrowser.selectedTab
     };
     toolbox = gDevTools.openToolbox(target, "bottom", "styleeditor");
-    toolbox.once("load", checkStyleEditorLoaded);
+    toolbox.once("styleeditor-ready", checkStyleEditorLoaded);
   }.bind(this));
 
   gDevTools.toggleToolboxForTab(gBrowser.selectedTab);
