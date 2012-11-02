@@ -1466,6 +1466,9 @@ var gBrowserInit = {
       cmd.removeAttribute("hidden");
     }
 
+    // Initialize gDevTools
+    gDevTools.init(window.document);
+
     let appMenuButton = document.getElementById("appmenu-button");
     let appMenuPopup = document.getElementById("appmenu-popup");
     if (appMenuButton && appMenuPopup) {
@@ -1510,6 +1513,9 @@ var gBrowserInit = {
 
     if (!__lookupGetter__("InspectorUI"))
       InspectorUI.destroy();
+
+    if (!__lookupGetter__("gDevTools"))
+      gDevTools.destroy(window.document);
 
     // First clean up services initialized in gBrowserInit.onLoad (or those whose
     // uninit methods don't depend on the services having been initialized).
