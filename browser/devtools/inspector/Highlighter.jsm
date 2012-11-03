@@ -72,14 +72,15 @@ const PSEUDO_CLASSES = [":hover", ":active", ":focus"];
 /**
  * Constructor.
  *
- * @param aTab Browser's tab.
+ * @param aTarget The inspection target.
  * @param aInspector Inspector panel.
  */
-function Highlighter(aTab, aInspector)
+function Highlighter(aTarget, aInspector)
 {
-  this.tab = aTab;
-  this.browser = aTab.linkedBrowser;
-  this.chromeDoc = aTab.ownerDocument;
+  this.target = aTarget;
+  this.tab = aTarget.tab;
+  this.browser = this.tab.linkedBrowser;
+  this.chromeDoc = this.tab.ownerDocument;
   this.chromeWin = this.chromeDoc.defaultView;
   this.inspector = aInspector
 

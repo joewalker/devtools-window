@@ -30,12 +30,12 @@ Cu.import("resource:///modules/devtools/Sidebar.jsm");
 function InspectorPanel(iframeWindow, toolbox) {
   this._target = toolbox._target;
 
-  if (this.target.type == DevTools.TargetType.REMOTE) {
+  if (this.target.isRemote) {
     throw "Unsupported target";
   }
 
-  this.tabTarget = (this.target.type == DevTools.TargetType.TAB);
-  this.chromeTarget = (this.target.type == DevTools.TargetType.CHROME);
+  this.tabTarget = (this.target.tab != null);
+  this.chromeTarget = (this.target.chromeWindow != null);
 
   new EventEmitter(this);
 
@@ -58,7 +58,7 @@ function InspectorPanel(iframeWindow, toolbox) {
   this.breadcrumbs = new HTMLBreadcrumbs(this);
 
   if (this.tabTarget) {
-    this.highlighter = new Highlighter(this.target.value, this);
+    this.highlighter = new Highlighter(this.target, this);
     let button = this.panelDoc.getElementById("inspector-inspect-toolbutton");
     button.hidden = false;
     this.updateInspectorButton = function() {
@@ -80,12 +80,12 @@ function InspectorPanel(iframeWindow, toolbox) {
 
     // All the components are initialized. Let's select a node.
     if (this.tabTarget) {
-      let browser = this.target.value.linkedBrowser;
+      let browser = this.target.tab.linkedBrowser;
       let root = browser.contentDocument.documentElement;
       this._selection.setNode(root);
     }
     if (this.chromeTarget) {
-      let root = this.target.value.document.documentElement;
+      let root = this.target.chromeWindow.document.documentElement;
       this._selection.setNode(root);
     }
 
@@ -256,9 +256,9 @@ InspectorPanel.prototype = {
 
     let controllerWindow;
     if (this.tabTarget) {
-      controllerWindow = this.target.value.ownerDocument.defaultView;
+      controllerWindow = this.target.tab.ownerDocument.defaultView;
     } else if (this.chromeTarget) {
-      controllerWindow = this.target.value;
+      controllerWindow = this.target.chromeWindow;
     }
     this.markup = new MarkupView(this, this._markupFrame, controllerWindow);
 

@@ -2,6 +2,10 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+let temp = [];
+Cu.import("resource:///modules/devtools/Target.jsm", temp);
+let TargetFactory = temp.TargetFactory;
+
 function test() {
   waitForExplicitFinish();
   gBrowser.selectedTab = gBrowser.addTab();
@@ -11,10 +15,7 @@ function test() {
   }, true);
 
   function openAllTools() {
-    let target = {
-      type: gDevTools.TargetType.TAB,
-      value: gBrowser.selectedTab
-    }
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
 
     let tools = gDevTools.getToolDefinitions();
     let expectedCallbacksCount = tools.size();

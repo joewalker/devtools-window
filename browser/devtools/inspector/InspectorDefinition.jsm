@@ -35,19 +35,10 @@ const InspectorDefinition = {
   label: l10n("inspector.label"),
 
   isTargetSupported: function(target) {
-    switch (target.type) {
-      case DevTools.TargetType.TAB:
-        return true;
-      case DevTools.TargetType.REMOTE:
-      case DevTools.TargetType.CHROME:
-      default:
-        return false;
-    }
+    return !target.isRemote;
   },
 
   build: function(iframeWindow, toolbox) {
     return new InspectorPanel(iframeWindow, toolbox);
   }
 };
-
-

@@ -181,7 +181,14 @@ function closeConsole(aTab, aCallback)
     Services.obs.addObserver(onWebConsoleClose, "web-console-destroyed", false);
   }
 
-  gDevTools.closeToolbox(aTab || tab);
+  let toolbox = gDevTools.getToolBoxes().get(aTab || tab);
+  if (toolbox == null) {
+    // FIXME: fixing tests, but we should check if this is right
+    todo('No toolbox for tab');
+  }
+  else {
+    toolbox.destroy();
+  }
 }
 
 /**

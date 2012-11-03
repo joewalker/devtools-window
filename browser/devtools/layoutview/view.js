@@ -16,10 +16,8 @@ function LayoutView(aInspector, aWindow)
 {
   this.inspector = aInspector;
 
-  if (this.inspector.target.TargetType == DevTools.TargetType.TAB) {
-    // <browser> is not always available (for Chrome targets for example)
-    this.browser = aInspector.target.linkedBrowser;
-  }
+  // <browser> is not always available (for Chrome targets for example)
+  this.browser = aInspector.target.linkedBrowser;
 
   this.doc = aWindow.document;
   this.sizeLabel = this.doc.querySelector(".size > span");

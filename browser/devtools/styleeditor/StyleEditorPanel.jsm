@@ -26,13 +26,13 @@ const StyleEditorDefinition = {
   modifiers: "shift",
   label: l10n("ToolboxStyleEditor.label"),
   url: "chrome://browser/content/styleeditor.xul",
-  build: function(iframeWindow, toolbox) {
-    let target = toolbox.target;
-    if (target.type !== "tab") {
-      throw new Error("Unsupported target type: " + target.type);
-    }
 
-    iframeWindow.init(target.value.linkedBrowser.contentWindow);
+  isTargetSupported: function(target) {
+    return !target.isRemote && !target.isChrome;
+  },
+
+  build: function(iframeWindow, toolbox) {
+    iframeWindow.init(toolbox.target.tab.linkedBrowser.contentWindow);
     return iframeWindow;
   }
 };
