@@ -4,14 +4,14 @@
 
 "use strict";
 
-const EXPORTED_SYMBOLS = [ "TargetFactory" ];
+this.EXPORTED_SYMBOLS = [ "TargetFactory" ];
 
 Components.utils.import("resource:///modules/devtools/EventEmitter.jsm");
 
 /**
  * Functions for creating Targets
  */
-const TargetFactory = {
+this.TargetFactory = {
   /**
    * Construct a Target
    * @param {XULTab} tab

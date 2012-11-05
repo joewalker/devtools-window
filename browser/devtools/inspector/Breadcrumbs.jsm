@@ -10,7 +10,7 @@ const Ci = Components.interfaces;
 
 const PSEUDO_CLASSES = [":hover", ":active", ":focus"];
 
-let EXPORTED_SYMBOLS = ["HTMLBreadcrumbs"];
+this.EXPORTED_SYMBOLS = ["HTMLBreadcrumbs"];
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource:///modules/devtools/DOMHelpers.jsm");
@@ -40,7 +40,7 @@ const LOW_PRIORITY_ELEMENTS = {
  *   else select the node;
  * . If the selected node is the last node displayed, append its first (if any).
  */
-function HTMLBreadcrumbs(aInspector)
+this.HTMLBreadcrumbs = function HTMLBreadcrumbs(aInspector)
 {
   this.inspector = aInspector;
   this.selection = this.inspector.selection;

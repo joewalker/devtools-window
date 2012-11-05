@@ -4,7 +4,7 @@
 
 "use strict";
 
-const EXPORTED_SYMBOLS = [ "gDevTools", "DevTools" ];
+this.EXPORTED_SYMBOLS = [ "gDevTools", "DevTools" ];
 
 const Cu = Components.utils;
 const Ci = Components.interfaces;
@@ -19,7 +19,7 @@ Cu.import("resource:///modules/devtools/Target.jsm");
  * DevTools is a class that represents a set of developer tools, it holds a
  * set of tools and keeps track of open toolboxes in the browser.
  */
-function DevTools() {
+this.DevTools = function DevTools() {
   this._tools = new Map();
   this._toolboxes = new Map();
 
@@ -534,4 +534,4 @@ DevTools.prototype = {
  * It is an instance of a DevTools class that holds a set of tools. It has the
  * same lifetime as the browser.
  */
-const gDevTools = new DevTools();
+this.gDevTools = new DevTools();

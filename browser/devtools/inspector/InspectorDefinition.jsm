@@ -6,7 +6,7 @@
 
 "use strict";
 
-const EXPORTED_SYMBOLS = ["InspectorDefinition"];
+this.EXPORTED_SYMBOLS = ["InspectorDefinition"];
 
 const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 const properties = "chrome://browser/locale/devtools/inspector.properties";
@@ -25,7 +25,7 @@ Cu.import("resource://gre/modules/Services.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "InspectorPanel", "resource:///modules/devtools/InspectorPanel.jsm");
 
-const InspectorDefinition = {
+this.InspectorDefinition = {
   id: "inspector",
   accesskey: l10n("inspector.accesskey"),
   key: l10n("inspector.commandkey"),

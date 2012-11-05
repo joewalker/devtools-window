@@ -8,7 +8,7 @@ const Cc = Components.classes;
 const Cu = Components.utils;
 const Ci = Components.interfaces;
 
-let EXPORTED_SYMBOLS = ["InspectorSidebar"];
+this.EXPORTED_SYMBOLS = ["InspectorSidebar"];
 
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 
@@ -19,7 +19,7 @@ Cu.import("resource:///modules/devtools/EventEmitter.jsm");
  * @param {Node} a <tabbox> node.
  * @param {ToolPanel} Related ToolPanel instance.
  */
-function InspectorSidebar(tabbox, panel) {
+this.InspectorSidebar = function InspectorSidebar(tabbox, panel) {
   this.tabbox = tabbox;
   this.panelDoc = this.tabbox.ownerDocument;
   this.panel = panel;

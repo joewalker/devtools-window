@@ -4,7 +4,7 @@
 
 "use strict";
 
-const EXPORTED_SYMBOLS = [ "WebConsoleDefinition" ];
+this.EXPORTED_SYMBOLS = [ "WebConsoleDefinition" ];
 
 const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
@@ -33,7 +33,7 @@ XPCOMUtils.defineLazyGetter(this, "osString", function() {
 /**
  * The external API allowing us to be registered with DevTools.jsm
  */
-const WebConsoleDefinition = {
+this.WebConsoleDefinition = {
   id: "webconsole",
   key: l10n("cmd.commandkey"),
   accesskey: l10n("webConsoleCmd.accesskey"),

@@ -7,7 +7,7 @@
 
 const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
-const EXPORTED_SYMBOLS = ["DebuggerDefinition"];
+this.EXPORTED_SYMBOLS = ["DebuggerDefinition"];
 
 const STRINGS_URI = "chrome://browser/locale/devtools/debugger.properties";
 
@@ -24,7 +24,7 @@ XPCOMUtils.defineLazyGetter(this, "osString", function() {
   return Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
 });
 
-const DebuggerDefinition = {
+this.DebuggerDefinition = {
   id: "jsdebugger",
   key: l10n("open.commandkey"),
   accesskey: l10n("debuggerMenu.accesskey"),

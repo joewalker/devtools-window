@@ -4,7 +4,7 @@
 
 "use strict";
 
-const EXPORTED_SYMBOLS = [ "StyleEditorDefinition" ];
+this.EXPORTED_SYMBOLS = [ "StyleEditorDefinition" ];
 
 const Cu = Components.utils;
 const STRINGS_URI = "chrome://browser/locale/devtools/styleeditor.properties";
@@ -19,7 +19,7 @@ XPCOMUtils.defineLazyGetter(this, "_strings",
 /**
  * The external API allowing us to be registered with DevTools.jsm
  */
-const StyleEditorDefinition = {
+this.StyleEditorDefinition = {
   id: "styleeditor",
   key: l10n("open.commandkey"),
   accesskey: l10n("open.accesskey"),

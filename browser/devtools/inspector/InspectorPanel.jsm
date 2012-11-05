@@ -9,7 +9,7 @@ const Cu = Components.utils;
 const Ci = Components.interfaces;
 const Cr = Components.results;
 
-const EXPORTED_SYMBOLS = ["InspectorPanel"];
+this.EXPORTED_SYMBOLS = ["InspectorPanel"];
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource:///modules/devtools/MarkupView.jsm");
@@ -27,7 +27,7 @@ Cu.import("resource:///modules/devtools/Sidebar.jsm");
  * the markup view, and the sidebar (computed view, rule view
  * and layout view).
  */
-function InspectorPanel(iframeWindow, toolbox) {
+this.InspectorPanel = function InspectorPanel(iframeWindow, toolbox) {
   this._target = toolbox._target;
 
   if (this.target.isRemote) {

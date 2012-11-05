@@ -16,7 +16,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
 XPCOMUtils.defineLazyModuleGetter(this, "CommandUtils",
                                   "resource:///modules/devtools/DeveloperToolbar.jsm");
 
-const EXPORTED_SYMBOLS = [ "Toolbox" ];
+this.EXPORTED_SYMBOLS = [ "Toolbox" ];
 
 /**
  * A "Toolbox" is the component that holds all the tools for one specific
@@ -30,7 +30,7 @@ const EXPORTED_SYMBOLS = [ "Toolbox" ];
  * @param {string} selectedTool
  *        Tool to select initially
  */
-function Toolbox(target, hostType, selectedTool) {
+this.Toolbox = function Toolbox(target, hostType, selectedTool) {
   this._target = target;
   this._toolPanels = new Map();
 
