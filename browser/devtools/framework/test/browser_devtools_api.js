@@ -26,7 +26,6 @@ function runTests(aTab) {
     label: "someLabel",
     build: function(iframeWindow, toolbox) {
       let panel = new DevToolPanel(iframeWindow, toolbox);
-      toolbox.on(toolId + "-ready", continueTests);
       return panel;
     },
   };
@@ -41,13 +40,24 @@ function runTests(aTab) {
 
   let target = TargetFactory.forTab(gBrowser.selectedTab);
 
+  function onNewToolbox(event, toolboxFromEvent) {
+    let toolBoxes = gDevTools.getToolboxes();
+    let tb = toolBoxes.get(gBrowser.selectedTab);
+    is(toolboxFromEvent, tb, "'toolbox-ready' event fired. Correct toolbox value.");
+    is(tb.target, target, "toolbox target is correct");
+    is(tb._host.hostTab, gBrowser.selectedTab, "toolbox host is correct");
+    tb.once(toolId + "-ready", continueTests);
+  }
+
+  function onToolboxClosed(event, tabFromEvent) {
+    is(tabFromEvent, gBrowser.selectedTab, "'toolbox-destroyed' event fired. Correct tab value.");
+    finishUp();
+  }
+
+
+  gDevTools.once("toolbox-ready", onNewToolbox);
+  gDevTools.once("toolbox-destroyed", onToolboxClosed);
   gDevTools.openToolbox(target, "bottom", toolId);
-
-  let toolBoxes = gDevTools.getToolboxes();
-
-  let tb = toolBoxes.get(gBrowser.selectedTab);
-  is(tb.target, target, "toolbox target is correct");
-  is(tb._host.hostTab, gBrowser.selectedTab, "toolbox host is correct");
 }
 
 function continueTests(event, panel) {
@@ -65,11 +75,10 @@ function continueTests(event, panel) {
   is(gDevTools.getToolDefinitions().has(toolId), false,
     "The tool is no longer registered");
 
-  finishUp(tb);
+  tb.destroy();
 }
 
-function finishUp(toolbox) {
-  toolbox.destroy();
+function finishUp() {
   toolbox = tempScope = null;
   gBrowser.removeCurrentTab();
   finish();

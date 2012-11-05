@@ -169,7 +169,12 @@ DevTools.prototype = {
 
     this._toolboxes.set(target.tab, tb);
     tb.once("destroyed", function() {
+      this.emit("toolbox-destroyed", target.tab);
       this._toolboxes.delete(target.tab);
+    }.bind(this));
+
+    tb.once("ready", function() {
+      this.emit("toolbox-ready", tb);
     }.bind(this));
 
     tb.open();
