@@ -16,13 +16,15 @@ Cu.import("resource:///modules/devtools/Toolbox.jsm");
 Cu.import("resource:///modules/devtools/Target.jsm");
 
 /**
- * DevTools is a singleton that represents a set of developer tools, it holds a
+ * DevTools is a class that represents a set of developer tools, it holds a
  * set of tools and keeps track of open toolboxes in the browser.
  */
 function DevTools() {
   this._tools = new Map();
   this._toolboxes = new Map();
 
+  // Because init() is called from browser.js's _delayedStartup() method we need
+  // to use bind in order to preserve the context of "this."
   this.init = this.init.bind(this);
 
   new EventEmitter(this);
@@ -62,7 +64,7 @@ DevTools.prototype = {
      * Register the set of default tools
      */
     for (let definition of defaultTools) {
-      gDevTools.registerTool(definition);
+      this.registerTool(definition);
     }
     this._addAllToolsToMenu(doc);
   },

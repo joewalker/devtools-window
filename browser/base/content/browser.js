@@ -1502,11 +1502,11 @@ var gBrowserInit = {
     // In certain scenarios it's possible for unload to be fired before onload,
     // (e.g. if the window is being closed after browser.js loads but before the
     // load completes). In that case, there's nothing to do here.
-    if (!gStartupRan)
+    if (!gStartupRan) {
       return;
+    }
 
-    if (!__lookupGetter__("gDevTools"))
-      gDevTools.destroy(window.document);
+    gDevTools.destroy(window.document);
 
     // First clean up services initialized in gBrowserInit.onLoad (or those whose
     // uninit methods don't depend on the services having been initialized).
