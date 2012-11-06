@@ -5,7 +5,7 @@
 
 "use strict";
 
-const EXPORTED_SYMBOLS = ["StyleEditor", "StyleEditorFlags", "StyleEditorManager"];
+this.EXPORTED_SYMBOLS = ["StyleEditor", "StyleEditorFlags"];
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
@@ -65,7 +65,7 @@ const TRANSITIONS_ENABLED = Services.prefs.getBoolPref(TRANSITIONS_PREF);
  * @see inputElement
  * @see StyleEditorChrome
  */
-function StyleEditor(aDocument, aStyleSheet)
+this.StyleEditor = function StyleEditor(aDocument, aStyleSheet)
 {
   assert(aDocument, "Argument 'aDocument' is required.");
 
@@ -1143,7 +1143,7 @@ StyleEditor.prototype = {
  *
  * @see StyleEditor.setFlag
  */
-let StyleEditorFlags = {
+this.StyleEditorFlags = {
   DISABLED:      "disabled",
   ERROR:         "error",
   IMPORTED:      "imported",

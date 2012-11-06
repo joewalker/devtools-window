@@ -7,6 +7,10 @@ const Cu = Components.utils;
 
 let toolbox;
 
+let tempScope = {};
+Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
+let TargetFactory = tempScope.TargetFactory;
+
 function test() {
   addTab("about:blank", function(aBrowser, aTab) {
     loadWebConsole(aTab);
@@ -16,10 +20,7 @@ function test() {
 function loadWebConsole(aTab) {
   ok(gDevTools, "gDevTools exists");
 
-  let target = {
-    type: gDevTools.TargetType.TAB,
-    value: gBrowser.selectedTab
-  };
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
   toolbox = gDevTools.openToolbox(target, "bottom", "webconsole");
   toolbox.once("webconsole-ready", checkToolLoading);
 }
@@ -41,10 +42,7 @@ function selectAndCheckById(id) {
 
 function testToggle() {
   toolbox.once("destroyed", function() {
-    let target = {
-      type: gDevTools.TargetType.TAB,
-      value: gBrowser.selectedTab
-    };
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
     toolbox = gDevTools.openToolbox(target, "bottom", "styleeditor");
     toolbox.once("styleeditor-ready", checkStyleEditorLoaded);
   }.bind(this));

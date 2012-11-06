@@ -9,7 +9,7 @@ const Cu = Components.utils;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 
-const EXPORTED_SYMBOLS = [ "Hosts" ];
+this.EXPORTED_SYMBOLS = [ "Hosts" ];
 
 /**
  * A toolbox host represents an object that contains a toolbox (e.g. the
@@ -20,7 +20,7 @@ const EXPORTED_SYMBOLS = [ "Hosts" ];
  * destroy() - destroy the host's UI
  */
 
-let Hosts = {
+this.Hosts = {
   "bottom": BottomHost,
   "side": SidebarHost,
   "window": WindowHost

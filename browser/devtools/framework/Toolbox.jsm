@@ -16,7 +16,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
 XPCOMUtils.defineLazyModuleGetter(this, "CommandUtils",
                                   "resource:///modules/devtools/DeveloperToolbar.jsm");
 
-const EXPORTED_SYMBOLS = [ "Toolbox" ];
+this.EXPORTED_SYMBOLS = [ "Toolbox" ];
 
 /**
  * A "Toolbox" is the component that holds all the tools for one specific
@@ -30,7 +30,7 @@ const EXPORTED_SYMBOLS = [ "Toolbox" ];
  * @param {string} selectedTool
  *        Tool to select initially
  */
-function Toolbox(target, hostType, selectedTool) {
+this.Toolbox = function Toolbox(target, hostType, selectedTool) {
   this._target = target;
   this._toolPanels = new Map();
 
@@ -84,7 +84,7 @@ Toolbox.prototype = {
 
   /**
    * Get/alter the target of a Toolbox so we're debugging something different.
-   * See TargetType for more details.
+   * See Target.jsm for more details.
    * TODO: Do we allow |toolbox.target = null;| ?
    */
   get target() {
@@ -311,7 +311,7 @@ Toolbox.prototype = {
   _createHost: function TBOX_createHost(hostType) {
     let hostTab = this._getHostTab();
     if (!Hosts[hostType]) {
-      throw new Error('Unknown host: '+ hostType);
+      throw new Error('Unknown hostType: '+ hostType);
     }
     let newHost = new Hosts[hostType](hostTab);
 
@@ -359,8 +359,8 @@ Toolbox.prototype = {
    * Get the most appropriate host tab, either the target or the current tab
    */
   _getHostTab: function TBOX_getHostTab() {
-    if (this._target.type == gDevTools.TargetType.TAB) {
-      return this._target.value;
+    if (!this._target.isRemote && !this._target.isChrome) {
+      return this._target.tab;
     } else {
       let win = Services.wm.getMostRecentWindow("navigator:browser");
       return win.gBrowser.selectedTab;

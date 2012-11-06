@@ -7,7 +7,7 @@
 
 const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
-const EXPORTED_SYMBOLS = ["DebuggerDefinition"];
+this.EXPORTED_SYMBOLS = ["DebuggerDefinition"];
 
 const STRINGS_URI = "chrome://browser/locale/devtools/debugger.properties";
 
@@ -24,7 +24,7 @@ XPCOMUtils.defineLazyGetter(this, "osString", function() {
   return Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
 });
 
-const DebuggerDefinition = {
+this.DebuggerDefinition = {
   id: "jsdebugger",
   key: l10n("open.commandkey"),
   accesskey: l10n("debuggerMenu.accesskey"),
@@ -35,14 +35,7 @@ const DebuggerDefinition = {
   label: l10n("ToolboxDebugger.label"),
 
   isTargetSupported: function(target) {
-    switch (target.type) {
-      case gDevTools.TargetType.TAB:
-        return true;
-      case gDevTools.TargetType.REMOTE:
-      case gDevTools.TargetType.CHROME:
-      default:
-        return false;
-    }
+    return !target.isRemote;
   },
 
   build: function(iframeWindow, toolbox) {
@@ -65,15 +58,11 @@ function DebuggerPanel(iframeWindow, toolbox) {
 
   new EventEmitter(this);
 
-  if (this.target.type == gDevTools.TargetType.TAB) {
-    this._ensureOnlyOneRunningDebugger();
-    if (!DebuggerServer.initialized) {
-      // Always allow connections from nsIPipe transports.
-      DebuggerServer.init(function() true);
-      DebuggerServer.addBrowserActors();
-    }
-  } else {
-    throw "Unsupported target";
+  this._ensureOnlyOneRunningDebugger();
+  if (!DebuggerServer.initialized) {
+    // Always allow connections from nsIPipe transports.
+    DebuggerServer.init(function() true);
+    DebuggerServer.addBrowserActors();
   }
 }
 

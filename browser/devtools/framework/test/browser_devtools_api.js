@@ -9,6 +9,8 @@ const toolId = "test-tool";
 let tempScope = {};
 Cu.import("resource:///modules/devtools/EventEmitter.jsm", tempScope);
 let EventEmitter = tempScope.EventEmitter;
+Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
+let TargetFactory = tempScope.TargetFactory;
 
 function test() {
   addTab("about:blank", function(aBrowser, aTab) {
@@ -37,14 +39,11 @@ function runTests(aTab) {
   is(gDevTools.getToolDefinitions().has(toolId), true,
     "The tool is registered");
 
-  let target = {
-    type: gDevTools.TargetType.TAB,
-    value: gBrowser.selectedTab
-  };
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
 
   gDevTools.openToolbox(target, "bottom", toolId);
 
-  let toolBoxes = gDevTools.getToolboxes(gBrowser.selectedTab);
+  let toolBoxes = gDevTools.getToolboxes();
 
   let tb = toolBoxes.get(gBrowser.selectedTab);
   is(tb.target, target, "toolbox target is correct");

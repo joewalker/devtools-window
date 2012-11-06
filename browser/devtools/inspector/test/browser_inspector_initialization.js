@@ -38,7 +38,7 @@ function startInspectorTests()
 
   ok(inspector, "Inspector instance is accessible");
   ok(inspector.isReady, "Inspector instance is ready");
-  is(inspector.target.value, gBrowser.selectedTab, "Valid target");
+  is(inspector.target.tab, gBrowser.selectedTab, "Valid target");
   ok(inspector.highlighter, "Highlighter is up");
 
   let p = doc.querySelector("p");

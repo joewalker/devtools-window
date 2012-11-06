@@ -13,7 +13,7 @@ Cu.import("resource:///modules/devtools/LayoutHelpers.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 
-var EXPORTED_SYMBOLS = ["Highlighter"];
+this.EXPORTED_SYMBOLS = ["Highlighter"];
 
 const PSEUDO_CLASSES = [":hover", ":active", ":focus"];
   // add ":visited" and ":link" after bug 713106 is fixed
@@ -72,14 +72,15 @@ const PSEUDO_CLASSES = [":hover", ":active", ":focus"];
 /**
  * Constructor.
  *
- * @param aTab Browser's tab.
+ * @param aTarget The inspection target.
  * @param aInspector Inspector panel.
  */
-function Highlighter(aTab, aInspector)
+this.Highlighter = function Highlighter(aTarget, aInspector)
 {
-  this.tab = aTab;
-  this.browser = aTab.linkedBrowser;
-  this.chromeDoc = aTab.ownerDocument;
+  this.target = aTarget;
+  this.tab = aTarget.tab;
+  this.browser = this.tab.linkedBrowser;
+  this.chromeDoc = this.tab.ownerDocument;
   this.chromeWin = this.chromeDoc.defaultView;
   this.inspector = aInspector
 

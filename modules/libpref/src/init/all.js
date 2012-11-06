@@ -3629,6 +3629,10 @@ pref("webgl.prefer-16bpp", false);
 pref("webgl.default-no-alpha", false);
 pref("webgl.force-layers-readback", false);
 
+// Stagefright prefs
+pref("stagefright.force-enabled", false);
+pref("stagefright.disabled", false);
+
 #ifdef XP_WIN
 // The default TCP send window on Windows is too small, and autotuning only occurs on receive
 pref("network.tcp.sendbuffer", 131072);
@@ -3817,6 +3821,12 @@ pref("dom.mozApps.maxLocalId", 1000);
 // they are handled separately. This pref is only read once at startup:
 // a restart is required to enable a new value.
 pref("network.activity.blipIntervalMilliseconds", 0);
+
+// If true, reuse the same global for everything loaded by the component loader
+// (JS components, JSMs, etc).  This saves memory, but makes it possible for
+// the scripts to interfere with each other.  A restart is required for this
+// to take effect.
+pref("jsloader.reuseGlobal", false);
 
 // When we're asked to take a screenshot, don't wait more than 2000ms for the
 // event loop to become idle before actually taking the screenshot.

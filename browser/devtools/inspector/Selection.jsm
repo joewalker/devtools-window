@@ -7,7 +7,7 @@
 const Cu = Components.utils;
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 
-const EXPORTED_SYMBOLS = ["Selection"];
+this.EXPORTED_SYMBOLS = ["Selection"];
 
 /**
  * API
@@ -57,7 +57,7 @@ const EXPORTED_SYMBOLS = ["Selection"];
  *    the ndoe change.
  *
  */
-function Selection(node=null, track={attributes:true,detached:true}) {
+this.Selection = function Selection(node=null, track={attributes:true,detached:true}) {
   new EventEmitter(this);
   this._onMutations = this._onMutations.bind(this);
   this.track = track;

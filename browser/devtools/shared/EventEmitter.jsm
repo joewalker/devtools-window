@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-var EXPORTED_SYMBOLS = ["EventEmitter"];
+this.EXPORTED_SYMBOLS = ["EventEmitter"];
 
 /**
  * EventEmitter.
@@ -11,7 +11,7 @@ var EXPORTED_SYMBOLS = ["EventEmitter"];
  *        If aObjectToExtend is not null, the public methods of EventEmitter
  *        are bound to the object.
  */
-function EventEmitter(aObjectToExtend) {
+this.EventEmitter = function EventEmitter(aObjectToExtend) {
   if (aObjectToExtend) {
     aObjectToExtend.on = this.on.bind(this);
     aObjectToExtend.off = this.off.bind(this);

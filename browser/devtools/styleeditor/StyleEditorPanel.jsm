@@ -4,7 +4,7 @@
 
 "use strict";
 
-const EXPORTED_SYMBOLS = [ "StyleEditorDefinition" ];
+this.EXPORTED_SYMBOLS = [ "StyleEditorDefinition" ];
 
 const Cu = Components.utils;
 const STRINGS_URI = "chrome://browser/locale/devtools/styleeditor.properties";
@@ -19,20 +19,20 @@ XPCOMUtils.defineLazyGetter(this, "_strings",
 /**
  * The external API allowing us to be registered with DevTools.jsm
  */
-const StyleEditorDefinition = {
+this.StyleEditorDefinition = {
   id: "styleeditor",
   key: l10n("open.commandkey"),
   accesskey: l10n("open.accesskey"),
   modifiers: "shift",
   label: l10n("ToolboxStyleEditor.label"),
   url: "chrome://browser/content/styleeditor.xul",
-  build: function(iframeWindow, toolbox) {
-    let target = toolbox.target;
-    if (target.type !== "tab") {
-      throw new Error("Unsupported target type: " + target.type);
-    }
 
-    iframeWindow.init(target.value.linkedBrowser.contentWindow);
+  isTargetSupported: function(target) {
+    return !target.isRemote && !target.isChrome;
+  },
+
+  build: function(iframeWindow, toolbox) {
+    iframeWindow.init(toolbox.target.tab.linkedBrowser.contentWindow);
     return iframeWindow;
   }
 };

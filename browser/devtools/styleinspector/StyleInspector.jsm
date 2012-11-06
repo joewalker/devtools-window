@@ -14,9 +14,9 @@ Cu.import("resource:///modules/devtools/CssRuleView.jsm");
 
 // This module doesn't currently export any symbols directly, it only
 // registers inspector tools.
-var EXPORTED_SYMBOLS = ["RuleViewTool", "ComputedViewTool"];
+this.EXPORTED_SYMBOLS = ["RuleViewTool", "ComputedViewTool"];
 
-function RuleViewTool(aInspector, aWindow, aIFrame)
+this.RuleViewTool = function RVT_RuleViewTool(aInspector, aWindow, aIFrame)
 {
   this.inspector = aInspector;
   this.doc = aWindow.document;
@@ -112,7 +112,7 @@ RuleViewTool.prototype = {
   }
 }
 
-function ComputedViewTool(aInspector, aWindow, aIFrame)
+this.ComputedViewTool = function CVT_ComputedViewTool(aInspector, aWindow, aIFrame)
 {
   this.inspector = aInspector;
   this.window = aWindow;

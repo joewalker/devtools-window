@@ -4,7 +4,7 @@
 
 "use strict";
 
-const EXPORTED_SYMBOLS = [ "DeveloperToolbar", "CommandUtils" ];
+this.EXPORTED_SYMBOLS = [ "DeveloperToolbar", "CommandUtils" ];
 
 const NS_XHTML = "http://www.w3.org/1999/xhtml";
 const XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
@@ -37,7 +37,7 @@ XPCOMUtils.defineLazyGetter(this, "prefBranch", function() {
 /**
  * A collection of utilities to help working with commands
  */
-const CommandUtils = {
+this.CommandUtils = {
   /**
    * Read a toolbarSpec from preferences
    * @param aPref The name of the preference to read
@@ -129,7 +129,7 @@ XPCOMUtils.defineLazyGetter(this, "isLinux", function () {
  * @param aChromeWindow The browser window to which this toolbar is attached
  * @param aToolbarElement See browser.xul:<toolbar id="developer-toolbar">
  */
-function DeveloperToolbar(aChromeWindow, aToolbarElement)
+this.DeveloperToolbar = function DeveloperToolbar(aChromeWindow, aToolbarElement)
 {
   this._chromeWindow = aChromeWindow;
 
