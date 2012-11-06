@@ -23,9 +23,7 @@ function loadTab(url, callback) {
 }
 
 function openProfiler(tab, callback) {
-  gDevTools.openDefaultToolbox(tab, "jsprofiler");
-
-  let tb = gDevTools.getToolboxForTarget(tab);
+  let tb = gDevTools.openToolboxForTab(tab, "jsprofiler");
   tb.once("jsprofiler-ready", callback);
 }
 
