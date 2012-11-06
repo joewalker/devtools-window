@@ -5,20 +5,59 @@
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 
 <?xml-stylesheet href="chrome://browser/skin/" type="text/css"?>
-<?xml-stylesheet href="chrome://browser/skin/devtools/common.css" type="text/css"?>
+<?xml-stylesheet href="chrome://browser/skin/devtools/common.css"?>
+<?xml-stylesheet href="chrome://browser/skin/devtools/splitview.css"?>
+<?xml-stylesheet href="chrome://browser/content/profiler.css"?>
 
 <window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
-  <vbox flex="1">
-    <toolbar class="devtools-toolbar" mode="full">
-      <toolbarbutton id="profiler-toggle"
-                     class="devtools-toolbarbutton"
-                     label="Start"
-                     disabled="true"/>
-    </toolbar>
+  <box flex="1" id="profiler-chrome" class="splitview-root">
+    <box flex="1" class="splitview-controller">
+      <box class="splitview-nav-container" width="180px">
+        <vbox flex="1">
+          <vbox flex="1">
+            <ol class="splitview-nav">
+              <li class="splitview-active" flex="1">
+                <h1 class="profile-name">
+                  <a href="#">Profile 1</a>
+                </h1>
+              </li>
+            </ol>
+          </vbox>
 
-    <vbox flex="1">
-      <iframe id="profiler-cleo"
-        src="devtools/cleopatra.html" flex="1"></iframe>
-    </vbox>
-  </vbox>
+          <toolbar class="devtools-toolbar" mode="full">
+            <toolbarbutton id="profiler-new"
+                           class="devtools-toolbarbutton"
+                           label="New"
+                           disabled="true"/>
+            <toolbarbutton id="profiler-import"
+                           class="devtools-toolbarbutton"
+                           label="Import"
+                           disabled="true"/>
+          </toolbar>
+        </vbox>
+      </box>
+
+      <box class="splitview-side-details" flex="1">
+        <vbox flex="1" align="center">
+          <box flex="1" align="center">
+            <p id="profiler-start-wrapper">
+              Click
+              <button id="profiler-start" disabled="true" label="Start"/>
+              to start profiling.
+            </p>
+
+            <p id="profiler-stop-wrapper" hidden="true">
+              Click
+              <button id="profiler-stop" label="Stop"/>
+              to stop profiling.
+            </p>
+          </box>
+        </vbox>
+        <vbox flex="1" hidden="true">
+          <iframe id="profiler-cleo"
+            src="devtools/cleopatra.html" flex="1"></iframe>
+        </vbox>
+      </box>
+    </box>
+  </box>
 </window>

@@ -54,9 +54,13 @@ function ProfilerPanel(frame, toolbox) {
   new EventEmitter(this);
 
   this.controller.connect(function onConnect() {
-    let toggle = this.document.getElementById("profiler-toggle");
-    toggle.addEventListener("click", this.onToggle.bind(this), false);
-    toggle.removeAttribute("disabled");
+    let stop = this.document.getElementById("profiler-stop");
+    stop.addEventListener("click", this.onToggle.bind(this), false);
+
+    let start = this.document.getElementById("profiler-start");
+    start.addEventListener("click", this.onToggle.bind(this), false);
+    start.removeAttribute("disabled");
+
     this.isReady = true;
     this.emit("ready");
   }.bind(this));
@@ -99,14 +103,11 @@ ProfilerPanel.prototype = {
   },
 
   onToggle: function PP_onToggle() {
-    let el = this.document.getElementById("profiler-toggle");
+    let start = this.document.getElementById("profiler-start-wrapper");
+    let stop = this.document.getElementById("profiler-stop-wrapper");
     let iframe = this.document.getElementById("profiler-cleo");
 
     this.controller.isActive(function (err, isActive) {
-      if (err) {
-        dump("[LOG] Error on profiler isActive: " + err.message + "\n");
-      }
-
       if (isActive) {
         this.controller.stop(function (err, data) {
           if (err) {
@@ -115,7 +116,10 @@ ProfilerPanel.prototype = {
           }
 
           this.parseProfileData(data);
-          el.setAttribute("label", "Start");
+
+          stop.setAttribute("hidden", true);
+          start.removeAttribute("hidden");
+
           this.emit("stopped");
         }.bind(this));
 
@@ -128,7 +132,9 @@ ProfilerPanel.prototype = {
           return; // TODO
         }
 
-        el.setAttribute("label", "Stop");
+        start.setAttribute("hidden", true);
+        stop.removeAttribute("hidden");
+
         this.emit("started");
       }.bind(this));
     }.bind(this));
