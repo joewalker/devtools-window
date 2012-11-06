@@ -29,6 +29,7 @@ this.InspectorDefinition = {
   id: "inspector",
   accesskey: l10n("inspector.accesskey"),
   key: l10n("inspector.commandkey"),
+  ordinal: 2,
   modifiers: osString == "Darwin" ? "accel,alt" : "accel,shift",
   icon: "chrome://browser/skin/devtools/tools-icons-small.png",
   url: "chrome://browser/content/devtools/inspector/inspector.xul",
