@@ -105,6 +105,8 @@ ProfilerPanel.prototype = {
   onToggle: function PP_onToggle() {
     let start = this.document.getElementById("profiler-start-wrapper");
     let stop = this.document.getElementById("profiler-stop-wrapper");
+    let control = this.document.getElementById("profiler-control");
+    let report = this.document.getElementById("profiler-report");
     let iframe = this.document.getElementById("profiler-cleo");
 
     this.controller.isActive(function (err, isActive) {
@@ -119,6 +121,9 @@ ProfilerPanel.prototype = {
 
           stop.setAttribute("hidden", true);
           start.removeAttribute("hidden");
+
+          control.setAttribute("hidden", true);
+          report.removeAttribute("hidden");
 
           this.emit("stopped");
         }.bind(this));
