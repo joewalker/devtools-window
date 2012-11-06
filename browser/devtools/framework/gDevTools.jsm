@@ -27,6 +27,9 @@ this.DevTools = function DevTools() {
   // to use bind in order to preserve the context of "this."
   this.init = this.init.bind(this);
 
+  // Bind _updateMenuCheckbox() to preserve context.
+  this._updateMenuCheckbox = this._updateMenuCheckbox.bind(this);
+
   new EventEmitter(this);
 }
 
@@ -67,6 +70,9 @@ DevTools.prototype = {
       this.registerTool(definition);
     }
     this._addAllToolsToMenu(doc);
+
+    let tabContainer = doc.getElementById("tabbrowser-tabs")
+    tabContainer.addEventListener("TabSelect", this._updateMenuCheckbox, false);
   },
 
   /**
@@ -171,10 +177,12 @@ DevTools.prototype = {
     tb.once("destroyed", function() {
       this.emit("toolbox-destroyed", target.tab);
       this._toolboxes.delete(target.tab);
+      this._updateMenuCheckbox();
     }.bind(this));
 
     tb.once("ready", function() {
       this.emit("toolbox-ready", tb);
+      this._updateMenuCheckbox();
     }.bind(this));
 
     tb.open();
@@ -438,6 +446,17 @@ DevTools.prototype = {
     }
   },
 
+  _updateMenuCheckbox: function DT_updateMenuCheckbox() {
+    let win = Services.wm.getMostRecentWindow("navigator:browser");
+    let tab = win.gBrowser.selectedTab;
+    let appmenuitem = win.document.getElementById("appmenu_devToolbox");
+    let menuitem = win.document.getElementById("menu_devToolbox");
+    let hasToolbox = !!this.getToolboxForTarget(tab);
+
+    appmenuitem.setAttribute("checked", hasToolbox);
+    menuitem.setAttribute("checked", hasToolbox);
+  },
+
   /**
    * Add the menuitem for a tool to all open browser windows.
    *
@@ -522,6 +541,9 @@ DevTools.prototype = {
       }
     }
 
+    let tabContainer = doc.getElementById("tabbrowser-tabs")
+    tabContainer.removeEventListener("TabSelect",
+                                     this._updateMenuCheckbox, false);
     let numWindows = 0;
     this._forEachBrowserWindow(function(win) {
       numWindows++;
