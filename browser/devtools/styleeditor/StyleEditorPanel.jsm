@@ -22,6 +22,7 @@ XPCOMUtils.defineLazyGetter(this, "_strings",
 this.StyleEditorDefinition = {
   id: "styleeditor",
   key: l10n("open.commandkey"),
+  ordinal: 3,
   accesskey: l10n("open.accesskey"),
   modifiers: "shift",
   label: l10n("ToolboxStyleEditor.label"),

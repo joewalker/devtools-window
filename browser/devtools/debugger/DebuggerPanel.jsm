@@ -29,6 +29,7 @@ this.DebuggerDefinition = {
   key: l10n("open.commandkey"),
   accesskey: l10n("debuggerMenu.accesskey"),
   modifiers: osString == "Darwin" ? "accel,alt" : "accel,shift",
+  ordinal: 1,
   killswitch: "devtools.debugger.enabled",
   icon: "chrome://browser/skin/devtools/tools-icons-small.png",
   url: "chrome://browser/content/debugger.xul",

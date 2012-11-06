@@ -38,6 +38,7 @@ this.WebConsoleDefinition = {
   key: l10n("cmd.commandkey"),
   accesskey: l10n("webConsoleCmd.accesskey"),
   modifiers: osString == "Darwin" ? "accel,alt" : "accel,shift",
+  ordinal: 0,
   icon: "chrome://browser/skin/devtools/webconsole-tool-icon.png",
   url: "chrome://browser/content/devtools/webconsole.xul",
   label: l10n("ToolboxWebconsole.label"),

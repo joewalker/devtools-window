@@ -224,6 +224,11 @@ Toolbox.prototype = {
     radio.className = "toolbox-tab devtools-tab";
     radio.id = "toolbox-tab-" + id;
     radio.setAttribute("toolid", id);
+
+    let ordinal = (typeof toolDefinition.ordinal == "number") ?
+                  toolDefinition.ordinal : 99;
+    radio.setAttribute("ordinal", ordinal);
+
     radio.addEventListener("command", function(id) {
       this.selectTool(id);
     }.bind(this, id));
