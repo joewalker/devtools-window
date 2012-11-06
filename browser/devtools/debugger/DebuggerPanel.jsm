@@ -50,12 +50,20 @@ function DebuggerPanel(iframeWindow, toolbox) {
   this._controller = iframeWindow.DebuggerController;
   this._bkp = this._controller.Breakpoints;
 
-  let onDebuggerLoaded = function() {
+  let onDebuggerLoaded = function () {
     iframeWindow.removeEventListener("Debugger:Loaded", onDebuggerLoaded, true);
     this.setReady();
   }.bind(this);
 
+  let onDebuggerConnected = function () {
+    iframeWindow.removeEventListener("Debugger:Connected",
+      onDebuggerConnected, true);
+    this.emit("connected");
+  }.bind(this);
+
   iframeWindow.addEventListener("Debugger:Loaded", onDebuggerLoaded, true);
+  iframeWindow.addEventListener("Debugger:Connected",
+    onDebuggerConnected, true);
 
   new EventEmitter(this);
 
