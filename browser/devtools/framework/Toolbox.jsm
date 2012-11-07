@@ -9,6 +9,7 @@ const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 Cu.import("resource:///modules/devtools/ToolboxHosts.jsm");
+Cu.import("resource:///modules/devtools/gcli.jsm");
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 
 XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
