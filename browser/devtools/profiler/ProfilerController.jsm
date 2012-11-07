@@ -20,7 +20,6 @@ XPCOMUtils.defineLazyGetter(this, "DebuggerServer", function () {
 
 function ProfilerConnection() {
   if (!DebuggerServer.initialized) {
-    dump("[LOG] Initializing DebuggerServer\n");
     DebuggerServer.init();
     DebuggerServer.addBrowserActors();
   }
@@ -33,13 +32,10 @@ ProfilerConnection.prototype = {
   actor: null,
 
   connect: function PCn_connect(aCallback) {
-    dump("[LOG] Connecting...\n");
     let client = this.client;
 
     client.connect(function (aType, aTraits) {
-      dump("[LOG] Connected! Listing tabs...\n");
       client.listTabs(function (aResponse) {
-        dump("[LOG] Got dem tabs! Actor: " + aResponse.profilerActor + "\n");
         this.actor = aResponse.profilerActor;
         aCallback();
       }.bind(this));

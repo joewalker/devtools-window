@@ -110,11 +110,18 @@ ProfilerPanel.prototype = {
     let iframe = this.document.getElementById("profiler-cleo");
 
     this.controller.isActive(function (err, isActive) {
+      if (err) {
+        // FIXME: Error handling.
+        Cu.reportError("ProfilerController.isActive: " + err.message);
+        return;
+      }
+
       if (isActive) {
         this.controller.stop(function (err, data) {
           if (err) {
-            dump("[LOG] Error on profiler stop: " + err.message + "\n");
-            return; // TODO
+            // FIXME: Error handling.
+            Cu.reportError("ProfilerController.stop: " + err.message);
+            return;
           }
 
           this.parseProfileData(data);
@@ -133,8 +140,9 @@ ProfilerPanel.prototype = {
 
       this.controller.start(function (err) {
         if (err) {
-          dump("[LOG] Error on profiler start: " + err.message + "\n");
-          return; // TODO
+          // FIXME: Error handling.
+          Cu.reportError("ProfilerController.start: " + err.message);
+          return;
         }
 
         start.setAttribute("hidden", true);
