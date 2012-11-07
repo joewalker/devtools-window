@@ -453,7 +453,9 @@ DevTools.prototype = {
     let menuitem = win.document.getElementById("menu_devToolbox");
     let hasToolbox = !!this.getToolboxForTarget(tab);
 
-    appmenuitem.setAttribute("checked", hasToolbox);
+    if (appmenuitem) {
+      appmenuitem.setAttribute("checked", hasToolbox);
+    }
     menuitem.setAttribute("checked", hasToolbox);
   },
 
