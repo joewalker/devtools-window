@@ -9,12 +9,18 @@ const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 Cu.import("resource:///modules/devtools/ToolboxHosts.jsm");
+Cu.import("resource:///modules/devtools/gcli.jsm");
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 
 XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
                                   "resource:///modules/devtools/gDevTools.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "CommandUtils",
                                   "resource:///modules/devtools/DeveloperToolbar.jsm");
+
+Components.utils.import("resource://gre/modules/devtools/Require.jsm");
+
+let Requisition = require('gcli/cli').Requisition;
+let CommandOutputManager = require('gcli/canon').CommandOutputManager;
 
 this.EXPORTED_SYMBOLS = [ "Toolbox" ];
 
@@ -189,15 +195,10 @@ Toolbox.prototype = {
    *        The iframe to contain the buttons
    */
   _buildButtons: function TBOX_buildButtons(frame) {
-    let window = frame.ownerDocument.defaultView;
-    // FIXME: Once we move the DeveloperToolbar into the Devtools Window we
-    // might not need this check.
-    if (!window.DeveloperToolbar || !window.DeveloperToolbar.display) {
-      return;
-    }
-
     let toolbarSpec = CommandUtils.getCommandbarSpec("devtools.toolbox.toolbarspec");
-    let requisition = window.DeveloperToolbar.display.requisition;
+    let environment = { chromeDocument: frame.ownerDocument };
+    let requisition = new Requisition(environment);
+    requisition.commandOutputManager = new CommandOutputManager();
 
     let buttons = CommandUtils.createButtons(toolbarSpec, this.doc, requisition);
 
