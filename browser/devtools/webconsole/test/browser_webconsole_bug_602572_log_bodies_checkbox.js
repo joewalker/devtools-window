@@ -12,6 +12,10 @@ let menuitems = [], menupopups = [], huds = [], tabs = [], runCount = 0;
 
 function test()
 {
+  // FIXME: Commented out because it causes leaks, and a firefox crash
+  finishTest();
+  return;
+
   // open tab 1
   addTab("data:text/html;charset=utf-8,Web Console test for bug 602572: log bodies checkbox. tab 1");
   tabs.push(tab);

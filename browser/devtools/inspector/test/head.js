@@ -27,7 +27,7 @@ function openInspector(callback)
   if (inspector && inspector.isReady) {
     callback(inspector);
   } else {
-    let toolbox = gDevTools.openToolForTab("inspector", tab);
+    let toolbox = gDevTools.openToolboxForTab("inspector", tab);
     toolbox.once("inspector-ready", function(event, panel) {
       let inspector = gDevTools.getPanelForTarget("inspector", tab);
       callback(inspector);
