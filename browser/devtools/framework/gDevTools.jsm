@@ -29,6 +29,9 @@ this.DevTools = function DevTools() {
   // to use bind in order to preserve the context of "this."
   this.init = this.init.bind(this);
 
+  // destroy() is an observer's handler so we need to preserve context.
+  this.destroy = this.destroy.bind(this);
+
   // Bind _updateMenuCheckbox() to preserve context.
   this._updateMenuCheckbox = this._updateMenuCheckbox.bind(this);
 
@@ -75,6 +78,8 @@ DevTools.prototype = {
 
     let tabContainer = doc.getElementById("tabbrowser-tabs")
     tabContainer.addEventListener("TabSelect", this._updateMenuCheckbox, false);
+
+    Services.obs.addObserver(this.destroy, "quit-application-granted", false);
   },
 
   /**
@@ -452,8 +457,19 @@ DevTools.prototype = {
     }
   },
 
+  /**
+   * Update the "Toggle Toolbox" checkbox in the developer tools menu. This is
+   * called when a toolbox is created or destroyed.
+   */
   _updateMenuCheckbox: function DT_updateMenuCheckbox() {
     let win = Services.wm.getMostRecentWindow("navigator:browser");
+
+    // In the case of a browser window being closed the checkbox no longer
+    // exists so we bail out.
+    if (!win) {
+      return;
+    }
+
     let tab = win.gBrowser.selectedTab;
     let appmenuitem = win.document.getElementById("appmenu_devToolbox");
     let menuitem = win.document.getElementById("menu_devToolbox");
@@ -521,9 +537,15 @@ DevTools.prototype = {
   },
 
   /**
-   * Destroy this DevTools instance.
+   * Called on browser unload to remove menu entries, toolboxes and event
+   * listeners from the closed browser window.
+   *
+   * @param  {XULWindow} win
+   *         The window containing the menu entr
    */
-  destroy: function DT_destroy(doc) {
+  forgetWindow: function DT_forgetWindow(win) {
+    let doc = win.document;
+
     let nodeids = [
       "Tools:",
       "key_",
@@ -544,7 +566,7 @@ DevTools.prototype = {
 
     // Destroy toolboxes for closed window
     for (let [target, toolbox] of this._toolboxes) {
-      if (target.ownerDocument.defaultView == window) {
+      if (target.ownerDocument.defaultView == win) {
         toolbox.destroy();
       }
     }
@@ -552,15 +574,17 @@ DevTools.prototype = {
     let tabContainer = doc.getElementById("tabbrowser-tabs")
     tabContainer.removeEventListener("TabSelect",
                                      this._updateMenuCheckbox, false);
-    let numWindows = 0;
-    this._forEachBrowserWindow(function(win) {
-      numWindows++;
-    });
-    if(numWindows == 0) {
-      delete this._tools;
-      delete this._toolboxes;
-    }
-  }
+  },
+
+  /**
+   * All browser windows have been closed, tidy up remaining objects.
+   */
+  destroy: function() {
+    Services.obs.removeObserver(this.destroy, "quit-application-granted");
+
+    delete this._tools;
+    delete this._toolboxes;
+  },
 };
 
 /**
