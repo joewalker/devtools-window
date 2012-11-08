@@ -15,6 +15,8 @@ Cu.import("resource:///modules/devtools/ToolDefinitions.jsm");
 Cu.import("resource:///modules/devtools/Toolbox.jsm");
 Cu.import("resource:///modules/devtools/Target.jsm");
 
+const FORBIDDEN_IDS = new Set("toolbox", "");
+
 /**
  * DevTools is a class that represents a set of developer tools, it holds a
  * set of tools and keeps track of open toolboxes in the browser.
@@ -100,6 +102,10 @@ DevTools.prototype = {
    */
   registerTool: function DT_registerTool(toolDefinition) {
     let toolId = toolDefinition.id;
+
+    if (!toolId || FORBIDDEN_IDS.has(toolId)) {
+      throw new Error("Invalid definition.id");
+    }
 
     toolDefinition.killswitch = toolDefinition.killswitch ||
       "devtools." + toolId + ".enabled";

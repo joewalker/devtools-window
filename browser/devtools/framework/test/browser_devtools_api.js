@@ -46,7 +46,7 @@ function runTests(aTab) {
     is(toolboxFromEvent, tb, "'toolbox-ready' event fired. Correct toolbox value.");
     is(tb.target, target, "toolbox target is correct");
     is(tb._host.hostTab, gBrowser.selectedTab, "toolbox host is correct");
-    tb.once(toolId + "-ready", continueTests);
+    gDevTools.once(toolId + "-ready", continueTests);
   }
 
   function onToolboxClosed(event, tabFromEvent) {
@@ -57,13 +57,17 @@ function runTests(aTab) {
 
   gDevTools.once("toolbox-ready", onNewToolbox);
   gDevTools.once("toolbox-destroyed", onToolboxClosed);
-  gDevTools.openToolbox(target, "bottom", toolId);
+
+  executeSoon(function() {
+    gDevTools.openToolbox(target, "bottom", toolId);
+  });
 }
 
-function continueTests(event, panel) {
-  let tb = panel.toolbox;
+function continueTests(event, toolbox, panel) {
+  is (toolbox, gDevTools.getToolboxes().get(gBrowser.selectedTab), "{toolId}-ready event received, with correct toolbox value");
+  is (panel, toolbox.getToolPanels().get(toolId), "panel value is correct");
 
-  is(tb.currentToolId, toolId, "toolbox _currentToolId is correct");
+  is(toolbox.currentToolId, toolId, "toolbox _currentToolId is correct");
 
   let toolDefinitions = gDevTools.getToolDefinitions();
   is(toolDefinitions.has(toolId), true, "The tool is in gDevTools");
@@ -75,7 +79,7 @@ function continueTests(event, panel) {
   is(gDevTools.getToolDefinitions().has(toolId), false,
     "The tool is no longer registered");
 
-  tb.destroy();
+  toolbox.destroy();
 }
 
 function finishUp() {
