@@ -19,7 +19,8 @@ Cu.import("resource:///modules/devtools/EventEmitter.jsm");
  * @param {Node} a <tabbox> node.
  * @param {ToolPanel} Related ToolPanel instance.
  */
-this.InspectorSidebar = function InspectorSidebar(tabbox, panel) {
+this.InspectorSidebar = function InspectorSidebar(tabbox, panel)
+{
   this.tabbox = tabbox;
   this.panelDoc = this.tabbox.ownerDocument;
   this.panel = panel;
@@ -82,7 +83,7 @@ InspectorSidebar.prototype = {
   /**
    * Clean-up.
    */
-  destroy: function() {
+  destroy: function InspectorSidebar_destroy() {
     this.hide();
     this.tabbox = null;
     this.panelDoc = null;
