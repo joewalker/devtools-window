@@ -30,13 +30,15 @@ InspectorSidebar.prototype = {
    * Register a view. A view is a document.
    * The document must have a title, which will be used as the name of the tab.
    *
+   * @param {string} view id
    * @param {string} url
    */
-  addView: function InspectorSidebar_addView(url) {
+  addView: function InspectorSidebar_addView(id, url) {
     let tab = this.panelDoc.createElement("tab");
     this.tabbox.tabs.appendChild(tab);
 
     let iframe = this.panelDoc.createElement("iframe");
+    iframe.className = "iframe-" + id;
     iframe.setAttribute("flex", "1");
     iframe.setAttribute("src", url);
 
