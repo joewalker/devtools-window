@@ -38,29 +38,7 @@ this.DevTools = function DevTools() {
   new EventEmitter(this);
 }
 
-/**
- * The developer tools can be 'hosted' either embedded in a browser window, or
- * in a separate tab. Other hosts may be possible here, like a separate XUL
- * window.
- *
- * A Toolbox host is an object with this shape:
- * {
- *   type: DevTools.HostType.[BOTTOM|TAB],
- *   element: ...
- * }
- *
- * Definition of the 'element' property is left as an exercise to the
- * implementor.
- */
-DevTools.HostType = {
-  BOTTOM: "bottom",
-  SIDE: "side",
-  WINDOW: "window"
-};
-
 DevTools.prototype = {
-  HostType: DevTools.HostType,
-
   /**
    * Initialize the DevTools class.
    *
@@ -168,7 +146,7 @@ DevTools.prototype = {
    *
    * @param {Target} target
    *         The target the toolbox will debug
-   * @param {DevTools.HostType} hostType
+   * @param {Toolbox.HostType} hostType
    *        The type of host (bottom, top, side)
    * @param {string} defaultToolId
    *        The id of the initial tool to show

@@ -1016,6 +1016,7 @@ pref("devtools.toolbox.sidebar.width", 500);
 pref("devtools.toolbox.host", "bottom");
 pref("devtools.toolbox.selectedTool", "webconsole");
 pref("devtools.toolbox.toolbarspec", '["tilt toggle","scratchpad open","screenshot"]');
+pref("devtools.toolbox.sideEnabled", false);
 
 // Enable the Inspector
 pref("devtools.inspector.enabled", true);
