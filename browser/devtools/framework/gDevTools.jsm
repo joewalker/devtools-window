@@ -522,6 +522,10 @@ DevTools.prototype = {
    *         The window containing the menu entr
    */
   forgetWindow: function DT_forgetWindow(win) {
+    if (!this._tools) {
+      return;
+    }
+
     let doc = win.document;
 
     let nodeids = [
