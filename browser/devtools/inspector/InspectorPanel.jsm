@@ -145,16 +145,6 @@ InspectorPanel.prototype = {
   },
 
   /**
-   * Returns true if a given sidebar panel is currently visible.
-   * @param string aPanelName
-   *        The panel name as registered with registerSidebar
-   */
-  isSidePanelVisible: function InspectorPanel_isPanelVisible(aPanelName) {
-    return this.sidebar.visible &&
-           this.sidebar.activePanel === aPanelName;
-  },
-
-  /**
    * Destroy the inspector.
    */
   destroy: function InspectorPanel__destroy() {
@@ -163,6 +153,9 @@ InspectorPanel.prototype = {
       this.highlighter.off("unlocked", this.updateInspectorButton);
       this.highlighter.destroy();
     }
+
+    this.sidebar.destroy();
+    this.sidebar = null;
 
     this.nodemenu.removeEventListener("popupshowing", this._setupNodeMenu, true);
     this.nodemenu.removeEventListener("popuphiding", this._resetNodeMenu, true);

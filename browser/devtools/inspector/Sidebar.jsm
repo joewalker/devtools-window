@@ -83,7 +83,14 @@ InspectorSidebar.prototype = {
    * Clean-up.
    */
   destroy: function() {
-    this.hide();
+    while (this.tabbox.tabpanels.hasChildNodes()) {
+      this.tabbox.tabpanels.removeChild(this.tabbox.tabpanels.firstChild);
+    }
+
+    while (this.tabbox.tabs.hasChildNodes()) {
+      this.tabbox.tabs.removeChild(this.tabbox.tabs.firstChild);
+    }
+
     this.tabbox = null;
     this.panelDoc = null;
     this.panel = null;
