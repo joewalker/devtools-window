@@ -4,61 +4,65 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
 
-<?xml-stylesheet href="chrome://browser/skin/" type="text/css"?>
+<?xml-stylesheet href="chrome://global/skin/global.css"?>
 <?xml-stylesheet href="chrome://browser/skin/devtools/common.css"?>
 <?xml-stylesheet href="chrome://browser/skin/devtools/splitview.css"?>
+<?xml-stylesheet href="chrome://browser/content/splitview.css"?>
 <?xml-stylesheet href="chrome://browser/content/profiler.css"?>
 
 <window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
   <box flex="1" id="profiler-chrome" class="splitview-root">
-    <box flex="1" class="splitview-controller">
-      <box class="splitview-nav-container" width="180px">
-        <vbox flex="1">
-          <vbox flex="1">
-            <ol class="splitview-nav">
-              <li class="splitview-active" flex="1">
-                <h1 class="profile-name">
-                  <a href="#">Profile 1</a>
-                </h1>
-              </li>
-            </ol>
-          </vbox>
+    <box class="splitview-controller" width="180px">
+      <box class="splitview-main"></box>
 
-          <toolbar class="devtools-toolbar" mode="full">
-            <toolbarbutton id="profiler-new"
-                           class="devtools-toolbarbutton"
-                           label="New"
-                           disabled="true"/>
-            <toolbarbutton id="profiler-import"
-                           class="devtools-toolbarbutton"
-                           label="Import"
-                           disabled="true"/>
-          </toolbar>
-        </vbox>
-      </box>
+      <box class="splitview-nav-container">
+        <ol class="splitview-nav" id="profiles-list">
+          <!-- Example:
+          <li class="splitview-active">
+            <h1 class="profile-name">Profile 1</h1>
+          </li>
+          -->
+        </ol>
 
-      <box class="splitview-side-details" flex="1">
-        <vbox flex="1" align="center" id="profiler-control">
-          <box flex="1" align="center">
-            <p id="profiler-start-wrapper">
-              Click
-              <button id="profiler-start" disabled="true" label="Start"/>
-              to start profiling.
-            </p>
+        <spacer flex="1"/>
 
-            <p id="profiler-stop-wrapper" hidden="true">
-              Click
-              <button id="profiler-stop" label="Stop"/>
-              to stop profiling.
-            </p>
-          </box>
-        </vbox>
+        <toolbar class="devtools-toolbar" mode="full">
+          <toolbarbutton id="profiler-create"
+                         class="devtools-toolbarbutton"
+                         label="New"
+                         disabled="true"/>
 
-        <vbox flex="1" hidden="true" id="profiler-report">
-          <iframe id="profiler-cleo"
-            src="devtools/cleopatra.html" flex="1"></iframe>
-        </vbox>
-      </box>
+          <!-- TODO: Export/import feature.
+          <toolbarbutton id="profiler-import"
+                         class="devtools-toolbarbutton"
+                         label="Import"
+                         disabled="true"/>
+          -->
+        </toolbar>
+      </box> <!-- splitview-nav-container -->
+    </box> <!-- splitview-controller -->
+
+    <box flex="1">
+      <vbox flex="1" align="center" id="profiler-control">
+        <spacer flex="1"/>
+        <p id="profiler-start-wrapper">
+          Click
+          <button id="profiler-start" disabled="true" label="Start"/>
+          to start profiling.
+        </p>
+
+        <p id="profiler-stop-wrapper" hidden="true">
+          Click
+          <button id="profiler-stop" label="Stop"/>
+          to stop profiling.
+        </p>
+        <spacer flex="1"/>
+      </vbox>
+
+      <vbox flex="1" hidden="true" id="profiler-report">
+        <iframe id="profiler-cleo"
+          src="devtools/cleopatra.html" flex="1"></iframe>
+      </vbox>
     </box>
   </box>
 </window>

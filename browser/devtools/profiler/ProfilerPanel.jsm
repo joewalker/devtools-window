@@ -51,9 +51,18 @@ function ProfilerPanel(frame, toolbox) {
   this.target = toolbox.target;
   this.controller = new ProfilerController();
 
+  this._profiles = {};
+  this._uid = 0;
+
   new EventEmitter(this);
 
   this.controller.connect(function onConnect() {
+    this.switchToProfile(this.createProfile());
+
+    let create = this.document.getElementById("profiler-create");
+    create.addEventListener("click", this.createProfile.bind(this), false);
+    create.removeAttribute("disabled");
+
     let stop = this.document.getElementById("profiler-stop");
     stop.addEventListener("click", this.onToggle.bind(this), false);
 
@@ -67,10 +76,48 @@ function ProfilerPanel(frame, toolbox) {
 }
 
 ProfilerPanel.prototype = {
-  destroy: function PP_destroy() {
-    // FIXME: Need an actualt destroy function that closes
-    // connections and all that.
-    this.emit("destroyed");
+  _uid: null,
+  _activeUid: null,
+  _profiles: null,
+
+  createProfile: function PP_addProfile() {
+    let list = this.document.getElementById("profiles-list");
+    let item = this.document.createElement("li");
+    let wrap = this.document.createElement("h1");
+
+    this._uid += 1;
+    this._profiles[this._uid] = null;
+
+    item.setAttribute("id", "profile_" + this._uid);
+    item.addEventListener("click", this.switchToProfile.bind(this, this._uid), false);
+    wrap.className = "profile-name";
+    wrap.textContent = "Profile " + this._uid;
+
+    item.appendChild(wrap);
+    list.appendChild(item);
+
+    return this._uid;
+  },
+
+  switchToProfile: function PP_switchToProfile(uid) {
+    if (this._profiles[uid] === undefined) {
+      return false;
+    }
+
+    let active = this.document.querySelector("#profiles-list > li.splitview-active");
+    if (active) {
+      active.className = "";
+    }
+
+    let item = this.document.getElementById("profile_" + uid);
+    item.className = "splitview-active";
+
+    this._activeUid = uid;
+    return true;
+  },
+
+  cacheProfileData: function PP_cacheProfileData(data) {
+    this._profiles[this._activeUid] = data;
   },
 
   parseProfileData: function PP_parseProfileData(data) {
@@ -124,6 +171,7 @@ ProfilerPanel.prototype = {
             return;
           }
 
+          this.cacheProfileData(data);
           this.parseProfileData(data);
 
           stop.setAttribute("hidden", true);
@@ -151,5 +199,11 @@ ProfilerPanel.prototype = {
         this.emit("started");
       }.bind(this));
     }.bind(this));
+  },
+
+  destroy: function PP_destroy() {
+    // FIXME: Need an actualt destroy function that closes
+    // connections and all that.
+    this.emit("destroyed");
   }
 };
