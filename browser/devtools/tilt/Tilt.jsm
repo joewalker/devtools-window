@@ -48,7 +48,21 @@ Cu.import("resource:///modules/devtools/TiltGL.jsm");
 Cu.import("resource:///modules/devtools/TiltUtils.jsm");
 Cu.import("resource:///modules/devtools/TiltVisualizer.jsm");
 
-this.EXPORTED_SYMBOLS = ["Tilt"];
+this.EXPORTED_SYMBOLS = ["TiltManager"];
+
+this.TiltManager = {
+  _instances: new WeakMap(),
+  getTiltForBrowser: function(aChromeWindow)
+  {
+    if (this._instances.has(aChromeWindow)) {
+      return this._instances.get(aChromeWindow);
+    } else {
+      let tilt = new Tilt(aChromeWindow);
+      this._instances.set(aChromeWindow, tilt);
+      return tilt;
+    }
+  },
+}
 
 /**
  * Object managing instances of the visualizer.
@@ -79,7 +93,7 @@ Tilt.prototype = {
   /**
    * Initializes a visualizer for the current tab.
    */
-  initialize: function T_initialize()
+  initializeForCurrentTab: function T_initializeForCurrentTab()
   {
     let id = this.currentWindowId;
 
@@ -94,7 +108,8 @@ Tilt.prototype = {
       chromeWindow: this.chromeWindow,
       contentWindow: this.chromeWindow.gBrowser.selectedBrowser.contentWindow,
       parentNode: this.chromeWindow.gBrowser.selectedBrowser.parentNode,
-      notifications: this.NOTIFICATIONS
+      notifications: this.NOTIFICATIONS,
+      tab: this.chromeWindow.gBrowser.selectedTab
     });
 
     // make sure the visualizer object was initialized properly
@@ -163,42 +178,6 @@ Tilt.prototype = {
   },
 
   /**
-   * Handles any supplementary post-initialization work, done immediately
-   * after a TILT_NOTIFICATIONS.INITIALIZING notification.
-   */
-  _whenInitializing: function T__whenInitializing()
-  {
-    this._whenShown();
-  },
-
-  /**
-   * Handles any supplementary post-destruction work, done immediately
-   * after a TILT_NOTIFICATIONS.DESTROYED notification.
-   */
-  _whenDestroyed: function T__whenDestroyed()
-  {
-    this._whenHidden();
-  },
-
-  /**
-   * Handles any necessary changes done when the Tilt surface is shown,
-   * after a TILT_NOTIFICATIONS.SHOWN notification.
-   */
-  _whenShown: function T__whenShown()
-  {
-    this.tiltButton.checked = true;
-  },
-
-  /**
-   * Handles any necessary changes done when the Tilt surface is hidden,
-   * after a TILT_NOTIFICATIONS.HIDDEN notification.
-   */
-  _whenHidden: function T__whenHidden()
-  {
-    this.tiltButton.checked = false;
-  },
-
-  /**
    * Handles the event fired when a tab is selected.
    */
   _onTabSelect: function T__onTabSelect()
@@ -207,19 +186,6 @@ Tilt.prototype = {
       Services.obs.notifyObservers(null, TILT_NOTIFICATIONS.SHOWN, null);
     } else {
       Services.obs.notifyObservers(null, TILT_NOTIFICATIONS.HIDDEN, null);
-    }
-  },
-
-  /**
-   * A node was selected in the Inspector.
-   * Called from InspectorUI.
-   *
-   * @param {Element} aNode
-   *                  the newly selected node
-   */
-  update: function T_update(aNode) {
-    if (this.currentInstance) {
-      this.currentInstance.presenter.highlightNode(aNode, "moveIntoView");
     }
   },
 
@@ -236,52 +202,8 @@ Tilt.prototype = {
     // load the preferences from the devtools.tilt branch
     TiltVisualizer.Prefs.load();
 
-    // hide the button in the Inspector toolbar if Tilt is not enabled
-    this.tiltButton.hidden = !this.enabled;
-
-    // add the necessary observers to handle specific notifications
-    Services.obs.addObserver(
-      this._whenInitializing.bind(this), TILT_NOTIFICATIONS.INITIALIZING, false);
-    Services.obs.addObserver(
-      this._whenDestroyed.bind(this), TILT_NOTIFICATIONS.DESTROYED, false);
-    Services.obs.addObserver(
-      this._whenShown.bind(this), TILT_NOTIFICATIONS.SHOWN, false);
-    Services.obs.addObserver(
-      this._whenHidden.bind(this), TILT_NOTIFICATIONS.HIDDEN, false);
-
-    Services.obs.addObserver(function(aSubject, aTopic, aWinId) {
-      this.destroy(aWinId); }.bind(this),
-      this.chromeWindow.InspectorUI.INSPECTOR_NOTIFICATIONS.DESTROYED, false);
-
     this.chromeWindow.gBrowser.tabContainer.addEventListener("TabSelect",
       this._onTabSelect.bind(this), false);
-
-
-    // FIXME: this shouldn't be done here, see bug #705131
-    let onOpened = function() {
-      if (this.inspector && this.highlighter && this.currentInstance) {
-        this.inspector.stopInspecting();
-        this.inspectButton.disabled = true;
-        this.highlighter.hide();
-      }
-    }.bind(this);
-
-    let onClosed = function() {
-      if (this.inspector && this.highlighter) {
-        this.inspectButton.disabled = false;
-        this.highlighter.show();
-      }
-    }.bind(this);
-
-    Services.obs.addObserver(onOpened,
-      this.chromeWindow.InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED, false);
-    Services.obs.addObserver(onClosed,
-      this.chromeWindow.InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED, false);
-    Services.obs.addObserver(onOpened,
-      TILT_NOTIFICATIONS.INITIALIZING, false);
-    Services.obs.addObserver(onClosed,
-      TILT_NOTIFICATIONS.DESTROYED, false);
-
 
     this._setupFinished = true;
   },
@@ -311,35 +233,4 @@ Tilt.prototype = {
   {
     return this.visualizers[this.currentWindowId];
   },
-
-  /**
-   * Gets the current InspectorUI instance.
-   */
-  get inspector()
-  {
-    return this.chromeWindow.InspectorUI;
-  },
-
-  /**
-   * Gets the current Highlighter instance from the InspectorUI.
-   */
-  get highlighter()
-  {
-    return this.inspector.highlighter;
-  },
-
-  /**
-   * Gets the Tilt button in the Inspector toolbar.
-   */
-  get tiltButton()
-  {
-    return this.chromeWindow.document.getElementById("inspector-3D-button");
-  },
-
-  /**
-   * Gets the Inspect button in the Inspector toolbar.
-   */
-  get inspectButton() {
-    return this.chromeWindow.document.getElementById("inspector-inspect-toolbutton");
-  }
 };

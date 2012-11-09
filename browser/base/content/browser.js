@@ -118,12 +118,6 @@ XPCOMUtils.defineLazyGetter(this, "DeveloperToolbar", function() {
   return new tmp.DeveloperToolbar(window, document.getElementById("developer-toolbar"));
 });
 
-XPCOMUtils.defineLazyGetter(this, "Tilt", function() {
-  let tmp = {};
-  Cu.import("resource:///modules/devtools/Tilt.jsm", tmp);
-  return new tmp.Tilt(window);
-});
-
 XPCOMUtils.defineLazyGetter(this, "Social", function() {
   let tmp = {};
   Cu.import("resource:///modules/Social.jsm", tmp);
