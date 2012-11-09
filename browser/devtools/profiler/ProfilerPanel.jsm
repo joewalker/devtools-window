@@ -89,7 +89,11 @@ ProfilerPanel.prototype = {
     this._profiles[this._uid] = null;
 
     item.setAttribute("id", "profile_" + this._uid);
-    item.addEventListener("click", this.switchToProfile.bind(this, this._uid), false);
+    item.setAttribute("data-uid", this._uid);
+    item.addEventListener("click", function (ev) {
+      this.switchToProfile(parseInt(ev.target.getAttribute("data-uid"), 10));
+    }.bind(this), false);
+
     wrap.className = "profile-name";
     wrap.textContent = "Profile " + this._uid;
 
@@ -111,6 +115,18 @@ ProfilerPanel.prototype = {
 
     let item = this.document.getElementById("profile_" + uid);
     item.className = "splitview-active";
+
+    let control = this.document.getElementById("profiler-control");
+    let report = this.document.getElementById("profiler-report");
+
+    if (this._profiles[uid] === null) {
+      control.removeAttribute("hidden");
+      report.setAttribute("hidden", true);
+    } else {
+      this.parseProfileData(this._profiles[uid]);
+      report.removeAttribute("hidden");
+      control.setAttribute("hidden", true);
+    }
 
     this._activeUid = uid;
     return true;
@@ -154,7 +170,6 @@ ProfilerPanel.prototype = {
     let stop = this.document.getElementById("profiler-stop-wrapper");
     let control = this.document.getElementById("profiler-control");
     let report = this.document.getElementById("profiler-report");
-    let iframe = this.document.getElementById("profiler-cleo");
 
     this.controller.isActive(function (err, isActive) {
       if (err) {
