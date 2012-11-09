@@ -18,7 +18,7 @@ function test() {
   debug_remote(TEST_URL, function(aTab, aDebuggee, aWindow) {
     gTab = aTab;
     gWindow = aWindow;
-    let gDebugger = gWindow.contentWindow;
+    let gDebugger = gWindow.panelWin;
 
     info("Current remote host: " +
       Services.prefs.getCharPref("devtools.debugger.remote-host"));

@@ -8,52 +8,53 @@ function test() {
   var tab1 = addTab(TAB1_URL, function() {
     gBrowser.selectedTab = tab1;
 
-    ok(!DebuggerUI.getDebugger(),
-      "Shouldn't have a debugger pane for this tab yet.");
+    ok(!gDevTools.getPanelForTarget("jsdebugger", tab1),
+      "Shouldn't have a debugger panel for this tab yet.");
 
-    let pane = DebuggerUI.toggleDebugger();
-    let someWidth1 = parseInt(Math.random() * 200) + 100;
-    let someWidth2 = parseInt(Math.random() * 200) + 100;
+    let toolbox = gDevTools.openToolboxForTab(tab1, "jsdebugger");
+    toolbox.once("jsdebugger-ready", function dbgReady() {
+      let dbg = gDevTools.getPanelForTarget("jsdebugger", tab1);
+      ok(dbg, "We should have a debugger panel.");
 
-    ok(pane, "toggleDebugger() should return a pane.");
+      let someWidth1 = parseInt(Math.random() * 200) + 100;
+      let someWidth2 = parseInt(Math.random() * 200) + 100;
 
-    is(DebuggerUI.getDebugger(), pane,
-      "getDebugger() should return the same pane as toggleDebugger().");
+      let content = dbg.panelWin;
+      let stackframes;
+      let variables;
 
-    let content = pane.contentWindow;
-    let stackframes;
-    let variables;
+      wait_for_connect_and_resume(function() {
+        ok(content.Prefs.stackframesWidth,
+          "The debugger preferences should have a saved stackframesWidth value.");
+        ok(content.Prefs.variablesWidth,
+          "The debugger preferences should have a saved variablesWidth value.");
 
-    wait_for_connect_and_resume(function() {
-      ok(content.Prefs.stackframesWidth,
-        "The debugger preferences should have a saved stackframesWidth value.");
-      ok(content.Prefs.variablesWidth,
-        "The debugger preferences should have a saved variablesWidth value.");
+        stackframes = content.document.getElementById("stackframes+breakpoints");
+        variables = content.document.getElementById("variables");
 
-      stackframes = content.document.getElementById("stackframes+breakpoints");
-      variables = content.document.getElementById("variables");
+        is(content.Prefs.stackframesWidth, stackframes.getAttribute("width"),
+          "The stackframes pane width should be the same as the preferred value.");
+        is(content.Prefs.variablesWidth, variables.getAttribute("width"),
+          "The variables pane width should be the same as the preferred value.");
 
-      is(content.Prefs.stackframesWidth, stackframes.getAttribute("width"),
-        "The stackframes pane width should be the same as the preferred value.");
-      is(content.Prefs.variablesWidth, variables.getAttribute("width"),
-        "The variables pane width should be the same as the preferred value.");
+        stackframes.setAttribute("width", someWidth1);
+        variables.setAttribute("width", someWidth2);
 
-      stackframes.setAttribute("width", someWidth1);
-      variables.setAttribute("width", someWidth2);
+        removeTab(tab1);
+      }, tab1);
 
-      removeTab(tab1);
+      window.addEventListener("Debugger:Shutdown", function dbgShutdown() {
+        window.removeEventListener("Debugger:Shutdown", dbgShutdown, true);
+
+        is(content.Prefs.stackframesWidth, stackframes.getAttribute("width"),
+          "The stackframes pane width should have been saved by now.");
+        is(content.Prefs.variablesWidth, variables.getAttribute("width"),
+          "The variables pane width should have been saved by now.");
+
+        finish();
+
+      }, true);
     });
 
-    window.addEventListener("Debugger:Shutdown", function dbgShutdown() {
-      window.removeEventListener("Debugger:Shutdown", dbgShutdown, true);
-
-      is(content.Prefs.stackframesWidth, stackframes.getAttribute("width"),
-        "The stackframes pane width should have been saved by now.");
-      is(content.Prefs.variablesWidth, variables.getAttribute("width"),
-        "The variables pane width should have been saved by now.");
-
-      finish();
-
-    }, true);
   });
 }
