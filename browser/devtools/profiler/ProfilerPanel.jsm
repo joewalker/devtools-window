@@ -45,13 +45,12 @@ const ProfilerDefinition = {
 
 function ProfilerPanel(frame, toolbox) {
   this.isReady = false;
-  this.frame = frame;
   this.window = frame.window;
   this.document = frame.document;
   this.target = toolbox.target;
   this.controller = new ProfilerController();
 
-  this._profiles = {};
+  this._profiles = new Map();
   this._uid = 0;
 
   new EventEmitter(this);
@@ -76,36 +75,64 @@ function ProfilerPanel(frame, toolbox) {
 }
 
 ProfilerPanel.prototype = {
+  isReady: null,
   _uid: null,
   _activeUid: null,
   _profiles: null,
+
+  getReporter: function PP_getReporter(uid=this._activeUid) {
+    let meta = this._profiles.get(uid);
+    return meta ?
+      [this.document.getElementById("profiler-cleo-" + uid), meta] :
+      [null,null];
+  },
+
+  showReporter: function PP_showReporter(uid=this._activeUid) {
+    let [el] = this.getReporter();
+    if (el) {
+      el.setAttribute("hidden", "true");
+    }
+
+    [el] = this.getReporter(uid);
+    el.removeAttribute("hidden");
+  },
 
   createProfile: function PP_addProfile() {
     let list = this.document.getElementById("profiles-list");
     let item = this.document.createElement("li");
     let wrap = this.document.createElement("h1");
+    let meta = { uid: ++this._uid, data: null };
 
-    this._uid += 1;
-    this._profiles[this._uid] = null;
-
-    item.setAttribute("id", "profile_" + this._uid);
-    item.setAttribute("data-uid", this._uid);
+    item.setAttribute("id", "profile-" + meta.uid);
+    item.setAttribute("data-uid", meta.uid);
     item.addEventListener("click", function (ev) {
       this.switchToProfile(parseInt(ev.target.getAttribute("data-uid"), 10));
     }.bind(this), false);
 
     wrap.className = "profile-name";
-    wrap.textContent = "Profile " + this._uid;
+    wrap.textContent = "Profile " + meta.uid;
 
     item.appendChild(wrap);
     list.appendChild(item);
 
-    return this._uid;
+    let report = this.document.getElementById("profiler-report");
+    let iframe = this.document.createElement("iframe");
+
+    iframe.setAttribute("flex", "1");
+    iframe.setAttribute("id", "profiler-cleo-" + meta.uid);
+    iframe.setAttribute("src", "devtools/cleopatra.html");
+    iframe.setAttribute("hidden", "true");
+    report.appendChild(iframe);
+
+    this._profiles.set(meta.uid, meta);
+    return meta.uid;
   },
 
   switchToProfile: function PP_switchToProfile(uid) {
-    if (this._profiles[uid] === undefined) {
-      return false;
+    let [el, meta] = this.getReporter(uid);
+
+    if (!el || !meta) {
+      return;
     }
 
     let active = this.document.querySelector("#profiles-list > li.splitview-active");
@@ -113,33 +140,36 @@ ProfilerPanel.prototype = {
       active.className = "";
     }
 
-    let item = this.document.getElementById("profile_" + uid);
+    let item = this.document.getElementById("profile-" + uid);
     item.className = "splitview-active";
 
     let control = this.document.getElementById("profiler-control");
     let report = this.document.getElementById("profiler-report");
 
-    if (this._profiles[uid] === null) {
-      control.removeAttribute("hidden");
-      report.setAttribute("hidden", true);
-    } else {
-      this.parseProfileData(this._profiles[uid]);
+    if (meta.data) {
       report.removeAttribute("hidden");
       control.setAttribute("hidden", true);
+    } else {
+      control.removeAttribute("hidden");
+      report.setAttribute("hidden", true);
     }
 
+    this.showReporter(uid);
     this._activeUid = uid;
+
     return true;
   },
 
   cacheProfileData: function PP_cacheProfileData(data) {
-    this._profiles[this._activeUid] = data;
+    let [el, meta] = this.getReporter();
+    meta.data = data;
+    this._profiles.set(meta.uid, meta);
   },
 
   parseProfileData: function PP_parseProfileData(data) {
-    let iframe = this.document.getElementById("profiler-cleo");
+    let [el, meta] = this.getReporter();
 
-    iframe.contentWindow.postMessage(JSON.stringify({
+    el.contentWindow.postMessage(JSON.stringify({
       task: "receiveProfileData",
       rawProfile: data
     }), "*");
@@ -149,7 +179,7 @@ ProfilerPanel.prototype = {
 
     let poll = function pollBreadcrumbs() {
       let wait = this.window.setTimeout.bind(null, poll, 100);
-      let trail = iframe.contentWindow.gBreadcrumbTrail;
+      let trail = el.contentWindow.gBreadcrumbTrail;
 
       if (!trail) {
         return wait();
@@ -188,6 +218,7 @@ ProfilerPanel.prototype = {
 
           this.cacheProfileData(data);
           this.parseProfileData(data);
+          this.showReporter();
 
           stop.setAttribute("hidden", true);
           start.removeAttribute("hidden");

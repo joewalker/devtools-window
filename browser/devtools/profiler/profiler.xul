@@ -18,7 +18,7 @@
       <box class="splitview-nav-container">
         <ol class="splitview-nav" id="profiles-list">
           <!-- Example:
-          <li class="splitview-active">
+          <li class="splitview-active" id="profile-1" data-uid="1">
             <h1 class="profile-name">Profile 1</h1>
           </li>
           -->
@@ -60,8 +60,10 @@
       </vbox>
 
       <vbox flex="1" hidden="true" id="profiler-report">
-        <iframe id="profiler-cleo"
+        <!-- Example:
+        <iframe id="profiler-cleo-1"
           src="devtools/cleopatra.html" flex="1"></iframe>
+        -->
       </vbox>
     </box>
   </box>
