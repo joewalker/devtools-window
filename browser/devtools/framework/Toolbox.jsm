@@ -323,10 +323,14 @@ Toolbox.prototype = {
         this._toolPanels.set(id, panel);
         if (panel.isReady) {
           this.emit(id + "-ready", panel);
+          this.emit("select", id);
+          this.emit(id + "-selected", panel);
           gDevTools.emit(id + "-ready", this, panel);
         } else {
           panel.once("ready", function(event) {
             this.emit(id + "-ready", panel);
+            this.emit("select", id);
+            this.emit(id + "-selected");
             gDevTools.emit(id + "-ready", this, panel);
           }.bind(this));
         }
@@ -334,6 +338,9 @@ Toolbox.prototype = {
 
       iframe.addEventListener("DOMContentLoaded", boundLoad, true);
       iframe.setAttribute("src", definition.url);
+    } else {
+      this.emit("select", id);
+      this.emit(id + "-selected");
     }
 
     Services.prefs.setCharPref(this._prefs.LAST_TOOL, id);
