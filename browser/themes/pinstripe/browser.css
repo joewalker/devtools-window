@@ -3378,7 +3378,7 @@ toolbarbutton.chevron > .toolbarbutton-menu-dropmarker {
   outline-color: rgba(255,255,255,0.7);
 }
 
-/* Highlighter toolbar */
+/* Developer toolbar */
 
 #developer-toolbar {
   border-top: 1px solid hsla(210, 8%, 5%, .65);
