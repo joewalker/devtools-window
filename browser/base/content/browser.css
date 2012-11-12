@@ -562,10 +562,6 @@ statuspanel[inactive][previoustype=overLink] {
   -moz-box-align: end;
 }
 
-.styleInspector {
-  min-width: 350px;
-}
-
 .panel-inner-arrowcontentfooter[footertype="promobox"] {
   -moz-binding: url("chrome://browser/content/urlbarBindings.xml#promobox");
 }

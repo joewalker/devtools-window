@@ -1032,7 +1032,6 @@ pref("devtools.toolbox.sideEnabled", false);
 
 // Enable the Inspector
 pref("devtools.inspector.enabled", true);
-pref("devtools.inspector.sidebarOpen", false);
 pref("devtools.inspector.activeSidebar", "ruleview");
 pref("devtools.inspector.markupPreview", false);
 
