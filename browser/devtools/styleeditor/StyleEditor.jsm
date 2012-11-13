@@ -1120,6 +1120,7 @@ StyleEditor.prototype = {
       accel: true,
       callback: function save() {
         this.saveToFile(this._savedFile);
+        return true;
       }.bind(this)
     });
 
@@ -1130,6 +1131,7 @@ StyleEditor.prototype = {
       shift: true,
       callback: function saveAs() {
         this.saveToFile();
+        return true;
       }.bind(this)
     });
 

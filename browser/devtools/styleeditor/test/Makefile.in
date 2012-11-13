@@ -20,13 +20,15 @@ _BROWSER_TEST_FILES = \
                  browser_styleeditor_init.js \
                  browser_styleeditor_loading.js \
                  browser_styleeditor_new.js \
-                 browser_styleeditor_passedinsheet.js \
+                 $(browser_styleeditor_passedinsheet.js) \
                  browser_styleeditor_pretty.js \
                  browser_styleeditor_private.js \
                  browser_styleeditor_readonly.js \
-                 $(warning browser_styleeditor_reopen.js is disabled for intermittent failures. Bug 707891) \
+                 browser_styleeditor_reopen.js \
                  browser_styleeditor_sv_keynav.js \
                  browser_styleeditor_sv_resize.js \
+                 head.js \
+                 helpers.js \
                  four.html \
                  head.js \
                  helpers.js \
@@ -44,6 +46,8 @@ _BROWSER_TEST_FILES = \
                  test_private.html \
                  test_private.css \
                  $(NULL)
+
+
 
 libs::	$(_BROWSER_TEST_FILES)
 	$(INSTALL) $(foreach f,$^,"$f") $(DEPTH)/_tests/testing/mochitest/browser/$(relativesrcdir)
