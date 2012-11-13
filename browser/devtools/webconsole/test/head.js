@@ -35,8 +35,7 @@ let tab, browser, hudId, hud, hudBox, filterBox, outputNode, cs;
 
 function addTab(aURL)
 {
-  gBrowser.selectedTab = gBrowser.addTab();
-  content.location.assign(aURL);
+  gBrowser.selectedTab = gBrowser.addTab(aURL);
   tab = gBrowser.selectedTab;
   browser = gBrowser.getBrowserForTab(tab);
 }
@@ -136,23 +135,22 @@ function findLogEntry(aString)
  *        Optional function to invoke after the Web Console completes
  *        initialization (web-console-created).
  */
-function openConsole(aTab, aCallback)
+function openConsole(aTab, aCallback = function() { })
 {
-  function onWebConsoleOpen(aSubject, aTopic)
+  function onWebConsoleOpen(aEvent, aPanel)
   {
-    if (aTopic == "web-console-created") {
-      Services.obs.removeObserver(onWebConsoleOpen, "web-console-created");
-      aSubject.QueryInterface(Ci.nsISupportsString);
-      let hud = HUDService.getHudReferenceById(aSubject.data);
-      executeSoon(aCallback.bind(null, hud));
-    }
+    executeSoon(aCallback.bind(null, aPanel.hud));
   }
 
-  if (aCallback) {
-    Services.obs.addObserver(onWebConsoleOpen, "web-console-created", false);
+  let toolbox = gDevTools.getToolboxForTarget(aTab || tab);
+  if (toolbox) {
+    toolbox.once("webconsole-selected", onWebConsoleOpen);
+    toolbox.selectTool("webconsole");
   }
-
-  gDevTools.openToolboxForTab(aTab || tab, "webconsole");
+  else {
+    toolbox = gDevTools.openToolboxForTab(aTab || tab, "webconsole");
+    toolbox.once("webconsole-selected", onWebConsoleOpen);
+  }
 }
 
 /**
@@ -165,29 +163,25 @@ function openConsole(aTab, aCallback)
  *        Optional function to invoke after the Web Console completes
  *        closing (web-console-destroyed).
  */
-function closeConsole(aTab, aCallback)
+function closeConsole(aTab, aCallback = function() { })
 {
-  function onWebConsoleClose(aSubject, aTopic)
-  {
-    if (aTopic == "web-console-destroyed") {
-      Services.obs.removeObserver(onWebConsoleClose, "web-console-destroyed");
-      aSubject.QueryInterface(Ci.nsISupportsString);
-      let hudId = aSubject.data;
-      executeSoon(aCallback.bind(null, hudId));
+  let toolbox = gDevTools.getToolboxForTarget(aTab || tab);
+  if (toolbox) {
+    let panel = gDevTools.getPanelForTarget("webconsole", aTab || tab);
+    if (panel) {
+      let hudId = panel.hud.hudId;
+      panel.once("destroyed", function() {
+        executeSoon(aCallback.bind(null, hudId));
+      });
     }
-  }
+    else {
+      toolbox.once("destroyed", aCallback.bind(null, null));
+    }
 
-  if (aCallback) {
-    Services.obs.addObserver(onWebConsoleClose, "web-console-destroyed", false);
-  }
-
-  let toolbox = gDevTools.getToolboxes().get(aTab || tab);
-  if (toolbox == null) {
-    // FIXME: fixing tests, but we should check if this is right
-    todo('No toolbox for tab');
+    toolbox.destroy();
   }
   else {
-    toolbox.destroy();
+    aCallback();
   }
 }
 

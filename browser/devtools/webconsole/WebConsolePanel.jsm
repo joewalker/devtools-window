@@ -12,36 +12,31 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "Services",
                                   "resource://gre/modules/Services.jsm");
+
 XPCOMUtils.defineLazyModuleGetter(this, "WebConsoleUtils",
                                   "resource://gre/modules/devtools/WebConsoleUtils.jsm");
+
 XPCOMUtils.defineLazyModuleGetter(this, "HUDService",
                                   "resource:///modules/HUDService.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "DevTools",
-                                  "resource:///modules/devtools/gDevTools.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "EventEmitter",
                                   "resource:///modules/devtools/EventEmitter.jsm");
 
 const STRINGS_URI = "chrome://browser/locale/devtools/webconsole.properties";
-XPCOMUtils.defineLazyGetter(this, "_strings",
-  function() Services.strings.createBundle(STRINGS_URI));
-
-XPCOMUtils.defineLazyGetter(this, "osString", function() {
-  return Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
-});
+let l10n = new WebConsoleUtils.l10n(STRINGS_URI);
 
 /**
  * The external API allowing us to be registered with DevTools.jsm
  */
 this.WebConsoleDefinition = {
   id: "webconsole",
-  key: l10n("cmd.commandkey"),
-  accesskey: l10n("webConsoleCmd.accesskey"),
-  modifiers: osString == "Darwin" ? "accel,alt" : "accel,shift",
+  key: l10n.getStr("cmd.commandkey"),
+  accesskey: l10n.getStr("webConsoleCmd.accesskey"),
+  modifiers: Services.appinfo.OS == "Darwin" ? "accel,alt" : "accel,shift",
   ordinal: 0,
   icon: "chrome://browser/skin/devtools/webconsole-tool-icon.png",
   url: "chrome://browser/content/devtools/webconsole.xul",
-  label: l10n("ToolboxWebconsole.label"),
+  label: l10n.getStr("ToolboxWebconsole.label"),
   isTargetSupported: function(target) {
     return !target.isRemote && !target.isChrome;
   },
@@ -63,18 +58,40 @@ function WebConsolePanel(iframeWindow, toolbox) {
   let iframe = parentDoc.getElementById("toolbox-panel-iframe-webconsole");
   this.hud = HUDService.activateHUDForContext(tab, iframe);
 
-  this.setReady();
+  let hudId = this.hud.hudId;
+  let onOpen = function _onWebConsoleOpen(aSubject)
+  {
+    aSubject.QueryInterface(Ci.nsISupportsString);
+    if (hudId == aSubject.data) {
+      Services.obs.removeObserver(onOpen, "web-console-created");
+      this.setReady();
+    }
+  }.bind(this);
+
+  Services.obs.addObserver(onOpen, "web-console-created", false);
 }
 
 WebConsolePanel.prototype = {
   get target() this._toolbox.target,
 
+  _isReady: false,
   get isReady() this._isReady,
 
   destroy: function WCP_destroy()
   {
-    let tab = this._toolbox.target.tab;
-    HUDService.deactivateHUDForContext(tab, false);
+    let hudId = this.hud.hudId;
+
+    let onClose = function _onWebConsoleClose(aSubject)
+    {
+      aSubject.QueryInterface(Ci.nsISupportsString);
+      if (hudId == aSubject.data) {
+        Services.obs.removeObserver(onClose, "web-console-destroyed");
+        this.emit("destroyed");
+      }
+    }.bind(this);
+
+    Services.obs.addObserver(onClose, "web-console-destroyed", false);
+    HUDService.deactivateHUDForContext(this.hud.tab, false);
   },
 
   setReady: function WCP_setReady()
@@ -82,19 +99,4 @@ WebConsolePanel.prototype = {
     this._isReady = true;
     this.emit("ready");
   },
-}
-
-/**
- * Lookup l10n string from a string bundle.
- * @param {string} aName The key to lookup.
- * @returns A localized version of the given key.
- */
-function l10n(aName)
-{
-  try {
-    return _strings.GetStringFromName(aName);
-  } catch (ex) {
-    Services.console.logStringMessage("Error reading '" + aName + "'");
-    throw new Error("l10n error with " + aName);
-  }
 }
