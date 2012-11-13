@@ -35,7 +35,7 @@ this.InspectorPanel = function InspectorPanel(iframeWindow, toolbox) {
   }
 
   this.tabTarget = (this.target.tab != null);
-  this.chromeTarget = (this.target.chromeWindow != null);
+  this.chromeTarget = (this.target.window != null);
 
   new EventEmitter(this);
 
@@ -85,7 +85,7 @@ this.InspectorPanel = function InspectorPanel(iframeWindow, toolbox) {
       this._selection.setNode(root);
     }
     if (this.chromeTarget) {
-      let root = this.target.chromeWindow.document.documentElement;
+      let root = this.target.window.document.documentElement;
       this._selection.setNode(root);
     }
 
@@ -251,7 +251,7 @@ InspectorPanel.prototype = {
     if (this.tabTarget) {
       controllerWindow = this.target.tab.ownerDocument.defaultView;
     } else if (this.chromeTarget) {
-      controllerWindow = this.target.chromeWindow;
+      controllerWindow = this.target.window;
     }
     this.markup = new MarkupView(this, this._markupFrame, controllerWindow);
 
