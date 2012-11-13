@@ -157,7 +157,7 @@ DevTools.prototype = {
   openToolbox: function DT_openToolbox(target, hostType, defaultToolId) {
     if (this._toolboxes.has(target.tab)) {
       // only allow one toolbox per target
-      return null;
+      return this._toolboxes.get(target.tab);
     }
 
     let tb = new Toolbox(target, hostType, defaultToolId);

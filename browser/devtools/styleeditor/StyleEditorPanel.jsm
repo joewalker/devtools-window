@@ -40,6 +40,16 @@ StyleEditorPanel.prototype = {
   },
 
   /**
+   * Panel window getter.
+   */
+  get panelWindow() this._panelWin,
+
+  /**
+   * StyleEditorChrome instance getter.
+   */
+  get styleEditorChrome() this._panelWin.styleEditorChrome,
+
+  /**
    * Set the page to target.
    */
   setPage: function StyleEditor_setPage(contentWindow) {

@@ -318,7 +318,7 @@ Toolbox.prototype = {
     let definition = gDevTools.getToolDefinitions().get(id);
 
     // only build the tab's content if we haven't already
-    if (iframe.src != definition.url) {
+    if (iframe.getAttribute("src") != definition.url) {
       let boundLoad = function() {
         iframe.removeEventListener("DOMContentLoaded", boundLoad, true);
         let panel = definition.build(iframe.contentWindow, this);
@@ -332,7 +332,7 @@ Toolbox.prototype = {
           panel.once("ready", function(event) {
             this.emit(id + "-ready", panel);
             this.emit("select", id);
-            this.emit(id + "-selected");
+            this.emit(id + "-selected", panel);
             gDevTools.emit(id + "-ready", this, panel);
           }.bind(this));
         }
@@ -341,8 +341,9 @@ Toolbox.prototype = {
       iframe.addEventListener("DOMContentLoaded", boundLoad, true);
       iframe.setAttribute("src", definition.url);
     } else {
+      let panel = this._toolPanels.get(id);
       this.emit("select", id);
-      this.emit(id + "-selected");
+      this.emit(id + "-selected", panel);
     }
 
     Services.prefs.setCharPref(this._prefs.LAST_TOOL, id);
