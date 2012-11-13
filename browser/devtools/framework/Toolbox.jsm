@@ -249,6 +249,8 @@ Toolbox.prototype = {
    *        Tool definition of the tool to build a tab for.
    */
   _buildTabForTool: function TBOX_buildTabForTool(toolDefinition) {
+    const MAX_ORDINAL = 99;
+
     let tabs = this.doc.getElementById("toolbox-tabs");
     let deck = this.doc.getElementById("toolbox-deck");
 
@@ -261,7 +263,7 @@ Toolbox.prototype = {
     radio.setAttribute("toolid", id);
 
     let ordinal = (typeof toolDefinition.ordinal == "number") ?
-                  toolDefinition.ordinal : 99;
+                  toolDefinition.ordinal : MAX_ORDINAL;
     radio.setAttribute("ordinal", ordinal);
 
     radio.addEventListener("command", function(id) {
