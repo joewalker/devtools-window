@@ -1,69 +1,57 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-let iframe;
-let iframeLoads = 0;
-let checksAfterLoads = false;
+function test() {
+  let iframe;
+  let iframeLoads = 0;
+  let checksAfterLoads = false;
+  let inspector;
 
-function startTest() {
-  ok(window.InspectorUI, "InspectorUI variable exists");
-  Services.obs.addObserver(runInspectorTests,
-    InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED, null);
-  InspectorUI.toggleInspectorUI();
-}
+  function startTest() {
+    openInspector(runInspectorTests);
+  }
 
-function runInspectorTests() {
-  Services.obs.removeObserver(runInspectorTests,
-    InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED, null);
+  function runInspectorTests(aInspector) {
+    inspector = aInspector;
 
-  iframe = content.document.querySelector("iframe");
-  ok(iframe, "found the iframe element");
+    iframe = content.document.querySelector("iframe");
+    ok(iframe, "found the iframe element");
 
-  ok(InspectorUI.inspecting, "Inspector is highlighting");
-  ok(InspectorUI.isInspectorOpen, "Inspector is open");
+    ok(inspector.highlighter._highlighting, "Inspector is highlighting");
 
-  Services.obs.addObserver(finishTest,
-    InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED, false);
+    iframe.addEventListener("load", onIframeLoad, false);
 
-  iframe.addEventListener("load", onIframeLoad, false);
-
-  executeSoon(function() {
-    iframe.contentWindow.location = "javascript:location.reload()";
-  });
-}
-
-function onIframeLoad() {
-  if (++iframeLoads != 2) {
     executeSoon(function() {
       iframe.contentWindow.location = "javascript:location.reload()";
     });
-    return;
   }
 
-  iframe.removeEventListener("load", onIframeLoad, false);
+  function onIframeLoad() {
+    if (++iframeLoads != 2) {
+      executeSoon(function() {
+        iframe.contentWindow.location = "javascript:location.reload()";
+      });
+      return;
+    }
 
-  ok(InspectorUI.inspecting, "Inspector is highlighting after iframe nav");
-  ok(InspectorUI.isInspectorOpen, "Inspector Panel is open after iframe nav");
+    iframe.removeEventListener("load", onIframeLoad, false);
 
-  checksAfterLoads = true;
+    ok(inspector.highlighter._highlighting, "Inspector is highlighting after iframe nav");
 
-  InspectorUI.closeInspectorUI();
-}
+    checksAfterLoads = true;
 
-function finishTest() {
-  Services.obs.removeObserver(finishTest,
-    InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED);
+    finishTest();
+  }
 
-  is(iframeLoads, 2, "iframe loads");
-  ok(checksAfterLoads, "the Inspector tests got the chance to run after iframe reloads");
-  ok(!InspectorUI.isInspectorOpen, "Inspector Panel is not open");
+  function finishTest() {
+    is(iframeLoads, 2, "iframe loads");
+    ok(checksAfterLoads, "the Inspector tests got the chance to run after iframe reloads");
 
-  iframe = null;
-  gBrowser.removeCurrentTab();
-  executeSoon(finish);
-}
+    iframe = null;
+    gBrowser.removeCurrentTab();
+    executeSoon(finish);
+  }
 
-function test() {
   waitForExplicitFinish();
 
   gBrowser.selectedTab = gBrowser.addTab();

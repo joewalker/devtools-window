@@ -11,6 +11,7 @@ function test()
 
   let doc;
   let node;
+  let inspector;
 
   gBrowser.selectedTab = gBrowser.addTab();
   gBrowser.selectedBrowser.addEventListener("load", function onload() {
@@ -26,23 +27,19 @@ function test()
 
   function setupKeyBindingsTest()
   {
-    Services.obs.addObserver(findAndHighlightNode,
-                             InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED,
-                             false);
-    InspectorUI.toggleInspectorUI();
+    openInspector(findAndHighlightNode);
   }
 
-  function findAndHighlightNode()
+  function findAndHighlightNode(aInspector)
   {
-    Services.obs.removeObserver(findAndHighlightNode,
-                                InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED);
+    inspector = aInspector;
 
     executeSoon(function() {
-      InspectorUI.highlighter.addListener("nodeselected", highlightBodyNode);
+      inspector.selection.once("new-node", highlightBodyNode);
       // Test that navigating around without a selected node gets us to the
       // body element.
       node = doc.querySelector("body");
-      let bc = InspectorUI.breadcrumbs;
+      let bc = inspector.breadcrumbs;
       bc.nodeHierarchy[bc.currentIndex].button.focus();
       EventUtils.synthesizeKey("VK_RIGHT", { });
     });
@@ -50,11 +47,10 @@ function test()
 
   function highlightBodyNode()
   {
-    InspectorUI.highlighter.removeListener("nodeselected", highlightBodyNode);
-    is(InspectorUI.selection, node, "selected body element");
+    is(inspector.selection.node, node, "selected body element");
 
     executeSoon(function() {
-      InspectorUI.highlighter.addListener("nodeselected", highlightHeaderNode);
+      inspector.selection.once("new-node", highlightHeaderNode);
       // Test that moving to the child works.
       node = doc.querySelector("h1");
       EventUtils.synthesizeKey("VK_RIGHT", { });
@@ -63,11 +59,10 @@ function test()
 
   function highlightHeaderNode()
   {
-    InspectorUI.highlighter.removeListener("nodeselected", highlightHeaderNode);
-    is(InspectorUI.selection, node, "selected h1 element");
+    is(inspector.selection.node, node, "selected h1 element");
 
     executeSoon(function() {
-      InspectorUI.highlighter.addListener("nodeselected", highlightParagraphNode);
+      inspector.selection.once("new-node", highlightParagraphNode);
       // Test that moving to the next sibling works.
       node = doc.querySelector("p");
       EventUtils.synthesizeKey("VK_DOWN", { });
@@ -76,11 +71,10 @@ function test()
 
   function highlightParagraphNode()
   {
-    InspectorUI.highlighter.removeListener("nodeselected", highlightParagraphNode);
-    is(InspectorUI.selection, node, "selected p element");
+    is(inspector.selection.node, node, "selected p element");
 
     executeSoon(function() {
-      InspectorUI.highlighter.addListener("nodeselected", highlightHeaderNodeAgain);
+      inspector.selection.once("new-node", highlightHeaderNodeAgain);
       // Test that moving to the previous sibling works.
       node = doc.querySelector("h1");
       EventUtils.synthesizeKey("VK_UP", { });
@@ -89,11 +83,10 @@ function test()
 
   function highlightHeaderNodeAgain()
   {
-    InspectorUI.highlighter.removeListener("nodeselected", highlightHeaderNodeAgain);
-    is(InspectorUI.selection, node, "selected h1 element");
+    is(inspector.selection.node, node, "selected h1 element");
 
     executeSoon(function() {
-      InspectorUI.highlighter.addListener("nodeselected", highlightParentNode);
+      inspector.selection.once("new-node", highlightParentNode);
       // Test that moving to the parent works.
       node = doc.querySelector("body");
       EventUtils.synthesizeKey("VK_LEFT", { });
@@ -102,27 +95,11 @@ function test()
 
   function highlightParentNode()
   {
-    InspectorUI.highlighter.removeListener("nodeselected", highlightParentNode);
-    is(InspectorUI.selection, node, "selected body element");
-
-    // Test that locking works.
-    synthesizeKeyFromKeyTag("key_inspect");
-
-    executeSoon(isTheNodeLocked);
-  }
-
-  function isTheNodeLocked()
-  {
-    ok(!InspectorUI.inspecting, "the node is locked");
-    Services.obs.addObserver(finishUp,
-                             InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED,
-                             false);
-    InspectorUI.closeInspectorUI();
+    is(inspector.selection.node, node, "selected body element");
+    finishUp();
   }
 
   function finishUp() {
-    Services.obs.removeObserver(finishUp,
-                                InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED);
     doc = node = null;
     gBrowser.removeCurrentTab();
     finish();

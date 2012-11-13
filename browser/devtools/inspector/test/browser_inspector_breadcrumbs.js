@@ -18,6 +18,7 @@ function test()
   let doc;
   let nodes;
   let cursor;
+  let inspector;
 
   gBrowser.selectedTab = gBrowser.addTab();
   gBrowser.selectedBrowser.addEventListener("load", function onload() {
@@ -26,7 +27,7 @@ function test()
     waitForFocus(setupTest, content);
   }, true);
 
-  content.location = "http://mochi.test:8888/browser/browser/devtools/highlighter/test/browser_inspector_breadcrumbs.html";
+  content.location = "http://mochi.test:8888/browser/browser/devtools/inspector/test/browser_inspector_breadcrumbs.html";
 
   function setupTest()
   {
@@ -36,20 +37,16 @@ function test()
       ok(nodes[i].node, "node " + nodes[i].nodeId + " found");
     }
 
-    Services.obs.addObserver(runTests,
-      InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED, false);
-    InspectorUI.toggleInspectorUI();
+    openInspector(runTests);
   }
 
-  function runTests()
+  function runTests(aInspector)
   {
-    Services.obs.removeObserver(runTests,
-      InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED);
-
+    inspector = aInspector;
     cursor = 0;
+    inspector.selection.on("new-node", nodeSelected);
     executeSoon(function() {
-      InspectorUI.highlighter.addListener("nodeselected", nodeSelected);
-      InspectorUI.inspectNode(nodes[0].node);
+      inspector.selection.setNode(nodes[0].node);
     });
   }
 
@@ -59,24 +56,19 @@ function test()
       performTest();
       cursor++;
       if (cursor >= nodes.length) {
-
-        InspectorUI.highlighter.removeListener("nodeselected", nodeSelected);
-        Services.obs.addObserver(finishUp,
-          InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED, false);
-
-        executeSoon(function() {
-          InspectorUI.closeInspectorUI();
-        });
+        inspector.selection.off("new-node", nodeSelected);
+        finishUp();
       } else {
         let node = nodes[cursor].node;
-        InspectorUI.inspectNode(node);
+        inspector.selection.setNode(node);
       }
     });
   }
 
   function performTest()
   {
-    let container = document.getElementById("inspector-breadcrumbs");
+    let panel = gDevTools.getPanelForTarget("inspector", gBrowser.selectedTab);
+    let container = panel.panelDoc.getElementById("inspector-breadcrumbs");
     let buttonsLabelIds = nodes[cursor].result.split(" ");
 
     // html > body > …
@@ -91,11 +83,11 @@ function test()
 
     let checkedButton = container.querySelector("button[checked]");
     let labelId = checkedButton.querySelector(".inspector-breadcrumbs-id");
-    is(labelId.textContent, "#" + InspectorUI.selection.id, "Node " + cursor + ": selection matches");
+    let id = inspector.selection.node.id;
+    is(labelId.textContent, "#" + id, "Node " + cursor + ": selection matches");
   }
 
   function finishUp() {
-    Services.obs.removeObserver(finishUp, InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED);
     doc = nodes = null;
     gBrowser.removeCurrentTab();
     finish();

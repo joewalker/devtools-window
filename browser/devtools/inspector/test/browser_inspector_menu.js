@@ -9,6 +9,7 @@ function test() {
   let doc;
   let node1;
   let div;
+  let inspector;
 
   function createDocument() {
     div = doc.createElement("div");
@@ -22,7 +23,7 @@ function test() {
     div.appendChild(p1);
     doc.body.appendChild(div);
     node1 = p1;
-    setupTest();
+    openInspector(runTests);
   }
 
   gBrowser.selectedTab = gBrowser.addTab();
@@ -34,20 +35,14 @@ function test() {
 
   content.location = content.location = "data:text/html,basic tests for inspector";;
 
-  function setupTest() {
-    Services.obs.addObserver(runTests, InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED, false);
-    InspectorUI.toggleInspectorUI();
-  }
-
-  function runTests() {
-    Services.obs.removeObserver(runTests, InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED);
-    InspectorUI.stopInspecting();
-    InspectorUI.inspectNode(node1, true);
+  function runTests(aInspector) {
+    inspector = aInspector;
+    inspector.selection.setNode(node1);
     testCopyInnerMenu();
   }
 
   function testCopyInnerMenu() {
-    let copyInner = document.getElementById("inspectorHTMLCopyInner");
+    let copyInner = inspector.panelDoc.getElementById("node-menu-copyinner");
     ok(copyInner, "the popup menu has a copy inner html menu item");
 
     waitForClipboard("This is some example text",
@@ -56,7 +51,7 @@ function test() {
   }
 
   function testCopyOuterMenu() {
-    let copyOuter = document.getElementById("inspectorHTMLCopyOuter");
+    let copyOuter = inspector.panelDoc.getElementById("node-menu-copyouter");
     ok(copyOuter, "the popup menu has a copy outer html menu item");
 
     waitForClipboard("<p>This is some example text</p>",
@@ -65,10 +60,10 @@ function test() {
   }
 
   function testDeleteNode() {
-    let deleteNode = document.getElementById("inspectorHTMLDelete");
+    let deleteNode = inspector.panelDoc.getElementById("node-menu-delete");
     ok(deleteNode, "the popup menu has a delete menu item");
 
-    InspectorUI.highlighter.addListener("nodeselected", deleteTest);
+    inspector.selection.once("detached", deleteTest);
 
     let commandEvent = document.createEvent("XULCommandEvent");
     commandEvent.initCommandEvent("command", true, true, window, 0, false, false,
@@ -77,19 +72,16 @@ function test() {
   }
 
   function deleteTest() {
-    InspectorUI.highlighter.removeListener("nodeselected", deleteTest);
-    is(InspectorUI.selection, div, "parent node selected");
     let p = doc.querySelector("P");
     is(p, null, "node deleted");
 
-    InspectorUI.highlighter.addListener("nodeselected", deleteRootNode);
-    InspectorUI.inspectNode(doc.documentElement, true);
+    deleteRootNode();
   }
 
   function deleteRootNode() {
-    InspectorUI.highlighter.removeListener("nodeselected", deleteRootNode);
-    let deleteNode = document.getElementById("inspectorHTMLDelete");
-    let commandEvent = document.createEvent("XULCommandEvent");
+    inspector.selection.setNode(doc.documentElement);
+    let deleteNode = inspector.panelDoc.getElementById("node-menu-delete");
+    let commandEvent = inspector.panelDoc.createEvent("XULCommandEvent");
     commandEvent.initCommandEvent("command", true, true, window, 0, false, false,
                                   false, false, null);
     deleteNode.dispatchEvent(commandEvent);
@@ -98,15 +90,6 @@ function test() {
 
   function isRootStillAlive() {
     ok(doc.documentElement, "Document element still alive.");
-    Services.obs.addObserver(finishUp, InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED, false);
-    executeSoon(function() {
-      InspectorUI.closeInspectorUI();
-    });
-  }
-
-  function finishUp() {
-    Services.obs.removeObserver(finishUp, InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED);
-    doc = node1 = div = null;
     gBrowser.removeCurrentTab();
     finish();
   }

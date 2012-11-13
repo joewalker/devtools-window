@@ -11,15 +11,6 @@ let LayoutHelpers = tempScope.LayoutHelpers;
 let testDir = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
 Services.scriptloader.loadSubScript(testDir + "/helpers.js", this);
 
-// Clear preferences that may be set during the course of tests.
-function clearUserPrefs()
-{
-  Services.prefs.clearUserPref("devtools.inspector.sidebarOpen");
-  Services.prefs.clearUserPref("devtools.inspector.activeSidebar");
-}
-
-registerCleanupFunction(clearUserPrefs);
-
 function openInspector(callback)
 {
   let tab = gBrowser.selectedTab;
@@ -27,7 +18,7 @@ function openInspector(callback)
   if (inspector && inspector.isReady) {
     callback(inspector);
   } else {
-    let toolbox = gDevTools.openToolboxForTab("inspector", tab);
+    let toolbox = gDevTools.openToolboxForTab(tab, "inspector");
     toolbox.once("inspector-ready", function(event, panel) {
       let inspector = gDevTools.getPanelForTarget("inspector", tab);
       callback(inspector);
@@ -79,10 +70,11 @@ function midPoint(aPointA, aPointB)
   return pointC;
 }
 
-/* FIXME
 function computedView()
 {
-  return InspectorUI.sidebar._toolContext("computedview");
+  let sidebar = getActiveInspector().sidebar;
+  let iframe = sidebar.tabbox.querySelector(".iframe-computedview");
+  return iframe.contentWindow.computedView;
 }
 
 function computedViewTree()
@@ -92,9 +84,10 @@ function computedViewTree()
 
 function ruleView()
 {
-  return InspectorUI.sidebar._toolContext("ruleview").view;
+  let sidebar = getActiveInspector().sidebar;
+  let iframe = sidebar.tabbox.querySelector(".iframe-ruleview");
+  return iframe.contentWindow.ruleView;
 }
-*/
 
 function synthesizeKeyFromKeyTag(aKeyId) {
   let key = document.getElementById(aKeyId);

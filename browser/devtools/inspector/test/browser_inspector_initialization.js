@@ -21,12 +21,7 @@ function createDocument()
     '</div>';
   doc.title = "Inspector Initialization Test";
 
-  let tab = gBrowser.selectedTab;
-  let toolbox = gDevTools.openToolForTab("inspector", tab);
-  toolbox.once("inspector-ready", function(event, panel) {
-    let inspector = gDevTools.getPanelForTarget("inspector", tab);
-    startInspectorTests();
-  });
+  openInspector(startInspectorTests);
 }
 
 function startInspectorTests()
@@ -48,7 +43,6 @@ function startInspectorTests()
   testHighlighter(p);
   testMarkupView(p);
   testBreadcrumbs(p);
-  // FIXME: testSidebars(p);
 
   let span = doc.querySelector("span");
 
@@ -57,9 +51,8 @@ function startInspectorTests()
   testHighlighter(span);
   testMarkupView(span);
   testBreadcrumbs(span);
-  // FIXME: testSidebars(span);
 
-  let toolbox = gDevTools.openToolForTab("inspector", gBrowser.selectedTab);
+  let toolbox = gDevTools.getToolboxForTarget(gBrowser.selectedTab);
   toolbox.once("destroyed", function() {
     ok("true", "'destroyed' notification received.");
     let toolbox = gDevTools.getToolboxForTarget(gBrowser.selectedTab);
@@ -102,17 +95,7 @@ function runContextMenuTest()
 {
   salutation = doc.getElementById("salutation");
   _clickOnInspectMenuItem(salutation);
-  executeSoon(function() {
-    let inspector = gDevTools.getPanelForTarget("inspector", gBrowser.selectedTab);
-    if (inspector && inspector.isReady) {
-      executeSoon(testInitialNodeIsSelected);
-    } else {
-      let toolbox = gDevTools.openToolForTab("inspector", gBrowser.selectedTab);
-      toolbox.once("inspector-ready", function(event, panel) {
-        executeSoon(testInitialNodeIsSelected);
-      });
-    }
-  });
+  gDevTools.once("inspector-ready", testInitialNodeIsSelected);
 }
 
 function testInitialNodeIsSelected() {

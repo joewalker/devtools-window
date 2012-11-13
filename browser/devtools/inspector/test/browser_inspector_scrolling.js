@@ -7,6 +7,7 @@
 let doc;
 let div;
 let iframe;
+let inspector;
 
 function createDocument()
 {
@@ -21,35 +22,25 @@ function createDocument()
     div.textContent = "big div";
     div.setAttribute("style", "height:500px; width:500px; border:1px solid gray;");
     iframe.contentDocument.body.appendChild(div);
-    toggleInspector();
+    openInspector(inspectNode);
   }, false);
 
   iframe.src = "data:text/html,foo bar";
   doc.body.appendChild(iframe);
 }
 
-function toggleInspector()
+function inspectNode(aInspector)
 {
-  Services.obs.addObserver(inspectNode, InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED, false);
-  InspectorUI.toggleInspectorUI();
-}
+  inspector = aInspector;
 
-function inspectNode()
-{
-  Services.obs.removeObserver(inspectNode,
-    InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED, false);
-
-  InspectorUI.highlighter.addListener("nodeselected", performScrollingTest);
-
+  inspector.highlighter.once("locked", performScrollingTest);
   executeSoon(function() {
-    InspectorUI.inspectNode(div);
+    inspector.selection.setNode(div, "");
   });
 }
 
 function performScrollingTest()
 {
-  InspectorUI.highlighter.removeListener("nodeselected", performScrollingTest);
-
   executeSoon(function() {
     EventUtils.synthesizeWheel(div, 10, 10,
       { deltaY: 50.0, deltaMode: WheelEvent.DOM_DELTA_PIXEL },
@@ -62,8 +53,8 @@ function performScrollingTest()
 
     is(iframe.contentDocument.body.scrollTop, 50, "inspected iframe scrolled");
 
-    div = iframe = doc = null;
-    InspectorUI.closeInspectorUI();
+    inspector = div = iframe = doc = null;
+    gDevTools.closeToolbox(gBrowser.selectedTab);
     gBrowser.removeCurrentTab();
     finish();
   }, false);
