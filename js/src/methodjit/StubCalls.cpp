@@ -55,6 +55,8 @@ using namespace js::mjit;
 using namespace js::types;
 using namespace JSC;
 
+using mozilla::DebugOnly;
+
 void JS_FASTCALL
 stubs::BindName(VMFrame &f, PropertyName *name_)
 {
@@ -837,7 +839,7 @@ stubs::RecompileForInline(VMFrame &f)
 {
     AutoAssertNoGC nogc;
     ExpandInlineFrames(f.cx->compartment);
-    Recompiler::clearStackReferences(f.cx->runtime->defaultFreeOp(), f.script());
+    Recompiler::clearStackReferences(f.cx->runtime->defaultFreeOp(), f.script().get(nogc));
     f.jit()->destroyChunk(f.cx->runtime->defaultFreeOp(), f.chunkIndex(), /* resetUses = */ false);
 }
 
@@ -1305,7 +1307,7 @@ stubs::LookupSwitch(VMFrame &f, jsbytecode *pc)
 {
     AutoAssertNoGC nogc;
     jsbytecode *jpc = pc;
-    JSScript *script = f.fp()->script();
+    JSScript *script = f.fp()->script().get(nogc);
 
     /* This is correct because the compiler adjusts the stack beforehand. */
     Value lval = f.regs.sp[-1];
@@ -1631,7 +1633,7 @@ stubs::AssertArgumentTypes(VMFrame &f)
     AutoAssertNoGC nogc;
     StackFrame *fp = f.fp();
     JSFunction *fun = fp->fun();
-    RawScript script = fun->script();
+    RawScript script = fun->script().get(nogc);
 
     /*
      * Don't check the type of 'this' for constructor frames, the 'this' value
@@ -1676,7 +1678,7 @@ stubs::InvariantFailure(VMFrame &f, void *rval)
     *frameAddr = repatchCode;
 
     /* Recompile the outermost script, and don't hoist any bounds checks. */
-    RawScript script = f.fp()->script();
+    RawScript script = f.fp()->script().get(nogc);
     JS_ASSERT(!script->failedBoundsCheck);
     script->failedBoundsCheck = true;
 

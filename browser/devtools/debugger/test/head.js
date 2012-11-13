@@ -87,10 +87,12 @@ function removeTab(aTab, aWindow) {
 
 function closeDebuggerAndFinish(aRemoteFlag, aCallback, aWindow) {
   let targetWindow = aWindow || window;
-  let debuggerUI = targetWindow.DebuggerUI;
-
-  let debuggerClosed = false;
-  let debuggerDisconnected = false;
+  // let dbg = gDevTools.getPanelForTarget("jsdebugger", targetWindow);
+  let debuggerClosed = true;
+  let debuggerDisconnected = true;
+  gDevTools.closeToolbox(gTab);
+  debuggerDisconnected = true;
+  _maybeFinish();
 
   function _maybeFinish() {
     if (debuggerClosed && debuggerDisconnected) {
@@ -100,20 +102,20 @@ function closeDebuggerAndFinish(aRemoteFlag, aCallback, aWindow) {
     }
   }
 
-  debuggerUI.chromeWindow.addEventListener("Debugger:Shutdown", function cleanup() {
-    debuggerUI.chromeWindow.removeEventListener("Debugger:Shutdown", cleanup, false);
-    debuggerDisconnected = true;
-    _maybeFinish();
-  }, false);
-  if (!aRemoteFlag) {
-    debuggerUI.getDebugger().close(function() {
-      debuggerClosed = true;
-      _maybeFinish();
-    });
-  } else {
-    debuggerClosed = true;
-    debuggerUI.getRemoteDebugger().close();
-  }
+  // dbg.chromeWindow.addEventListener("Debugger:Shutdown", function cleanup() {
+  //   dbg.chromeWindow.removeEventListener("Debugger:Shutdown", cleanup, false);
+  //   debuggerDisconnected = true;
+  //   _maybeFinish();
+  // }, false);
+  // if (!aRemoteFlag) {
+  //   dbg.getDebugger().close(function() {
+  //     debuggerClosed = true;
+  //     _maybeFinish();
+  //   });
+  // } else {
+  //   debuggerClosed = true;
+  //   dbg.getRemoteDebugger().close();
+  // }
 }
 
 function get_tab_actor_for_url(aClient, aURL, aCallback) {
@@ -147,18 +149,14 @@ function attach_thread_actor_for_url(aClient, aURL, aCallback) {
   });
 }
 
-function wait_for_connect_and_resume(aOnDebugging, aWindow) {
-  let targetWindow = aWindow || window;
-  let targetDocument = targetWindow.document;
-
-  targetDocument.addEventListener("Debugger:Connected", function dbgConnected(aEvent) {
-    targetDocument.removeEventListener("Debugger:Connected", dbgConnected, true);
-
+function wait_for_connect_and_resume(aOnDebugging, aTab) {
+  let dbg = gDevTools.getPanelForTarget("jsdebugger", aTab);
+  dbg.once("connected", function dbgConnected() {
     // Wait for the initial resume...
-    aEvent.target.ownerDocument.defaultView.gClient.addOneTimeListener("resumed", function() {
+    dbg.panelWin.gClient.addOneTimeListener("resumed", function() {
       aOnDebugging();
     });
-  }, true);
+  });
 }
 
 function debug_tab_pane(aURL, aOnDebugging) {
@@ -166,16 +164,17 @@ function debug_tab_pane(aURL, aOnDebugging) {
     gBrowser.selectedTab = gTab;
     let debuggee = tab.linkedBrowser.contentWindow.wrappedJSObject;
 
-    let pane = DebuggerUI.toggleDebugger();
-    pane._frame.addEventListener("Debugger:Connected", function dbgConnected() {
-      pane._frame.removeEventListener("Debugger:Connected", dbgConnected, true);
-
-      // Wait for the initial resume...
-      pane.contentWindow.gClient.addOneTimeListener("resumed", function() {
-        pane.contentWindow.DebuggerView.Variables.lazyEmpty = false;
-        aOnDebugging(tab, debuggee, pane);
+    let toolbox = gDevTools.openToolboxForTab(tab, "jsdebugger");
+    toolbox.once("jsdebugger-ready", function dbgReady() {
+      let dbg = gDevTools.getPanelForTarget("jsdebugger", tab);
+      dbg.once("connected", function() {
+        // Wait for the initial resume...
+        dbg.panelWin.gClient.addOneTimeListener("resumed", function() {
+          dbg._view.Variables.lazyEmpty = false;
+          aOnDebugging(tab, debuggee, dbg);
+        });
       });
-    }, true);
+    });
   });
 }
 
@@ -192,7 +191,7 @@ function debug_remote(aURL, aOnDebugging, aBeforeTabAdded) {
       win._dbgwin.removeEventListener("Debugger:Connected", dbgConnected, true);
 
       // Wait for the initial resume...
-      win.contentWindow.gClient.addOneTimeListener("resumed", function() {
+      win.panelWin.gClient.addOneTimeListener("resumed", function() {
         win._dbgwin.DebuggerView.Variables.lazyEmpty = false;
         aOnDebugging(tab, debuggee, win);
       });

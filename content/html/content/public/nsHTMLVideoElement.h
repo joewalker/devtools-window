@@ -16,13 +16,7 @@ public:
   nsHTMLVideoElement(already_AddRefed<nsINodeInfo> aNodeInfo);
   virtual ~nsHTMLVideoElement();
 
-  static nsHTMLVideoElement* FromContent(nsIContent* aPossibleVideo)
-  {
-    if (!aPossibleVideo || !aPossibleVideo->IsHTML(nsGkAtoms::video)) {
-      return NULL;
-    }
-    return static_cast<nsHTMLVideoElement*>(aPossibleVideo);
-  }
+  NS_IMPL_FROMCONTENT_HTML_WITH_TAG(nsHTMLVideoElement, video)
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
@@ -37,6 +31,7 @@ public:
   NS_FORWARD_NSIDOMHTMLELEMENT(nsHTMLMediaElement::)
 
   // nsIDOMHTMLMediaElement
+  using nsHTMLMediaElement::GetPaused;
   NS_FORWARD_NSIDOMHTMLMEDIAELEMENT(nsHTMLMediaElement::)
 
   // nsIDOMHTMLVideoElement

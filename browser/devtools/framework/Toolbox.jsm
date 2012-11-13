@@ -31,7 +31,7 @@ this.EXPORTED_SYMBOLS = [ "Toolbox" ];
  *
  * @param {object} target
  *        The object the toolbox is debugging.
- * @param {DevTools.HostType} hostType
+ * @param {Toolbox.HostType} hostType
  *        Type of host that will host the toolbox (e.g. sidebar, window)
  * @param {string} selectedTool
  *        Tool to select initially
@@ -65,13 +65,26 @@ this.Toolbox = function Toolbox(target, hostType, selectedTool) {
   gDevTools.on("tool-unregistered", this._toolUnregistered);
 }
 
+/**
+ * The toolbox can be 'hosted' either embedded in a browser window
+ * or in a separate window.
+ */
+Toolbox.HostType = {
+  BOTTOM: "bottom",
+  SIDE: "side",
+  WINDOW: "window"
+}
+
 Toolbox.prototype = {
   _URL: "chrome://browser/content/devtools/framework/toolbox.xul",
 
   _prefs: {
     LAST_HOST: "devtools.toolbox.host",
-    LAST_TOOL: "devtools.toolbox.selectedTool"
+    LAST_TOOL: "devtools.toolbox.selectedTool",
+    SIDE_ENABLED: "devtools.toolbox.sideEnabled"
   },
+
+  HostType: Toolbox.HostType,
 
   /**
    * Returns a *copy* of the _toolPanels collection.
@@ -151,25 +164,46 @@ Toolbox.prototype = {
   },
 
   /**
+   * Build the buttons for changing hosts. Called every time
+   * the host changes.
+   */
+  _buildDockButtons: function TBOX_createDockButtons() {
+    let dockBox = this.doc.getElementById("toolbox-dock-buttons");
+
+    while (dockBox.firstChild) {
+      dockBox.removeChild(dockBox.firstChild);
+    }
+
+    let sideEnabled = Services.prefs.getBoolPref(this._prefs.SIDE_ENABLED);
+
+    for each (let position in this.HostType) {
+      if (position == this.hostType ||
+         (!sideEnabled && position == this.HostType.SIDE)) {
+        continue;
+      }
+
+      let button = this.doc.createElement("toolbarbutton");
+      button.id = "toolbox-dock-" + position;
+      button.className = "toolbox-dock-button";
+      button.addEventListener("command", function(position) {
+        this.hostType = position;
+      }.bind(this, position));
+
+      dockBox.appendChild(button);
+    }
+  },
+
+  /**
    * Onload handler for the toolbox's iframe
    */
   _onLoad: function TBOX_onLoad() {
     this.frame.removeEventListener("DOMContentLoaded", this._onLoad, true);
     this.isReady = true;
 
-    let buttons = this.doc.getElementsByClassName("toolbox-dock-button");
-
-    for (let i = 0; i < buttons.length; i++) {
-      let button = buttons[i];
-      button.addEventListener("command", function() {
-        let position = button.getAttribute("data-position");
-        this._switchToHost(position);
-      }
-      .bind(this), true);
-    }
-
     let closeButton = this.doc.getElementById("toolbox-close");
     closeButton.addEventListener("command", this.destroy, true);
+
+    this._buildDockButtons();
 
     this._buildTabs();
     this._buildButtons(this.frame);
@@ -189,13 +223,13 @@ Toolbox.prototype = {
   },
 
   /**
-   * Add buttons to the UI as specified in the devtools.window.toolbarspec pref
+   * Add buttons to the UI as specified in the devtools.window.toolbarSpec pref
    *
    * @param {iframe} frame
    *        The iframe to contain the buttons
    */
   _buildButtons: function TBOX_buildButtons(frame) {
-    let toolbarSpec = CommandUtils.getCommandbarSpec("devtools.toolbox.toolbarspec");
+    let toolbarSpec = CommandUtils.getCommandbarSpec("devtools.toolbox.toolbarSpec");
     let environment = { chromeDocument: frame.ownerDocument };
     let requisition = new Requisition(environment);
     requisition.commandOutputManager = new CommandOutputManager();
@@ -215,6 +249,8 @@ Toolbox.prototype = {
    *        Tool definition of the tool to build a tab for.
    */
   _buildTabForTool: function TBOX_buildTabForTool(toolDefinition) {
+    const MAX_ORDINAL = 99;
+
     let tabs = this.doc.getElementById("toolbox-tabs");
     let deck = this.doc.getElementById("toolbox-deck");
 
@@ -227,7 +263,7 @@ Toolbox.prototype = {
     radio.setAttribute("toolid", id);
 
     let ordinal = (typeof toolDefinition.ordinal == "number") ?
-                  toolDefinition.ordinal : 99;
+                  toolDefinition.ordinal : MAX_ORDINAL;
     radio.setAttribute("ordinal", ordinal);
 
     radio.addEventListener("command", function(id) {
@@ -282,22 +318,32 @@ Toolbox.prototype = {
     let definition = gDevTools.getToolDefinitions().get(id);
 
     // only build the tab's content if we haven't already
-    if (iframe.src != definition.url) {
+    if (iframe.getAttribute("src") != definition.url) {
       let boundLoad = function() {
         iframe.removeEventListener("DOMContentLoaded", boundLoad, true);
         let panel = definition.build(iframe.contentWindow, this);
         this._toolPanels.set(id, panel);
         if (panel.isReady) {
           this.emit(id + "-ready", panel);
+          this.emit("select", id);
+          this.emit(id + "-selected", panel);
+          gDevTools.emit(id + "-ready", this, panel);
         } else {
           panel.once("ready", function(event) {
             this.emit(id + "-ready", panel);
+            this.emit("select", id);
+            this.emit(id + "-selected", panel);
+            gDevTools.emit(id + "-ready", this, panel);
           }.bind(this));
         }
       }.bind(this);
 
       iframe.addEventListener("DOMContentLoaded", boundLoad, true);
       iframe.setAttribute("src", definition.url);
+    } else {
+      let panel = this._toolPanels.get(id);
+      this.emit("select", id);
+      this.emit(id + "-selected", panel);
     }
 
     Services.prefs.setCharPref(this._prefs.LAST_TOOL, id);
@@ -353,7 +399,7 @@ Toolbox.prototype = {
 
       Services.prefs.setCharPref(this._prefs.LAST_HOST, this._host.type);
 
-      this._setDockButtons();
+      this._buildDockButtons();
 
       this.emit("host-changed");
     }.bind(this));
@@ -370,21 +416,6 @@ Toolbox.prototype = {
     } else {
       let win = Services.wm.getMostRecentWindow("navigator:browser");
       return win.gBrowser.selectedTab;
-    }
-  },
-
-  /**
-   * Set the docking buttons to reflect the current host
-   */
-  _setDockButtons: function TBOX_setDockButtons() {
-    let buttons = this.doc.querySelectorAll(".toolbox-dock-button");
-    for (let button of buttons) {
-      if (button.id == "toolbox-dock-" + this._host.type) {
-        button.checked = true;
-      }
-      else {
-        button.checked = false;
-      }
     }
   },
 

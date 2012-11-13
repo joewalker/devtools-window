@@ -352,11 +352,6 @@ endif
 TAR_CREATE_FLAGS = -cvhf
 TAR_CREATE_FLAGS_QUIET = -chf
 
-ifeq ($(OS_ARCH),BSD_OS)
-TAR_CREATE_FLAGS = -cvLf
-TAR_CREATE_FLAGS_QUIET = -cLf
-endif
-
 ifeq ($(OS_ARCH),OS2)
 TAR_CREATE_FLAGS = -cvf
 TAR_CREATE_FLAGS_QUIET = -cf
@@ -379,14 +374,17 @@ JAVA_GEN_DIR  = _javagen
 JAVA_DIST_DIR = $(DEPTH)/$(JAVA_GEN_DIR)
 JAVA_IFACES_PKG_NAME = org/mozilla/interfaces
 
-OS_INCLUDES += $(NSPR_CFLAGS) $(NSS_CFLAGS) $(MOZ_JPEG_CFLAGS) $(MOZ_PNG_CFLAGS) $(MOZ_ZLIB_CFLAGS)
+OS_INCLUDES += $(MOZ_JPEG_CFLAGS) $(MOZ_PNG_CFLAGS) $(MOZ_ZLIB_CFLAGS)
 
+# NSPR_CFLAGS and NSS_CFLAGS must appear ahead of OS_INCLUDES to avoid Linux
+# builds wrongly picking up system NSPR/NSS header files.
 INCLUDES = \
   $(LOCAL_INCLUDES) \
   -I$(srcdir) \
   -I. \
   -I$(DIST)/include \
   $(if $(LIBXUL_SDK),-I$(LIBXUL_SDK)/include) \
+  $(NSPR_CFLAGS) $(NSS_CFLAGS) \
   $(OS_INCLUDES) \
   $(NULL)
 
@@ -710,7 +708,7 @@ ifdef LOCALE_MERGEDIR
 MAKE_JARS_FLAGS += --locale-mergedir=$(LOCALE_MERGEDIR)
 endif
 ifdef IS_LANGUAGE_REPACK
-MAKE_JARS_FLAGS += --l10n-base=$(L10NBASEDIR)
+MAKE_JARS_FLAGS += --l10n-base=$(L10NBASEDIR)/$(AB_CD)
 endif
 else
 MAKE_JARS_FLAGS += -c $(LOCALE_SRCDIR)

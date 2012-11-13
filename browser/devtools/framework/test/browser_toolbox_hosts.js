@@ -6,6 +6,9 @@ let temp = {}
 Cu.import("resource:///modules/devtools/gDevTools.jsm", temp);
 let DevTools = temp.DevTools;
 
+Cu.import("resource:///modules/devtools/Toolbox.jsm", temp);
+let Toolbox = temp.Toolbox;
+
 let toolbox;
 
 function test()
@@ -32,7 +35,7 @@ function openToolbox(callback)
 
 function testBottomHost()
 {
-  checkHostType(DevTools.HostType.BOTTOM);
+  checkHostType(Toolbox.HostType.BOTTOM);
 
   // test UI presence
   let iframe = document.getElementById("devtools-toolbox-bottom-iframe");
@@ -41,12 +44,12 @@ function testBottomHost()
   checkToolboxLoaded(iframe);
 
   toolbox.once("host-changed", testSidebarHost);
-  toolbox.hostType = DevTools.HostType.SIDE;
+  toolbox.hostType = Toolbox.HostType.SIDE;
 }
 
 function testSidebarHost()
 {
-  checkHostType(DevTools.HostType.SIDE);
+  checkHostType(Toolbox.HostType.SIDE);
 
   // test UI presence
   let bottom = document.getElementById("devtools-toolbox-bottom-iframe");
@@ -58,12 +61,12 @@ function testSidebarHost()
   checkToolboxLoaded(iframe);
 
   toolbox.once("host-changed", testWindowHost);
-  toolbox.hostType = DevTools.HostType.WINDOW;
+  toolbox.hostType = Toolbox.HostType.WINDOW;
 }
 
 function testWindowHost()
 {
-  checkHostType(DevTools.HostType.WINDOW);
+  checkHostType(Toolbox.HostType.WINDOW);
 
   let sidebar = document.getElementById("devtools-toolbox-side-iframe");
   ok(!sidebar, "toolbox sidebar iframe doesn't exist");
@@ -86,7 +89,7 @@ function toolboxDestroyed()
 function testRememberHost()
 {
   // last host was the window - make sure it's the same when re-opening
-  is(toolbox.hostType, DevTools.HostType.WINDOW, "host remembered");
+  is(toolbox.hostType, Toolbox.HostType.WINDOW, "host remembered");
 
   let win = Services.wm.getMostRecentWindow("devtools:toolbox");
   ok(win, "toolbox separate window exists");
@@ -110,10 +113,10 @@ function checkToolboxLoaded(iframe)
 
 function cleanup()
 {
-  Services.prefs.setCharPref("devtools.toolbox.host", DevTools.HostType.BOTTOM);
+  Services.prefs.setCharPref("devtools.toolbox.host", Toolbox.HostType.BOTTOM);
 
   toolbox.destroy();
-  DevTools = toolbox = null;
+  DevTools = Toolbox = toolbox = null;
   gBrowser.removeCurrentTab();
   finish();
 }

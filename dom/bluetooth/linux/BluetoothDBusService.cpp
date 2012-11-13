@@ -879,10 +879,9 @@ bool
 IsDeviceConnectedTypeBoolean()
 {
 #if defined(MOZ_WIDGET_GONK)
-
   char connProp[PROPERTY_VALUE_MAX];
 
-  property_get(PROP_DEVICE_CONNECTED_TYPE, connProp, "array");
+  property_get(PROP_DEVICE_CONNECTED_TYPE, connProp, "boolean");
   if (strcmp(connProp, "boolean") == 0) {
     return true;
   }
@@ -2368,7 +2367,8 @@ void
 BluetoothDBusService::Disconnect(const uint16_t aProfileId,
                                  BluetoothReplyRunnable* aRunnable)
 {
-  if (aProfileId == (uint16_t)(BluetoothServiceUuid::Handsfree >> 32)) {
+  if (aProfileId == (uint16_t)(BluetoothServiceUuid::Handsfree >> 32) ||
+      aProfileId == (uint16_t)(BluetoothServiceUuid::Headset >> 32)) {
     BluetoothHfpManager* hfp = BluetoothHfpManager::Get();
     hfp->Disconnect();
   } else if (aProfileId == (uint16_t)(BluetoothServiceUuid::ObjectPush >> 32)) {
@@ -2385,6 +2385,23 @@ BluetoothDBusService::Disconnect(const uint16_t aProfileId,
   nsString replyError;
   BluetoothValue v = true;
   DispatchBluetoothReply(aRunnable, v, replyError);
+}
+
+bool
+BluetoothDBusService::IsConnected(const uint16_t aProfileId)
+{
+  NS_ASSERTION(NS_IsMainThread(), "Must be called from main thread!");
+
+  if (aProfileId == (uint16_t)(BluetoothServiceUuid::Handsfree >> 32)
+      || aProfileId == (uint16_t)(BluetoothServiceUuid::Headset >> 32)) {
+    BluetoothHfpManager* hfp = BluetoothHfpManager::Get();
+    return hfp->GetConnectionStatus() == SocketConnectionStatus::SOCKET_CONNECTED;
+  } else if (aProfileId == (uint16_t)(BluetoothServiceUuid::ObjectPush >> 32)) {
+    BluetoothOppManager* opp = BluetoothOppManager::Get();
+    return opp->GetConnectionStatus() == SocketConnectionStatus::SOCKET_CONNECTED;
+  }
+
+  return false;
 }
 
 class ConnectBluetoothSocketRunnable : public nsRunnable
@@ -2424,10 +2441,6 @@ public:
       DispatchBluetoothReply(mRunnable, v, replyError);
       return NS_ERROR_FAILURE;
     }
-    // Bluetooth value needs to be set to something to succeed.
-    v = true;
-    DispatchBluetoothReply(mRunnable, v, replyError);
-
     return NS_OK;
   }
 
@@ -2557,7 +2570,7 @@ BluetoothDBusService::GetScoSocket(const nsAString& aAddress,
   return NS_OK;
 }
 
-bool
+void
 BluetoothDBusService::SendFile(const nsAString& aDeviceAddress,
                                BlobParent* aBlobParent,
                                BlobChild* aBlobChild,
@@ -2570,12 +2583,17 @@ BluetoothDBusService::SendFile(const nsAString& aDeviceAddress,
   // has been determined when calling 'Connect()'. Nevertheless, keep
   // it for future use.
   BluetoothOppManager* opp = BluetoothOppManager::Get();
-  opp->SendFile(aBlobParent, aRunnable);
+  BluetoothValue v = true;
+  nsString errorStr;
 
-  return true;
+  if (!opp->SendFile(aBlobParent)) {
+    errorStr.AssignLiteral("Calling SendFile() failed");
+  }
+
+  DispatchBluetoothReply(aRunnable, v, errorStr);
 }
 
-bool
+void
 BluetoothDBusService::StopSendingFile(const nsAString& aDeviceAddress,
                                       BluetoothReplyRunnable* aRunnable)
 {
@@ -2586,9 +2604,14 @@ BluetoothDBusService::StopSendingFile(const nsAString& aDeviceAddress,
   // has been determined when calling 'Connect()'. Nevertheless, keep
   // it for future use.
   BluetoothOppManager* opp = BluetoothOppManager::Get();
-  opp->StopSendingFile(aRunnable);
+  BluetoothValue v = true;
+  nsString errorStr;
 
-  return true;
+  if (!opp->StopSendingFile()) {
+    errorStr.AssignLiteral("Calling StopSendingFile() failed");
+  }
+
+  DispatchBluetoothReply(aRunnable, v, errorStr);
 }
 
 void
@@ -2603,7 +2626,14 @@ BluetoothDBusService::ConfirmReceivingFile(const nsAString& aDeviceAddress,
   // has been determined when calling 'Connect()'. Nevertheless, keep
   // it for future use.
   BluetoothOppManager* opp = BluetoothOppManager::Get();
-  opp->ConfirmReceivingFile(aConfirm, aRunnable);
+  BluetoothValue v = true;
+  nsString errorStr;
+
+  if (!opp->ConfirmReceivingFile(aConfirm)) {
+    errorStr.AssignLiteral("Calling ConfirmReceivingFile() failed");
+  }
+
+  DispatchBluetoothReply(aRunnable, v, errorStr);
 }
 
 nsresult

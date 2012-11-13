@@ -82,7 +82,6 @@ MOCHITEST_BROWSER_FILES = \
 	browser_webconsole_bug_632817.js \
 	browser_webconsole_bug_611795.js \
 	browser_webconsole_bug_618311_close_panels.js \
-	browser_webconsole_bug_618311_private_browsing.js \
 	browser_webconsole_bug_626484_output_copy_order.js \
 	browser_webconsole_bug_632347_iterators_generators.js \
 	browser_webconsole_bug_642108_pruneTest.js \
@@ -94,7 +93,6 @@ MOCHITEST_BROWSER_FILES = \
 	browser_webconsole_bug_642615_autocomplete.js \
 	browser_webconsole_bug_585991_autocomplete_popup.js \
 	browser_webconsole_bug_585991_autocomplete_keys.js \
-	browser_webconsole_bug_663443_panel_title.js \
 	browser_webconsole_bug_660806_history_nav.js \
 	browser_webconsole_bug_651501_document_body_autocomplete.js \
 	browser_webconsole_bug_653531_highlighter_console_helper.js \
@@ -109,7 +107,6 @@ MOCHITEST_BROWSER_FILES = \
 	browser_webconsole_bug_782653_CSS_links_in_Style_Editor.js \
 	browser_cached_messages.js \
 	browser_bug664688_sandbox_update_after_navigation.js \
-	browser_webconsole_menustatus.js \
 	browser_result_format_as_string.js \
 	browser_webconsole_bug_737873_mixedcontent.js \
 	browser_output_breaks_after_console_dir_uninspectable.js \
@@ -117,6 +114,12 @@ MOCHITEST_BROWSER_FILES = \
 	browser_bug_638949_copy_link_location.js \
 	head.js \
 	$(NULL)
+
+ifndef MOZ_PER_WINDOW_PRIVATE_BROWSING
+MOCHITEST_BROWSER_FILES += \
+        browser_webconsole_bug_618311_private_browsing.js \
+        $(NULL)
+endif
 
 MOCHITEST_BROWSER_FILES += \
 	test-console.html \

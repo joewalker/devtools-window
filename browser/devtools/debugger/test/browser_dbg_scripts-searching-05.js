@@ -27,7 +27,7 @@ function test()
     gTab = aTab;
     gDebuggee = aDebuggee;
     gPane = aPane;
-    gDebugger = gPane.contentWindow;
+    gDebugger = gPane.panelWin;
 
     gDebugger.DebuggerController.activeThread.addOneTimeListener("framesadded", function() {
       framesAdded = true;
@@ -134,7 +134,7 @@ function testLocationChange()
   window.addEventListener("Debugger:GlobalSearch:CacheCleared", function _onCacheCleared(aEvent) {
     window.removeEventListener(aEvent.type, _onCacheCleared);
 
-    is(gSearchView._cache.size(), 0,
+    is(gSearchView._cache.size, 0,
       "The scripts sources cache for global searching should be cleared after a page navigation.")
 
     cacheCleared = true;

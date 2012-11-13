@@ -69,7 +69,7 @@
 
 "use strict";
 
-const EXPORTED_SYMBOLS = ["SignInToWebsiteController"];
+this.EXPORTED_SYMBOLS = ["SignInToWebsiteController"];
 
 const Ci = Components.interfaces;
 const Cu = Components.utils;
@@ -92,6 +92,7 @@ const kOpenIdentityDialog = "open-id-dialog";
 const kCloseIdentityDialog = "close-id-dialog";
 
 // Observer messages to communicate to shim
+const kReceivedIdentityAssertion = "received-id-assertion";
 const kIdentityDelegateWatch = "identity-delegate-watch";
 const kIdentityDelegateRequest = "identity-delegate-request";
 const kIdentityDelegateLogout = "identity-delegate-logout";
@@ -143,7 +144,7 @@ let Pipe = {
    * provide a callback for handling messages.
    *
    * @param aRpOptions        options describing the Relying Party's
-   *        (dicitonary)      call, such as origin and loggedInEmail.
+   *        (dictionary)      call, such as origin and loggedInUser.
    *
    * @param aGaiaOptions      showUI:   boolean
    *        (dictionary)      message:  name of the message to emit
@@ -218,9 +219,20 @@ let Pipe = {
       // If we receive a "finished" event, then the delegate is done, so
       // we shut down the pipe and clean up.
       mm.addMessageListener(kIdentityControllerDoMethod, aMessageCallback);
-      mm.addMessageListener(kIdentityDelegateFinished, function identityDelegateFinished(message) {
+      mm.addMessageListener(kIdentityDelegateFinished, function identityDelegateFinished() {
+        // clean up listeners
         mm.removeMessageListener(kIdentityDelegateFinished, identityDelegateFinished);
         mm.removeMessageListener(kIdentityControllerDoMethod, aMessageCallback);
+
+        let id = kReceivedIdentityAssertion + "-" + getRandomId();
+        let detail = {
+          type: kReceivedIdentityAssertion,
+          showUI: aGaiaOptions.showUI || false,
+          id: id
+        };
+        log('tell gaia to close the dialog');
+        // tell gaia to close the dialog
+        GaiaInterface.sendChromeEvent(detail);
       });
 
       mm.sendAsyncMessage(aGaiaOptions.message, aRpOptions);
@@ -241,7 +253,7 @@ let Pipe = {
  * controller into IdentityService and DOM, and ultimately up to the
  * Relying Party, which is open in a different window context.
  */
-let SignInToWebsiteController = {
+this.SignInToWebsiteController = {
 
   /*
    * Initialize the controller.  To use a different gaia communication pipe,
@@ -289,11 +301,11 @@ let SignInToWebsiteController = {
    */
   _makeDoMethodCallback: function SignInToWebsiteController__makeDoMethodCallback(aRpId) {
     return function SignInToWebsiteController_methodCallback(aOptions) {
-      log("doMethod:", aOptions);
       let message = aOptions.json;
       if (typeof message === 'string') {
         message = JSON.parse(message);
       }
+      log("doMethod:", message.method);
       switch(message.method) {
         case "ready":
           IdentityService.doReady(aRpId);

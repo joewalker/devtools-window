@@ -222,6 +222,12 @@ MFBT_ROOT = $(srcdir)/../../mfbt
 VPATH += $(MFBT_ROOT)
 include $(MFBT_ROOT)/exported_headers.mk
 
+###############################################
+# BEGIN enable non-releasable features
+#
+ifeq (,$(filter beta release esr,$(MOZ_UPDATE_CHANNEL)))
+DEFINES += -DENABLE_TYPEDARRAY_MOVE
+endif
 
 ifdef ENABLE_TRACE_LOGGING
 
@@ -384,6 +390,7 @@ CPPSRCS += 	ExecutableAllocator.cpp \
 		YarrInterpreter.cpp \
 		YarrPattern.cpp \
 		YarrSyntaxChecker.cpp \
+		YarrCanonicalizeUCS2.cpp \
 		$(NONE)
 
 ifdef ENABLE_METHODJIT_SPEW

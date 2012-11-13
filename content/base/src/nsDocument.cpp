@@ -107,7 +107,7 @@
 #include "nsIDOMHTMLFormElement.h"
 #include "nsIRequest.h"
 #include "nsILink.h"
-#include "nsBlobProtocolHandler.h"
+#include "nsHostObjectProtocolHandler.h"
 
 #include "nsCharsetAlias.h"
 #include "nsCharsetSource.h"
@@ -143,9 +143,13 @@
 #ifdef MOZ_MEDIA
 #include "nsHTMLMediaElement.h"
 #endif // MOZ_MEDIA
+#ifdef MOZ_WEBRTC
+#include "IPeerConnection.h"
+#endif // MOZ_WEBRTC
 
 #include "mozAutoDocUpdate.h"
 #include "nsGlobalWindow.h"
+#include "mozilla/dom/EncodingUtils.h"
 #include "mozilla/dom/indexedDB/IndexedDatabaseManager.h"
 #include "nsDOMNavigationTiming.h"
 #include "nsEventStateManager.h"
@@ -1444,8 +1448,8 @@ nsDocument::~nsDocument()
 
   mPendingTitleChangeEvent.Revoke();
 
-  for (uint32_t i = 0; i < mFileDataUris.Length(); ++i) {
-    nsBlobProtocolHandler::RemoveFileDataEntry(mFileDataUris[i]);
+  for (uint32_t i = 0; i < mHostObjectURIs.Length(); ++i) {
+    nsHostObjectProtocolHandler::RemoveDataEntry(mHostObjectURIs[i]);
   }
 
   // We don't want to leave residual locks on images. Make sure we're in an
@@ -3044,8 +3048,7 @@ nsDocument::TryChannelCharset(nsIChannel *aChannel,
     nsresult rv = aChannel->GetContentCharset(charsetVal);
     if (NS_SUCCEEDED(rv)) {
       nsAutoCString preferred;
-      rv = nsCharsetAlias::GetPreferred(charsetVal, preferred);
-      if(NS_SUCCEEDED(rv)) {
+      if(EncodingUtils::FindEncodingForLabel(charsetVal, preferred)) {
         aCharset = preferred;
         aCharsetSource = kCharsetFromChannel;
         return true;
@@ -6742,6 +6745,20 @@ nsDocument::CanSavePresentation(nsIRequest *aNewRequest)
     return false;
   }
 
+#ifdef MOZ_WEBRTC
+  // Check if we have active PeerConnections
+  nsCOMPtr<IPeerConnectionManager> pcManager =
+    do_GetService(IPEERCONNECTION_MANAGER_CONTRACTID);
+
+  if (pcManager && win) {
+    bool active;
+    pcManager->HasActivePeerConnection(win->WindowID(), &active);
+    if (active) {
+      return false;
+    }
+  }
+#endif // MOZ_WEBRTC
+
   bool canCache = true;
   if (mSubDocuments)
     PL_DHashTableEnumerate(mSubDocuments, CanCacheSubDocument, &canCache);
@@ -7595,15 +7612,15 @@ nsDocument::GetCurrentContentSink()
 }
 
 void
-nsDocument::RegisterFileDataUri(const nsACString& aUri)
+nsDocument::RegisterHostObjectUri(const nsACString& aUri)
 {
-  mFileDataUris.AppendElement(aUri);
+  mHostObjectURIs.AppendElement(aUri);
 }
 
 void
-nsDocument::UnregisterFileDataUri(const nsACString& aUri)
+nsDocument::UnregisterHostObjectUri(const nsACString& aUri)
 {
-  mFileDataUris.RemoveElement(aUri);
+  mHostObjectURIs.RemoveElement(aUri);
 }
 
 void
@@ -8359,7 +8376,7 @@ HasCrossProcessParent(nsIDocument* aDocument)
   if (!docShell) {
     return false;
   }
-  return docShell->GetIsContentBoundary();
+  return docShell->GetIsBrowserOrApp();
 }
 
 static bool

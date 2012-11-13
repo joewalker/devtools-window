@@ -17,10 +17,6 @@
   transform: translateY(1px);
 }
 
-.toolbox-dock-button[checked] {
-  background-color: transparent;
-}
-
 #toolbox-dock-bottom {
   background-image: url("chrome://browser/skin/devtools/dock-bottom.png");
 }

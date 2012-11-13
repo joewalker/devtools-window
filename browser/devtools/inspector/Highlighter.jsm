@@ -42,11 +42,9 @@ const PSEUDO_CLASSES = [":hover", ":active", ":focus"];
  * Events:
  *
  *   "closed" - Highlighter is closing
- *   "nodeselected" - A new node has been selected
  *   "highlighting" - Highlighter is highlighting
  *   "locked" - The selected node has been locked
  *   "unlocked" - The selected ndoe has been unlocked
- *   "pseudoclasstoggled" - A pseudo-class lock has changed on the selected node
  *
  * Structure:
  *  <stack class="highlighter-container">

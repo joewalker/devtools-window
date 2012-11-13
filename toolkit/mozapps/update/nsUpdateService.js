@@ -16,6 +16,7 @@ Components.utils.import("resource://gre/modules/ctypes.jsm");
 const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cr = Components.results;
+const Cu = Components.utils;
 
 const UPDATESERVICE_CID = Components.ID("{B3C290A6-3943-4B89-8BBE-C01EB7B3B311}");
 const UPDATESERVICE_CONTRACTID = "@mozilla.org/updates/update-service;1";
@@ -206,6 +207,13 @@ XPCOMUtils.defineLazyGetter(this, "gABI", function aus_gABI() {
 #endif
   return abi;
 });
+
+#ifdef MOZ_WIDGET_GONK
+XPCOMUtils.defineLazyGetter(this, "gProductModel", function aus_gProductModel() {
+  Cu.import("resource://gre/modules/systemlibs.js");
+  return libcutils.property_get("ro.product.model");
+});
+#endif
 
 XPCOMUtils.defineLazyGetter(this, "gOSVersion", function aus_gOSVersion() {
   let osVersion;
@@ -1593,9 +1601,18 @@ UpdateService.prototype = {
    * notify the user of install success.
    */
   _postUpdateProcessing: function AUS__postUpdateProcessing() {
-    if (!this.canCheckForUpdates || !this.canApplyUpdates) {
-      LOG("UpdateService:_postUpdateProcessing - unable to check for or apply " +
+    if (!this.canCheckForUpdates) {
+      LOG("UpdateService:_postUpdateProcessing - unable to check for " +
           "updates... returning early");
+      return;
+    }
+
+    if (!this.canApplyUpdates) {
+      LOG("UpdateService:_postUpdateProcessing - unable to apply " +
+          "updates... returning early");
+      // If the update is present in the update directly somehow,
+      // it would prevent us from notifying the user of futher updates.
+      cleanupActiveUpdate();
       return;
     }
 
@@ -2772,6 +2789,10 @@ Checker.prototype = {
     url = url.replace(/%DISTRIBUTION_VERSION%/g,
                       getDistributionPrefValue(PREF_APP_DISTRIBUTION_VERSION));
     url = url.replace(/\+/g, "%2B");
+
+#ifdef MOZ_WIDGET_GONK
+    url = url.replace(/%PRODUCT_MODEL%/g, gProductModel);
+#endif
 
     if (force)
       url += (url.indexOf("?") != -1 ? "&" : "?") + "force=1";

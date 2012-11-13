@@ -11,40 +11,36 @@ relativesrcdir  = @relativesrcdir@
 include $(DEPTH)/config/autoconf.mk
 include $(topsrcdir)/config/rules.mk
 
-# FIXME: Not ready for prime time:
-# browser_inspector_highlighter_autohide.js \
-
 _BROWSER_FILES = \
 		browser_inspector_iframeTest.js \
 		browser_inspector_initialization.js \
 		browser_inspector_highlighter.js \
+		browser_inspector_scrolling.js \
+		browser_inspector_bug_665880.js \
+		browser_inspector_infobar.js \
+		browser_inspector_breadcrumbs.html \
+		browser_inspector_breadcrumbs.js \
+		browser_inspector_invalidate.js \
+		browser_inspector_menu.js \
+		browser_inspector_pseudoClass_menu.js \
+		browser_inspector_destroyselection.html \
+		browser_inspector_destroyselection.js \
+		browser_inspector_bug_699308_iframe_navigation.js \
+		browser_inspector_bug_672902_keyboard_shortcuts.js \
 		head.js \
 		helpers.js \
 		$(NULL)
 
-#		browser_inspector_scrolling.js \
-#		browser_inspector_tab_switch.js \
-#		browser_inspector_bug_665880.js \
-#		browser_inspector_bug_674871.js \
-#		browser_inspector_bug_566084_location_changed.js \
-#		browser_inspector_infobar.js \
-#		browser_inspector_bug_690361.js \
-#		browser_inspector_bug_672902_keyboard_shortcuts.js \
-#		browser_inspector_keybindings.js \
-#		browser_inspector_breadcrumbs.html \
-#		browser_inspector_breadcrumbs.js \
-#		browser_inspector_bug_699308_iframe_navigation.js \
-#		browser_inspector_changes.js \
-#		browser_inspector_ruleviewstore.js \
-#		browser_inspector_invalidate.js \
-#		browser_inspector_sidebarstate.js \
-#		browser_inspector_menu.js \
-#		browser_inspector_pseudoclass_lock.js \
-#		browser_inspector_pseudoClass_menu.js \
-#		browser_inspector_destroyselection.html \
-#		browser_inspector_destroyselection.js \
-#		browser_inspector_cmd_inspect.js \
-#		browser_inspector_cmd_inspect.html \
+# Not portable yet
+# browser_inspector_highlighter_autohide.js \
+# browser_inspector_pseudoclass_lock.js depends on sidebar API work \
+# browser_inspector_changes.js depends on the sidebar-freeze mechanism \
+# browser_inspector_bug_566084_location_changed.js depends on the location change code \
+# browser_inspector_bug_674871.js \
+# browser_inspector_cmd_inspect.js \
+# browser_inspector_cmd_inspect.html \
+# browser_inspector_sidebarstate.js \
+# browser_inspector_keybindings.js \
 
 libs::	$(_BROWSER_FILES)
 	$(INSTALL) $(foreach f,$^,"$f") $(DEPTH)/_tests/testing/mochitest/browser/$(relativesrcdir)

@@ -74,7 +74,8 @@ typedef nsEventStatus (* EVENT_CALLBACK)(nsGUIEvent *event);
 #define NS_NATIVE_OFFSETY     7
 #define NS_NATIVE_PLUGIN_PORT 8
 #define NS_NATIVE_SCREEN      9
-#define NS_NATIVE_SHELLWIDGET 10      // Get the shell GtkWidget
+// The toplevel GtkWidget containing this nsIWidget:
+#define NS_NATIVE_SHELLWIDGET 10
 // Has to match to NPNVnetscapeWindow, and shareable across processes
 // HWND on Windows and XID on X11
 #define NS_NATIVE_SHAREABLE_WINDOW 11
@@ -158,6 +159,29 @@ enum nsTopLevelWidgetZPlacement { // for PlaceBehind()
   eZPlacementBelow,       // just below another widget
   eZPlacementTop          // top of the window stack
 };
+
+/**
+ * Before the OS goes to sleep, this topic is notified.
+ */
+#define NS_WIDGET_SLEEP_OBSERVER_TOPIC "sleep_notification"
+
+/**
+ * After the OS wakes up, this topic is notified.
+ */
+#define NS_WIDGET_WAKE_OBSERVER_TOPIC "wake_notification"
+
+/**
+ * Before the OS suspends the current process, this topic is notified.  Some
+ * OS will kill processes that are suspended instead of resuming them.
+ * For that reason this topic may be useful to safely close down resources.
+ */
+#define NS_WIDGET_SUSPEND_PROCESS_OBSERVER_TOPIC "suspend_process_notification"
+
+/**
+ * After the current process resumes from being suspended, this topic is
+ * notified.
+ */
+#define NS_WIDGET_RESUME_PROCESS_OBSERVER_TOPIC "resume_process_notification"
 
 /**
  * Preference for receiving IME updates

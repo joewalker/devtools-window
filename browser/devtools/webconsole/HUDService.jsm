@@ -535,14 +535,13 @@ WebConsole.prototype = {
     let styleSheets = this.tab.linkedBrowser.contentWindow.document.styleSheets;
     for each (let style in styleSheets) {
       if (style.href == aSourceURL) {
-        let SEM = this.chromeWindow.StyleEditor.StyleEditorManager;
-        let win = SEM.getEditorForWindow(this.chromeWindow.content.window);
-        if (win) {
-          SEM.selectEditor(win, style, aSourceLine);
-        }
-        else {
-          this.chromeWindow.StyleEditor.openChrome(style, aSourceLine);
-        }
+        let gDevTools = this.chromeWindow.gDevTools;
+        let toolbox = gDevTools.getToolboxForTarget(this.tab);
+        toolbox.once("styleeditor-selected",
+          function _onStyleEditorReady(aEvent, aPanel) {
+            aPanel.selectStyleSheet(style, aSourceLine);
+          });
+        toolbox.selectTool("styleeditor");
         return;
       }
     }

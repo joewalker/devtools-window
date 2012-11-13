@@ -274,7 +274,7 @@ StyleEditorChrome.prototype = {
   /**
    * Reset the chrome UI to an empty and ready state.
    */
-  _resetChrome: function SEC__resetChrome()
+  resetChrome: function SEC__resetChrome()
   {
     this._editors.forEach(function (aEditor) {
       aEditor.removeActionListener(this);
@@ -297,7 +297,7 @@ StyleEditorChrome.prototype = {
    */
   _populateChrome: function SEC__populateChrome()
   {
-    this._resetChrome();
+    this.resetChrome();
 
     let document = this.contentDocument;
     this._document.title = _("chromeWindowTitle",

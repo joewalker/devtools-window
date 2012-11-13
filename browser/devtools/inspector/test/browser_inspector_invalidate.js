@@ -1,48 +1,43 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
-let doc;
-let div;
+function test() {
 
-function createDocument()
-{
-  div = doc.createElement("div");
-  div.setAttribute("style", "width: 100px; height: 100px; background:yellow;");
-  doc.body.appendChild(div);
+  let doc;
+  let div;
+  let inspector;
 
-  Services.obs.addObserver(runTest,
-    InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED, false);
-  InspectorUI.toggleInspectorUI();
-}
+  function createDocument()
+  {
+    div = doc.createElement("div");
+    div.setAttribute("style", "width: 100px; height: 100px; background:yellow;");
+    doc.body.appendChild(div);
 
-function runTest(subject)
-{
-  Services.obs.removeObserver(runTest,
-    InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED, false);
+    openInspector(runTest);
+  }
 
-  InspectorUI.highlighter.highlight(div);
+  function runTest(inspector)
+  {
+    inspector.selection.setNode(div);
 
-  executeSoon(function() {
-    let outline = InspectorUI.highlighter.outline;
-    is(outline.style.width, "100px", "selection has the right width");
+    executeSoon(function() {
+      let outline = inspector.highlighter.outline;
+      is(outline.style.width, "100px", "selection has the right width");
 
-    div.style.width = "200px";
-    function pollTest() {
-      if (outline.style.width == "100px") {
-    	setTimeout(pollTest, 10);
-    	return;
+      div.style.width = "200px";
+      function pollTest() {
+        if (outline.style.width == "100px") {
+          setTimeout(pollTest, 10);
+          return;
+        }
+        is(outline.style.width, "200px", "selection updated");
+        gBrowser.removeCurrentTab();
+        finish();
       }
-      is(outline.style.width, "200px", "selection updated");
-      InspectorUI.closeInspectorUI();
-      gBrowser.removeCurrentTab();
-      finish();
-    }
-    setTimeout(pollTest, 10);
-  });
-}
+      setTimeout(pollTest, 10);
+    });
+  }
 
-function test()
-{
   waitForExplicitFinish();
   gBrowser.selectedTab = gBrowser.addTab();
   gBrowser.selectedBrowser.addEventListener("load", function() {
@@ -53,4 +48,3 @@ function test()
 
   content.location = "data:text/html,basic tests for inspector";
 }
-

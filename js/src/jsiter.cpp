@@ -50,9 +50,10 @@
 #include "vm/Stack-inl.h"
 #include "vm/String-inl.h"
 
-using namespace mozilla;
 using namespace js;
 using namespace js::gc;
+
+using mozilla::ArrayLength;
 
 static const gc::AllocKind ITERATOR_FINALIZE_KIND = gc::FINALIZE_OBJECT2;
 
@@ -819,6 +820,12 @@ static JSObject *
 iterator_iteratorObject(JSContext *cx, HandleObject obj, JSBool keysonly)
 {
     return obj;
+}
+
+size_t
+PropertyIteratorObject::sizeOfMisc(JSMallocSizeOfFun mallocSizeOf) const
+{
+    return mallocSizeOf(getPrivate());
 }
 
 void

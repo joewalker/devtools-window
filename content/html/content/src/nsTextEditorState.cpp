@@ -38,6 +38,7 @@
 #include "mozilla/Selection.h"
 #include "nsEventListenerManager.h"
 #include "nsContentUtils.h"
+#include "mozilla/Preferences.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -933,7 +934,8 @@ nsTextEditorState::nsTextEditorState(nsITextControlElement* aOwningElement)
     mInitializing(false),
     mValueTransferInProgress(false),
     mSelectionCached(true),
-    mSelectionRestoreEagerInit(false)
+    mSelectionRestoreEagerInit(false),
+    mPlaceholderVisibility(false)
 {
   MOZ_COUNT_CTOR(nsTextEditorState);
 }
@@ -1025,6 +1027,8 @@ public:
     if (!mCurrentValue.IsEmpty()) {
       value = &mCurrentValue;
     }
+
+    nsAutoScriptBlocker scriptBlocker;
 
     mState->PrepareEditor(value);
 
@@ -1198,7 +1202,7 @@ nsTextEditorState::PrepareEditor(const nsAString *aValue)
     preDestroyer.Init(newEditor);
 
     // Make sure we clear out the non-breaking space before we initialize the editor
-    rv = mBoundFrame->UpdateValueDisplay(false, true);
+    rv = mBoundFrame->UpdateValueDisplay(true, true);
     NS_ENSURE_SUCCESS(rv, rv);
   } else {
     if (aValue || !mEditorInitialized) {
@@ -1668,8 +1672,8 @@ bool
 nsTextEditorState::GetMaxLength(int32_t* aMaxLength)
 {
   nsCOMPtr<nsIContent> content = do_QueryInterface(mTextCtrlElement);
-  NS_ENSURE_TRUE(content, false);
-  nsGenericHTMLElement* element = nsGenericHTMLElement::FromContent(content);
+  nsGenericHTMLElement* element =
+    nsGenericHTMLElement::FromContentOrNull(content);
   NS_ENSURE_TRUE(element, false);
 
   const nsAttrValue* attr = element->GetParsedAttr(nsGkAtoms::maxlength);
@@ -1965,9 +1969,7 @@ nsTextEditorState::ValueWasChanged(bool aNotify)
     return;
   }
 
-  nsAutoString valueString;
-  GetValue(valueString, true);
-  SetPlaceholderClass(valueString.IsEmpty(), aNotify);
+  UpdatePlaceholderVisibility(aNotify);
 }
 
 void
@@ -1991,28 +1993,25 @@ nsTextEditorState::UpdatePlaceholderText(bool aNotify)
 }
 
 void
-nsTextEditorState::SetPlaceholderClass(bool aVisible,
-                                       bool aNotify)
+nsTextEditorState::UpdatePlaceholderVisibility(bool aNotify)
 {
   NS_ASSERTION(mPlaceholderDiv, "This function should not be called if "
                                 "mPlaceholderDiv isn't set");
 
-  // No need to do anything if we don't have a frame yet
-  if (!mBoundFrame)
-    return;
+  nsAutoString value;
+  GetValue(value, true);
 
-  nsAutoString classValue;
+  mPlaceholderVisibility = value.IsEmpty();
 
-  classValue.Assign(NS_LITERAL_STRING("anonymous-div placeholder"));
+  if (mPlaceholderVisibility &&
+      !Preferences::GetBool("dom.placeholder.show_on_focus", true)) {
+    nsCOMPtr<nsIContent> content = do_QueryInterface(mTextCtrlElement);
+    mPlaceholderVisibility = !nsContentUtils::IsFocusedContent(content);
+  }
 
-  if (!aVisible)
-    classValue.AppendLiteral(" hidden");
-
-  nsIContent* placeholderDiv = GetPlaceholderNode();
-  NS_ENSURE_TRUE_VOID(placeholderDiv);
-
-  placeholderDiv->SetAttr(kNameSpaceID_None, nsGkAtoms::_class,
-                          classValue, aNotify);
+  if (mBoundFrame && aNotify) {
+    mBoundFrame->InvalidateFrame();
+  }
 }
 
 void

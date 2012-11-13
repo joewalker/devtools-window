@@ -6,7 +6,6 @@
 #include "nsIInputStream.h"
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
-#include "nsCharsetAlias.h"
 #include "nsIParser.h"
 #include "nsParserCIID.h"
 #include "nsStreamUtils.h"
@@ -16,6 +15,10 @@
 #include "nsSAXLocator.h"
 #include "nsSAXXMLReader.h"
 #include "nsCharsetSource.h"
+
+#include "mozilla/dom/EncodingUtils.h"
+
+using mozilla::dom::EncodingUtils;
 
 #define XMLNS_URI "http://www.w3.org/2000/xmlns/"
 
@@ -52,7 +55,9 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsSAXXMLReader)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsISAXXMLReader)
 NS_INTERFACE_MAP_END
 
-nsSAXXMLReader::nsSAXXMLReader() : mIsAsyncParse(false)
+nsSAXXMLReader::nsSAXXMLReader() :
+    mIsAsyncParse(false),
+    mEnableNamespacePrefixes(false)
 {
 }
 
@@ -101,7 +106,7 @@ nsSAXXMLReader::HandleStartElement(const PRUnichar *aName,
     // XXX don't have attr type information
     NS_NAMED_LITERAL_STRING(cdataType, "CDATA");
     // could support xmlns reporting, it's a standard SAX feature
-    if (!uri.EqualsLiteral(XMLNS_URI)) {
+    if (mEnableNamespacePrefixes || !uri.EqualsLiteral(XMLNS_URI)) {
       NS_ASSERTION(aAtts[1], "null passed to handler");
       atts->AddAttribute(uri, localName, qName, cdataType,
                          nsDependentString(aAtts[1]));
@@ -397,12 +402,20 @@ nsSAXXMLReader::SetErrorHandler(nsISAXErrorHandler *aErrorHandler)
 NS_IMETHODIMP
 nsSAXXMLReader::SetFeature(const nsAString &aName, bool aValue)
 {
+  if (aName.EqualsLiteral("http://xml.org/sax/features/namespace-prefixes")) {
+    mEnableNamespacePrefixes = aValue;
+    return NS_OK;
+  }
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
 nsSAXXMLReader::GetFeature(const nsAString &aName, bool *aResult)
 {
+  if (aName.EqualsLiteral("http://xml.org/sax/features/namespace-prefixes")) {
+    *aResult = mEnableNamespacePrefixes;
+    return NS_OK;
+  }
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -623,7 +636,7 @@ nsSAXXMLReader::TryChannelCharset(nsIChannel *aChannel,
     nsresult rv = aChannel->GetContentCharset(charsetVal);
     if (NS_SUCCEEDED(rv)) {
       nsAutoCString preferred;
-      if (NS_FAILED(nsCharsetAlias::GetPreferred(charsetVal, preferred)))
+      if (!EncodingUtils::FindEncodingForLabel(charsetVal, preferred))
         return false;
 
       aCharset = preferred;

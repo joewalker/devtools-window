@@ -48,7 +48,9 @@ this.DebuggerDefinition = {
 function DebuggerPanel(iframeWindow, toolbox) {
   this._toolbox = toolbox;
   this._controller = iframeWindow.DebuggerController;
+  this._view = iframeWindow.DebuggerView;
   this._bkp = this._controller.Breakpoints;
+  this.panelWin = iframeWindow;
 
   let onDebuggerLoaded = function () {
     iframeWindow.removeEventListener("Debugger:Loaded", onDebuggerLoaded, true);
@@ -102,7 +104,7 @@ DebuggerPanel.prototype = {
   },
 
   getBreakpoint: function() {
-    this._bkp.getBreakpoint.apply(this._bkp, arguments);
+    return this._bkp.getBreakpoint.apply(this._bkp, arguments);
   },
 
   getAllBreakpoints: function() {

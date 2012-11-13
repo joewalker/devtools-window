@@ -35,7 +35,7 @@ this.InspectorPanel = function InspectorPanel(iframeWindow, toolbox) {
   }
 
   this.tabTarget = (this.target.tab != null);
-  this.chromeTarget = (this.target.chromeWindow != null);
+  this.chromeTarget = (this.target.window != null);
 
   new EventEmitter(this);
 
@@ -85,7 +85,7 @@ this.InspectorPanel = function InspectorPanel(iframeWindow, toolbox) {
       this._selection.setNode(root);
     }
     if (this.chromeTarget) {
-      let root = this.target.chromeWindow.document.documentElement;
+      let root = this.target.window.document.documentElement;
       this._selection.setNode(root);
     }
 
@@ -99,9 +99,9 @@ this.InspectorPanel = function InspectorPanel(iframeWindow, toolbox) {
   let tabbox = this.panelDoc.querySelector("#inspector-sidebar");
   this.sidebar = new InspectorSidebar(tabbox, this);
 
-  this.sidebar.addView("chrome://browser/content/devtools/cssruleview.xul");
-  this.sidebar.addView("chrome://browser/content/devtools/csshtmltree.xul");
-  this.sidebar.addView("chrome://browser/content/devtools/layoutview/view.xhtml");
+  this.sidebar.addView("ruleview", "chrome://browser/content/devtools/cssruleview.xul");
+  this.sidebar.addView("propertyview", "chrome://browser/content/devtools/csshtmltree.xul");
+  this.sidebar.addView("layoutview", "chrome://browser/content/devtools/layoutview/view.xhtml");
 
   this.sidebar.show();
 }
@@ -145,16 +145,6 @@ InspectorPanel.prototype = {
   },
 
   /**
-   * Returns true if a given sidebar panel is currently visible.
-   * @param string aPanelName
-   *        The panel name as registered with registerSidebar
-   */
-  isSidePanelVisible: function InspectorPanel_isPanelVisible(aPanelName) {
-    return this.sidebar.visible &&
-           this.sidebar.activePanel === aPanelName;
-  },
-
-  /**
    * Destroy the inspector.
    */
   destroy: function InspectorPanel__destroy() {
@@ -163,6 +153,9 @@ InspectorPanel.prototype = {
       this.highlighter.off("unlocked", this.updateInspectorButton);
       this.highlighter.destroy();
     }
+
+    this.sidebar.destroy();
+    this.sidebar = null;
 
     this.nodemenu.removeEventListener("popupshowing", this._setupNodeMenu, true);
     this.nodemenu.removeEventListener("popuphiding", this._resetNodeMenu, true);
@@ -258,7 +251,7 @@ InspectorPanel.prototype = {
     if (this.tabTarget) {
       controllerWindow = this.target.tab.ownerDocument.defaultView;
     } else if (this.chromeTarget) {
-      controllerWindow = this.target.chromeWindow;
+      controllerWindow = this.target.window;
     }
     this.markup = new MarkupView(this, this._markupFrame, controllerWindow);
 

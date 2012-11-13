@@ -18,7 +18,33 @@ function test() {
   debug_remote(TEST_URL, function(aTab, aDebuggee, aWindow) {
     gTab = aTab;
     gWindow = aWindow;
-    let gDebugger = gWindow.contentWindow;
+    let gDebugger = gWindow.panelWin;
+
+    info("Current remote window x: " +
+      Services.prefs.getIntPref("devtools.debugger.ui.win-x"));
+    info("Current remote window y: " +
+      Services.prefs.getIntPref("devtools.debugger.ui.win-y"));
+    info("Current remote window width: " +
+      Services.prefs.getIntPref("devtools.debugger.ui.win-width"));
+    info("Current remote window height: " +
+      Services.prefs.getIntPref("devtools.debugger.ui.win-height"));
+
+    is(gDebugger.Prefs.windowX,
+      Services.prefs.getIntPref("devtools.debugger.ui.win-x"),
+      "Current window x pref corresponds to the debugger pref.");
+
+    is(gDebugger.Prefs.windowY,
+      Services.prefs.getIntPref("devtools.debugger.ui.win-y"),
+      "Current window y pref corresponds to the debugger pref.");
+
+    is(gDebugger.Prefs.windowWidth,
+      Services.prefs.getIntPref("devtools.debugger.ui.win-width"),
+      "Current window width pref corresponds to the debugger pref.");
+
+    is(gDebugger.Prefs.windowHeight,
+      Services.prefs.getIntPref("devtools.debugger.ui.win-height"),
+      "Current window height pref corresponds to the debugger pref.");
+
 
     info("Current remote host: " +
       Services.prefs.getCharPref("devtools.debugger.remote-host"));

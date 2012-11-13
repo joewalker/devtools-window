@@ -129,7 +129,6 @@ static NS_DEFINE_CID(kXTFServiceCID, NS_XTFSERVICE_CID);
 #include "nsISVGChildFrame.h"
 #include "nsRenderingContext.h"
 #include "gfxSVGGlyphs.h"
-#include "mozilla/dom/EncodingUtils.h"
 
 #ifdef IBMBIDI
 #include "nsIBidiKeyboard.h"
@@ -1529,8 +1528,7 @@ nsContentUtils::Shutdown()
   sModifierSeparator = nullptr;
 
   NS_IF_RELEASE(sSameOriginChecker);
-  
-  EncodingUtils::Shutdown();
+
   nsTextEditorState::ShutDown();
 }
 
@@ -1736,7 +1734,7 @@ nsContentUtils::GetDocumentFromCaller()
   JSAutoCompartment ac(cx, obj);
 
   nsCOMPtr<nsPIDOMWindow> win =
-    do_QueryInterface(nsJSUtils::GetStaticScriptGlobal(cx, obj));
+    do_QueryInterface(nsJSUtils::GetStaticScriptGlobal(obj));
   if (!win) {
     return nullptr;
   }
@@ -2760,7 +2758,6 @@ nsContentUtils::LoadImage(nsIURI* aURI, nsIDocument* aLoadingDocument,
                               aLoadingDocument,     /* uniquification key */
                               aLoadFlags,           /* load flags */
                               nullptr,               /* cache key */
-                              nullptr,               /* existing request*/
                               channelPolicy,        /* CSP info */
                               aRequest);
 }
@@ -3215,6 +3212,33 @@ nsContentUtils::ReportToConsole(uint32_t aErrorFlags,
                "Supply either both parameters and their number or no"
                "parameters and 0.");
 
+  nsresult rv;
+  nsXPIDLString errorText;
+  if (aParams) {
+    rv = FormatLocalizedString(aFile, aMessageName, aParams, aParamsLength,
+                               errorText);
+  }
+  else {
+    rv = GetLocalizedString(aFile, aMessageName, errorText);
+  }
+  NS_ENSURE_SUCCESS(rv, rv);
+
+  return ReportToConsoleNonLocalized(errorText, aErrorFlags, aCategory,
+                                     aDocument, aURI, aSourceLine,
+                                     aLineNumber, aColumnNumber);
+}
+
+
+/* static */ nsresult
+nsContentUtils::ReportToConsoleNonLocalized(const nsAString& aErrorText,
+                                            uint32_t aErrorFlags,
+                                            const char *aCategory,
+                                            nsIDocument* aDocument,
+                                            nsIURI* aURI,
+                                            const nsAFlatString& aSourceLine,
+                                            uint32_t aLineNumber,
+                                            uint32_t aColumnNumber)
+{
   uint64_t innerWindowID = 0;
   if (aDocument) {
     if (!aURI) {
@@ -3228,16 +3252,6 @@ nsContentUtils::ReportToConsole(uint32_t aErrorFlags,
     rv = CallGetService(NS_CONSOLESERVICE_CONTRACTID, &sConsoleService);
     NS_ENSURE_SUCCESS(rv, rv);
   }
-
-  nsXPIDLString errorText;
-  if (aParams) {
-    rv = FormatLocalizedString(aFile, aMessageName, aParams, aParamsLength,
-                               errorText);
-  }
-  else {
-    rv = GetLocalizedString(aFile, aMessageName, errorText);
-  }
-  NS_ENSURE_SUCCESS(rv, rv);
 
   nsAutoCString spec;
   if (!aLineNumber) {
@@ -3259,7 +3273,7 @@ nsContentUtils::ReportToConsole(uint32_t aErrorFlags,
       do_CreateInstance(NS_SCRIPTERROR_CONTRACTID, &rv);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = errorObject->InitWithWindowID(errorText,
+  rv = errorObject->InitWithWindowID(aErrorText,
                                      NS_ConvertUTF8toUTF16(spec), // file name
                                      aSourceLine,
                                      aLineNumber, aColumnNumber,
@@ -6644,7 +6658,7 @@ nsContentUtils::FindInternalContentViewer(const char* aType,
 #endif
 
 #ifdef MOZ_MEDIA_PLUGINS
-  if (nsHTMLMediaElement::IsMediaPluginsEnabled() &&
+  if (nsMediaDecoder::IsMediaPluginsEnabled() &&
       nsHTMLMediaElement::IsMediaPluginsType(nsDependentCString(aType))) {
     docFactory = do_GetService("@mozilla.org/content/document-loader-factory;1");
     if (docFactory && aLoaderType) {
@@ -6666,30 +6680,34 @@ nsContentUtils::IsPatternMatching(nsAString& aValue, nsAString& aPattern,
   NS_ASSERTION(aDocument, "aDocument should be a valid pointer (not null)");
   NS_ENSURE_TRUE(aDocument->GetScriptGlobalObject(), true);
 
-  JSContext* ctx = (JSContext*) aDocument->GetScriptGlobalObject()->
+  JSContext* cx = aDocument->GetScriptGlobalObject()->
                                   GetContext()->GetNativeContext();
-  NS_ENSURE_TRUE(ctx, true);
+  NS_ENSURE_TRUE(cx, true);
 
-  JSAutoRequest ar(ctx);
+  JSAutoRequest ar(cx);
 
   // The pattern has to match the entire value.
   aPattern.Insert(NS_LITERAL_STRING("^(?:"), 0);
   aPattern.Append(NS_LITERAL_STRING(")$"));
 
-  JSObject* re = JS_NewUCRegExpObjectNoStatics(ctx, reinterpret_cast<jschar*>
+  JSObject* re = JS_NewUCRegExpObjectNoStatics(cx, static_cast<jschar*>
                                                  (aPattern.BeginWriting()),
-                                                aPattern.Length(), 0);
-  NS_ENSURE_TRUE(re, true);
+                                               aPattern.Length(), 0);
+  if (!re) {
+    JS_ClearPendingException(cx);
+    return true;
+  }
 
-  jsval rval = JSVAL_NULL;
+  JS::Value rval = JS::NullValue();
   size_t idx = 0;
-  JSBool res;
+  if (!JS_ExecuteRegExpNoStatics(cx, re,
+                                 static_cast<jschar*>(aValue.BeginWriting()),
+                                 aValue.Length(), &idx, true, &rval)) {
+    JS_ClearPendingException(cx);
+    return true;
+  }
 
-  res = JS_ExecuteRegExpNoStatics(ctx, re, reinterpret_cast<jschar*>
-                                    (aValue.BeginWriting()),
-                                  aValue.Length(), &idx, JS_TRUE, &rval);
-
-  return res == JS_FALSE || rval != JSVAL_NULL;
+  return !rval.isNull();
 }
 
 // static

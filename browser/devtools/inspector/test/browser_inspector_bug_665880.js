@@ -23,37 +23,24 @@ function test()
   {
     objectNode = doc.querySelector("object");
     ok(objectNode, "we have the object node");
-    Services.obs.addObserver(runObjectInspectionTest,
-      InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED, false);
-    InspectorUI.toggleInspectorUI();
+    openInspector(runObjectInspectionTest);
   }
 
-  function runObjectInspectionTest()
+  function runObjectInspectionTest(inspector)
   {
-    Services.obs.removeObserver(runObjectInspectionTest,
-      InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED);
-
-    executeSoon(function() {
-      InspectorUI.highlighter.addListener("nodeselected", performTestComparison);
-
-      InspectorUI.inspectNode(objectNode);
-    });
+    inspector.highlighter.once("locked", performTestComparison);
+    inspector.selection.setNode(objectNode, "");
   }
 
   function performTestComparison()
   {
-    InspectorUI.highlighter.removeListener("nodeselected", performTestComparison);
-
-    is(InspectorUI.selection, objectNode, "selection matches node");
-
-    Services.obs.addObserver(finishUp,
-      InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED, false);
-    InspectorUI.closeInspectorUI();
+    is(getActiveInspector().selection.node, objectNode, "selection matches node");
+    gDevTools.closeToolbox(gBrowser.selectedTab);
+    finishUp();
   }
 
 
   function finishUp() {
-    Services.obs.removeObserver(finishUp, InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED);
     doc = objectNode = null;
     gBrowser.removeCurrentTab();
     finish();

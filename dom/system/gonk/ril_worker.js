@@ -2376,8 +2376,22 @@ let RIL = {
       case MMI_SC_CF_NOT_REACHABLE:
       case MMI_SC_CF_ALL:
       case MMI_SC_CF_ALL_CONDITIONAL:
-        // TODO: Bug 793192 - MMI Codes: support call forwarding.
-        _sendMMIError("CALL_FORWARDING_NOT_SUPPORTED_VIA_MMI");
+        // Call forwarding requires at least an action, given by the MMI
+        // procedure, and a reason, given by the MMI service code, but there
+        // is no way that we get this far without a valid procedure or service
+        // code.
+        options.action = MMI_PROC_TO_CF_ACTION[mmi.procedure];
+        options.rilMessageType = "sendMMI";
+        options.reason = MMI_SC_TO_CF_REASON[sc];
+        options.number = mmi.sia;
+        options.serviceClass = mmi.sib;
+        if (options.action == CALL_FORWARD_ACTION_QUERY_STATUS) {
+          this.queryCallForwardStatus(options);
+          return;
+        }
+
+        options.timeSeconds = mmi.sic;
+        this.setCallForward(options);
         return;
 
       // Change the current ICC PIN number.
@@ -2895,6 +2909,13 @@ let RIL = {
    },
 
   /**
+   * Report STK Service is running.
+   */
+  reportStkServiceIsRunning: function reportStkServiceIsRunning() {
+    Buf.simpleRequest(REQUEST_REPORT_STK_SERVICE_IS_RUNNING);
+  },
+
+  /**
    * Process ICC status.
    */
   _processICCStatus: function _processICCStatus(iccStatus) {
@@ -2961,6 +2982,7 @@ let RIL = {
     this.getSignalStrength();
     if (newCardState == GECKO_CARDSTATE_READY) {
       this.fetchICCRecords();
+      this.reportStkServiceIsRunning();
     }
 
     this.cardState = newCardState;
@@ -3473,9 +3495,13 @@ let RIL = {
       }
 
       if (!updatedDataCall) {
-        currentDataCall.state = GECKO_NETWORK_STATE_DISCONNECTED;
-        currentDataCall.rilMessageType = "datacallstatechange";
-        this.sendDOMMessage(currentDataCall);
+        // If datacalls list is coming from REQUEST_SETUP_DATA_CALL response,
+        // we do not change state for any currentDataCalls not in datacalls list.
+        if (!newDataCallOptions) {
+          currentDataCall.state = GECKO_NETWORK_STATE_DISCONNECTED;
+          currentDataCall.rilMessageType = "datacallstatechange";
+          this.sendDOMMessage(currentDataCall);
+        }
         continue;
       }
 
@@ -3866,7 +3892,7 @@ let RIL = {
       this.sendDOMMessage(message);
     }
 
-    if (message.messageClass == GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_2]) {
+    if (message && message.messageClass == GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_2]) {
       // `MS shall ensure that the message has been to the SMS data field in
       // the (U)SIM before sending an ACK to the SC.`  ~ 3GPP 23.038 clause 4
       return PDU_FCS_RESERVED;

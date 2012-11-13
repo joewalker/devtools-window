@@ -31,7 +31,6 @@ class nsIEditor;
 struct nsRect;
 struct nsSize;
 class nsHTMLFormElement;
-class nsIDOMDOMStringMap;
 class nsIDOMHTMLMenuElement;
 class nsIDOMHTMLCollection;
 class nsDOMSettableTokenList;
@@ -54,13 +53,7 @@ public:
     SetFlags(NODE_HAS_DIRECTION_LTR);
   }
 
-  /** Typesafe, non-refcounting cast from nsIContent.  Cheaper than QI. **/
-  static nsGenericHTMLElement* FromContent(nsIContent *aContent)
-  {
-    if (aContent->IsHTML())
-      return static_cast<nsGenericHTMLElement*>(aContent);
-    return nullptr;
-  }
+  NS_IMPL_FROMCONTENT(nsGenericHTMLElement, kNameSpaceID_XHTML)
 
   /**
    * Handle QI for the standard DOM interfaces (DOMNode, DOMElement,
@@ -218,7 +211,7 @@ public:
   nsresult GetContentEditable(nsAString& aContentEditable);
   nsresult GetIsContentEditable(bool* aContentEditable);
   nsresult SetContentEditable(const nsAString &aContentEditable);
-  nsresult GetDataset(nsIDOMDOMStringMap** aDataset);
+  nsresult GetDataset(nsISupports** aDataset);
   already_AddRefed<nsDOMStringMap> Dataset();
   // Callback for destructor of of dataset to ensure to null out weak pointer.
   nsresult ClearDataset();
@@ -1527,5 +1520,17 @@ NS_DECLARE_NS_NEW_HTML_ELEMENT(Unknown)
 #if defined(MOZ_MEDIA)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Video)
 #endif
+
+inline nsISupports*
+ToSupports(nsGenericHTMLElement* aHTMLElement)
+{
+  return aHTMLElement;
+}
+
+inline nsISupports*
+ToCanonicalSupports(nsGenericHTMLElement* aHTMLElement)
+{
+  return aHTMLElement;
+}
 
 #endif /* nsGenericHTMLElement_h___ */

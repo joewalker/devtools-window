@@ -9,6 +9,7 @@ function test()
   let doc;
   let nodes;
   let cursor;
+  let inspector;
 
   gBrowser.selectedTab = gBrowser.addTab();
   gBrowser.selectedBrowser.addEventListener("load", function onload() {
@@ -36,19 +37,15 @@ function test()
       ok(nodes[i].node, "node " + i + " found");
     }
 
-    Services.obs.addObserver(runTests,
-      InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED, false);
-    InspectorUI.toggleInspectorUI();
+    openInspector(runTests);
   }
 
-  function runTests()
+  function runTests(aInspector)
   {
-    Services.obs.removeObserver(runTests,
-      InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED);
-
+    inspector = aInspector;
     cursor = 0;
     executeSoon(function() {
-      InspectorUI.inspectNode(nodes[0].node);
+      inspector.selection.setNode(nodes[0].node, "");
       nodeSelected();
     });
   }
@@ -59,16 +56,10 @@ function test()
       performTest();
       cursor++;
       if (cursor >= nodes.length) {
-
-        Services.obs.addObserver(finishUp,
-          InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED, false);
-
-        executeSoon(function() {
-          InspectorUI.closeInspectorUI();
-        });
+        finishUp();
       } else {
         let node = nodes[cursor].node;
-        InspectorUI.inspectNode(node);
+        inspector.selection.setNode(node, "");
         nodeSelected();
       }
     });
@@ -76,21 +67,23 @@ function test()
 
   function performTest()
   {
-    let container = document.getElementById("highlighter-nodeinfobar-container");
+    let browser = gBrowser.selectedBrowser;
+    let stack = browser.parentNode;
+
+    let container = stack.querySelector(".highlighter-nodeinfobar-container");
     is(container.getAttribute("position"), nodes[cursor].position, "node " + cursor + ": position matches.");
 
-    let tagNameLabel = document.getElementById("highlighter-nodeinfobar-tagname");
+    let tagNameLabel = stack.querySelector(".highlighter-nodeinfobar-tagname");
     is(tagNameLabel.textContent, nodes[cursor].tag, "node " + cursor  + ": tagName matches.");
 
-    let idLabel = document.getElementById("highlighter-nodeinfobar-id");
+    let idLabel = stack.querySelector(".highlighter-nodeinfobar-id");
     is(idLabel.textContent, nodes[cursor].id, "node " + cursor  + ": id matches.");
 
-    let classesBox = document.getElementById("highlighter-nodeinfobar-classes");
+    let classesBox = stack.querySelector(".highlighter-nodeinfobar-classes");
     is(classesBox.textContent, nodes[cursor].classes, "node " + cursor  + ": classes match.");
   }
 
   function finishUp() {
-    Services.obs.removeObserver(finishUp, InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED);
     doc = nodes = null;
     gBrowser.removeCurrentTab();
     finish();

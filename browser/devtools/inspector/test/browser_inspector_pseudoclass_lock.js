@@ -35,26 +35,13 @@ function createDocument()
   head.appendChild(style);
   doc.body.appendChild(div);
 
-  setupTests();
+  openInspector(selectNode);
 }
 
-function setupTests()
+function selectNode(inspector)
 {
-  Services.obs.addObserver(selectNode,
-    InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED, false);
-  InspectorUI.openInspectorUI();
-}
-
-function selectNode()
-{
-  Services.obs.removeObserver(selectNode,
-    InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED);
-
-  executeSoon(function() {
-    InspectorUI.highlighter.addListener("locked", openRuleView);
-    InspectorUI.inspectNode(div);
-    InspectorUI.stopInspecting();
-  });
+  inspector.selection.setNode(div);
+  openRuleView();
 }
 
 function openRuleView()

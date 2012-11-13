@@ -18,7 +18,7 @@ function test() {
     let target = TargetFactory.forTab(gBrowser.selectedTab);
 
     let tools = gDevTools.getToolDefinitions();
-    let expectedCallbacksCount = tools.size();
+    let expectedCallbacksCount = tools.size;
 
     let firstTool = null;
     // we transform the map to a [id, eventHasBeenFiredYet] map

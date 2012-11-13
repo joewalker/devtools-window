@@ -19,63 +19,27 @@ this.TargetFactory = {
    * @return A target object
    */
   forTab: function TF_forTab(tab) {
-    let target = Object.create(Target.prototype);
-    new EventEmitter(target);
-
-    target.tab = tab;
-
-    target._remote = false;
-
-    let document = target.tab.linkedBrowser.contentDocument;
-    target.name = document.title;
-    target.url = document.location.href;
-
-    return target;
+    return new TabTarget(tab);
   },
 
   /**
    * Construct a Target
-   * @param {nsIDOMWindow} chromeWindow
+   * @param {nsIDOMWindow} window
    *        The chromeWindow to use in creating a new target
    * @return A target object
    */
-  forWindow: function TF_forWindow(chromeWindow) {
-    let target = Object.create(Target.prototype);
-    new EventEmitter(target);
-
-    target.chromeWindow = chromeWindow;
-
-    target._remote = false;
-
-    let document = chromeWindow.content.ownerDocument;
-    target.name = document.title;
-    target.url = document.location.href;
-
-    return target;
+  forWindow: function TF_forWindow(window) {
+    return new WindowTarget(window);
   },
 
   /**
    * Construct a Target for a remote global
-   * @param {FIXME} connection
+   * @param {FIXME} actor
    *        The connection to a remote mozilla instance
-   * @param {string} id
-   *        The id of a debuggable window in the remote instance
    * @return A target object
    */
-  forRemote: function TF_forRemote(connection, id) {
-    let target = Object.create(Target.prototype);
-    new EventEmitter(target);
-
-    target.connection = connection;
-    target.id = id;
-
-    target._remote = true;
-
-    // FIXME: implement
-    target.name = "...";
-    target.url = "...";
-
-    return target;
+  forRemote: function TF_forRemote(actor) {
+    return new RemoteTarget(actor);
   },
 
   /**
@@ -83,33 +47,40 @@ this.TargetFactory = {
    * @return An array of target objects
    */
   allTargets: function TF_allTargets() {
-    let chromeWindows = [];
+    let windows = [];
     let wm = Components.classes["@mozilla.org/appshell/window-mediator;1"]
                        .getService(Components.interfaces.nsIWindowMediator);
     let en = wm.getXULWindowEnumerator(null);
     while (en.hasMoreElements()) {
-      chromeWindows.push(en.getNext());
+      windows.push(en.getNext());
     }
 
-    return chromeWindows.map(function(chromeWindow) {
-      return TargetFactory.forWindow(chromeWindow);
+    return windows.map(function(window) {
+      return TargetFactory.forWindow(window);
     });
   },
+};
 
-  /**
-   * The listing counterpart to TargetFactory.forRemote which gets
-   * an array of Targets for all available remote web pages.
-   * @param {FIXME} connection
-   *        The connection to a remote mozilla instance
-   * @return An array of target objects
-   */
-  allRemotes: function TF_allRemotes(connection) {
-    return FixmeRemoteThing.getIds(connection).then(function(ids) {
-      return ids.map(function(id) {
-        return TargetFactory.forRemote(connection, id);
-      });
-    });
-  },
+/**
+ * The 'version' property allows the developer tools equivalent of browser
+ * detection. Browser detection is evil, however while we don't know what we
+ * will need to detect in the future, it is an easy way to postpone work.
+ * We should be looking to use 'supports()' in place of version where
+ * possible.
+ */
+function getVersion() {
+  // FIXME: return something better
+  return 20;
+}
+
+/**
+ * A better way to support feature detection, but we're not yet at a place
+ * where we have the features well enough defined for this to make lots of
+ * sense.
+ */
+function supports(feature) {
+  // FIXME: return something better
+  return false;
 };
 
 /**
@@ -147,37 +118,98 @@ function Target() {
   throw new Error("Use TargetFactory.newXXX or Target.getXXX to create a Target in place of 'new Target()'");
 }
 
-/**
- * isRemote implies that all communication with the target must be via the
- * debug API.
- */
-Object.defineProperty(Target.prototype, "isRemote", {
-  get: function Target_getIsRemote() {
-    return this._remote;
-  },
-  enumerable: true
-});
-
-/**
- * The 'version' property allows the developer tools equivalent of browser
- * detection. Browser detection is evil, however while we don't know what we
- * will need to detect in the future, it is an easy way to postpone work.
- * We should be looking to use 'supports()' in place of version where
- * possible.
- */
 Object.defineProperty(Target.prototype, "version", {
-  get: function Target_getVersion() {
-    // FIXME: return something better
-    return 20;
-  },
+  get: getVersion,
   enumerable: true
 });
 
+
 /**
- * A better way to support feature detection, but we're not yet at a place
- * where we have the features well enough defined for this to make lots of
- * sense.
+ * A TabTarget represents a page living in a browser tab. Generally these will
+ * be web pages served over http(s), but they don't have to be.
  */
-Target.prototype.supports = function Target_supports(feature) {
-  return false;
+function TabTarget(tab) {
+  new EventEmitter(this);
+  this._tab = tab;
+}
+
+TabTarget.prototype = {
+  supports: supports,
+  get version() { return getVersion(); },
+
+  get tab() {
+    return this._tab;
+  },
+
+  get name() {
+    return this._tab.linkedBrowser.contentDocument.title;
+  },
+
+  get url() {
+    return this._tab.linkedBrowser.contentDocument.location.href;
+  },
+
+  get remote() {
+    return false;
+  },
+};
+
+
+/**
+ * A WindowTarget represents a page living in a xul window or panel. Generally
+ * these will have a chrome: URL
+ */
+function WindowTarget(window) {
+  new EventEmitter(this);
+  this._window = window;
+}
+
+WindowTarget.prototype = {
+  supports: supports,
+  get version() { return getVersion(); },
+
+  get window() {
+    return this._window;
+  },
+
+  get name() {
+    return this._window.content.ownerDocument.title;
+  },
+
+  get url() {
+    return this._window.content.ownerDocument.location.href;
+  },
+
+  get remote() {
+    return false;
+  },
+};
+
+/**
+ * A RemoteTarget represents a page living in a remote Firefox instance.
+ */
+function RemoteTarget(actor) {
+  new EventEmitter(this);
+  this._actor = actor;
+}
+
+RemoteTarget.prototype = {
+  supports: supports,
+  get version() { return getVersion(); },
+
+  get actor() {
+    return this._actor;
+  },
+
+  get name() {
+    throw new Error("FIXME: implement");
+  },
+
+  get url() {
+    throw new Error("FIXME: implement");
+  },
+
+  get remote() {
+    return true;
+  },
 };

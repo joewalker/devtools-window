@@ -13,6 +13,11 @@
 #include "AudioBufferSourceNode.h"
 #include "AudioBuffer.h"
 #include "GainNode.h"
+#include "DelayNode.h"
+#include "PannerNode.h"
+#include "AudioListener.h"
+#include "DynamicsCompressorNode.h"
+#include "BiquadFilterNode.h"
 
 namespace mozilla {
 namespace dom {
@@ -21,11 +26,15 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(AudioContext)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_NATIVE(AudioContext)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mWindow)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mDestination)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mListener)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER_NATIVE
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NATIVE_BEGIN(AudioContext)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mWindow)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mDestination)
+  // Cannot use NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR since AudioListener
+  // does not inherit from nsISupports.
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NATIVE_PTR(tmp->mListener, AudioListener, "listener")
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE_SCRIPT_OBJECTS
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 NS_IMPL_CYCLE_COLLECTION_TRACE_NATIVE_BEGIN(AudioContext)
@@ -92,6 +101,49 @@ AudioContext::CreateGain()
 {
   nsRefPtr<GainNode> gainNode = new GainNode(this);
   return gainNode.forget();
+}
+
+already_AddRefed<DelayNode>
+AudioContext::CreateDelay(float aMaxDelayTime, ErrorResult& aRv)
+{
+  if (aMaxDelayTime <= 0.f) {
+    aRv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+    return nullptr;
+  }
+  nsRefPtr<DelayNode> delayNode = new DelayNode(this, aMaxDelayTime);
+  return delayNode.forget();
+}
+
+already_AddRefed<PannerNode>
+AudioContext::CreatePanner()
+{
+  nsRefPtr<PannerNode> pannerNode = new PannerNode(this);
+  return pannerNode.forget();
+}
+
+already_AddRefed<DynamicsCompressorNode>
+AudioContext::CreateDynamicsCompressor()
+{
+  nsRefPtr<DynamicsCompressorNode> compressorNode =
+    new DynamicsCompressorNode(this);
+  return compressorNode.forget();
+}
+
+already_AddRefed<BiquadFilterNode>
+AudioContext::CreateBiquadFilter()
+{
+  nsRefPtr<BiquadFilterNode> filterNode =
+    new BiquadFilterNode(this);
+  return filterNode.forget();
+}
+
+AudioListener*
+AudioContext::Listener()
+{
+  if (!mListener) {
+    mListener = new AudioListener(this);
+  }
+  return mListener;
 }
 
 }

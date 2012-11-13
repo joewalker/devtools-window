@@ -1270,7 +1270,7 @@ ion::CanEnterAtBranch(JSContext *cx, HandleScript script, StackFrame *fp, jsbyte
 
     // Attempt compilation. Returns Method_Compiled if already compiled.
     JSFunction *fun = fp->isFunctionFrame() ? fp->fun() : NULL;
-    MethodStatus status = Compile(cx, script, fun, pc, false);
+    MethodStatus status = Compile(cx, script, fun, pc, fp->isConstructing());
     if (status != Method_Compiled) {
         if (status == Method_CantCompile)
             ForbidCompilation(cx, script);
@@ -1587,7 +1587,7 @@ InvalidateActivation(FreeOp *fop, uint8 *ionTop, bool invalidateAll)
           case IonFrame_Exit:
             IonSpew(IonSpew_Invalidate, "#%d exit frame @ %p", frameno, it.fp());
             break;
-          case IonFrame_JS:
+          case IonFrame_OptimizedJS:
           {
             JS_ASSERT(it.isScripted());
             IonSpew(IonSpew_Invalidate, "#%d JS frame @ %p, %s:%d (fun: %p, script: %p, pc %p)",
@@ -1701,9 +1701,9 @@ ion::InvalidateAll(FreeOp *fop, JSCompartment *c)
     CancelOffThreadIonCompile(c, NULL);
 
     FinishAllOffThreadCompilations(c->ionCompartment());
-
     for (IonActivationIterator iter(fop->runtime()); iter.more(); ++iter) {
         if (iter.activation()->compartment() == c) {
+            IonContext ictx(NULL, c, NULL);
             AutoFlushCache afc ("InvalidateAll", c->ionCompartment());
             IonSpew(IonSpew_Invalidate, "Invalidating all frames for GC");
             InvalidateActivation(fop, iter.top(), true);
@@ -1875,10 +1875,8 @@ AutoFlushCache::AutoFlushCache(const char *nonce, IonCompartment *comp)
     name_(nonce),
     used_(false)
 {
-    if (comp == NULL) {
-        if (CurrentIonContext() != NULL)
-            comp = GetIonContext()->compartment->ionCompartment();
-    }
+    if (CurrentIonContext() != NULL)
+        comp = GetIonContext()->compartment->ionCompartment();
     // If a compartment isn't available, then be a nop, nobody will ever see this flusher
     if (comp) {
         if (comp->flusher())

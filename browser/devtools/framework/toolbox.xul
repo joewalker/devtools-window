@@ -12,18 +12,13 @@
 <window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
   <notificationbox id="toolbox-notificationbox" flex="1">
     <toolbar class="devtools-tabbar">
+      <hbox id="toolbox-controls">
+        <toolbarbutton id="toolbox-close" class="devtools-closebutton"></toolbarbutton>
+        <hbox id="toolbox-dock-buttons"/>
+      </hbox>
       <radiogroup id="toolbox-tabs" orient="horizontal">
       </radiogroup>
-      <hbox flex="1" pack="end">
-        <hbox id="toolbox-buttons"/>
-        <toolbarbutton checked="true" id="toolbox-dock-bottom" class="toolbox-dock-button"
-                       data-position="bottom"></toolbarbutton>
-        <toolbarbutton id="toolbox-dock-side" class="toolbox-dock-button"
-                       data-position="side"></toolbarbutton>
-        <toolbarbutton id="toolbox-dock-window" class="toolbox-dock-button"
-                       data-position="window"></toolbarbutton>
-        <toolbarbutton id="toolbox-close" class="devtools-closebutton"></toolbarbutton>
-      </hbox>
+      <hbox id="toolbox-buttons" flex="1" pack="end"/>
     </toolbar>
     <deck id="toolbox-deck" flex="1">
     </deck>

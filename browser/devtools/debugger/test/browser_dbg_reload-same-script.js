@@ -13,6 +13,8 @@ let gDebuggee = null;
 let gDebugger = null;
 let gView = null;
 
+requestLongerTimeout(2);
+
 function test()
 {
   let step = 0;
@@ -26,7 +28,7 @@ function test()
     gTab = aTab;
     gDebuggee = aDebuggee;
     gPane = aPane;
-    gDebugger = gPane.contentWindow;
+    gDebugger = gPane.panelWin;
     gView = gDebugger.DebuggerView;
     resumed = true;
 

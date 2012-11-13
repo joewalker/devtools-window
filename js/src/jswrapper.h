@@ -43,14 +43,10 @@ class JS_FRIEND_API(Wrapper) : public DirectProxyHandler
         LAST_USED_FLAG = CROSS_COMPARTMENT
     };
 
-    typedef enum {
-        PermitObjectAccess,
-        PermitPropertyAccess,
-        DenyAccess
-    } Permission;
-
     static JSObject *New(JSContext *cx, JSObject *obj, JSObject *proto,
                          JSObject *parent, Wrapper *handler);
+
+    static JSObject *Renew(JSContext *cx, JSObject *existing, JSObject *obj, Wrapper *handler);
 
     static Wrapper *wrapperHandler(RawObject wrapper);
 
@@ -241,7 +237,8 @@ class JS_FRIEND_API(DeadObjectProxy) : public BaseProxyHandler
 };
 
 extern JSObject *
-TransparentObjectWrapper(JSContext *cx, JSObject *obj, JSObject *wrappedProto, JSObject *parent,
+TransparentObjectWrapper(JSContext *cx, JSObject *existing, JSObject *obj,
+                         JSObject *wrappedProto, JSObject *parent,
                          unsigned flags);
 
 // Proxy family for wrappers. Public so that IsWrapper() can be fully inlined by
@@ -275,6 +272,9 @@ UnwrapOneChecked(JSContext *cx, HandleObject obj);
 
 JS_FRIEND_API(bool)
 IsCrossCompartmentWrapper(RawObject obj);
+
+bool
+IsDeadProxyObject(RawObject obj);
 
 JSObject *
 NewDeadProxyObject(JSContext *cx, JSObject *parent);

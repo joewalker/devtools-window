@@ -53,7 +53,7 @@ nsSafeOptionListMutation::nsSafeOptionListMutation(nsIContent* aSelect,
                                                    nsIContent* aKid,
                                                    uint32_t aIndex,
                                                    bool aNotify)
-  : mSelect(nsHTMLSelectElement::FromContent(aSelect))
+  : mSelect(nsHTMLSelectElement::FromContentOrNull(aSelect))
   , mTopLevelMutation(false)
   , mNeedsRebuild(false)
 {
@@ -2194,6 +2194,37 @@ nsHTMLOptionCollection::NamedItem(JSContext* cx, const nsAString& name,
     return nullptr;
   }
   return &v.toObject();
+}
+
+void
+nsHTMLOptionCollection::GetSupportedNames(nsTArray<nsString>& aNames)
+{
+  nsAutoTArray<nsIAtom*, 8> atoms;
+  for (uint32_t i = 0; i < mElements.Length(); ++i) {
+    nsHTMLOptionElement *content = mElements.ElementAt(i);
+    if (content) {
+      // Note: HasName means the names is exposed on the document,
+      // which is false for options, so we don't check it here.
+      const nsAttrValue* val = content->GetParsedAttr(nsGkAtoms::name);
+      if (val && val->Type() == nsAttrValue::eAtom) {
+        nsIAtom* name = val->GetAtomValue();
+        if (!atoms.Contains(name)) {
+          atoms.AppendElement(name);
+        }
+      }
+      if (content->HasID()) {
+        nsIAtom* id = content->GetID();
+        if (!atoms.Contains(id)) {
+          atoms.AppendElement(id);
+        }
+      }
+    }
+  }
+
+  aNames.SetCapacity(atoms.Length());
+  for (uint32_t i = 0; i < atoms.Length(); ++i) {
+    aNames.AppendElement(nsDependentAtomString(atoms[i]));
+  }
 }
 
 NS_IMETHODIMP

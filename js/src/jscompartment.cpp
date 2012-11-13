@@ -29,16 +29,19 @@
 #include "jsgcinlines.h"
 #include "jsobjinlines.h"
 #include "jsscopeinlines.h"
+#ifdef JS_ION
 #include "ion/IonCompartment.h"
 #include "ion/Ion.h"
+#endif
 
 #if ENABLE_YARR_JIT
 #include "assembler/jit/ExecutableAllocator.h"
 #endif
 
-using namespace mozilla;
 using namespace js;
 using namespace js::gc;
+
+using mozilla::DebugOnly;
 
 JSCompartment::JSCompartment(JSRuntime *rt)
   : rt(rt),
@@ -63,6 +66,8 @@ JSCompartment::JSCompartment(JSRuntime *rt)
     typeLifoAlloc(LIFO_ALLOC_PRIMARY_CHUNK_SIZE),
     data(NULL),
     active(false),
+    scheduledForDestruction(false),
+    maybeAlive(true),
     lastAnimationTime(0),
     regExps(rt),
     propertyTree(thisForCtor()),
@@ -190,13 +195,16 @@ WrapForSameCompartment(JSContext *cx, HandleObject obj, Value *vp)
 }
 
 bool
-JSCompartment::wrap(JSContext *cx, Value *vp)
+JSCompartment::wrap(JSContext *cx, Value *vp, JSObject *existing)
 {
     JS_ASSERT(cx->compartment == this);
+    JS_ASSERT_IF(existing, existing->compartment() == cx->compartment);
+    JS_ASSERT_IF(existing, vp->isObject());
+    JS_ASSERT_IF(existing, IsDeadProxyObject(existing));
 
     unsigned flags = 0;
 
-    JS_CHECK_RECURSION(cx, return false);
+    JS_CHECK_CHROME_RECURSION(cx, return false);
 
 #ifdef DEBUG
     struct AutoDisableProxyCheck {
@@ -302,13 +310,24 @@ JSCompartment::wrap(JSContext *cx, Value *vp)
     RootedObject obj(cx, &vp->toObject());
 
     JSObject *proto = Proxy::LazyProto;
+    if (existing) {
+        /* Is it possible to reuse |existing|? */
+        if (!existing->getTaggedProto().isLazy() ||
+            existing->getClass() != &ObjectProxyClass ||
+            existing->getParent() != global ||
+            obj->isCallable())
+        {
+            existing = NULL;
+        }
+    }
 
     /*
      * We hand in the original wrapped object into the wrap hook to allow
      * the wrap hook to reason over what wrappers are currently applied
      * to the object.
      */
-    RootedObject wrapper(cx, cx->runtime->wrapObjectCallback(cx, obj, proto, global, flags));
+    RootedObject wrapper(cx);
+    wrapper = cx->runtime->wrapObjectCallback(cx, existing, obj, proto, global, flags);
     if (!wrapper)
         return false;
 
@@ -345,12 +364,12 @@ JSCompartment::wrap(JSContext *cx, HeapPtrString *strp)
 }
 
 bool
-JSCompartment::wrap(JSContext *cx, JSObject **objp)
+JSCompartment::wrap(JSContext *cx, JSObject **objp, JSObject *existing)
 {
     if (!*objp)
         return true;
     RootedValue value(cx, ObjectValue(**objp));
-    if (!wrap(cx, value.address()))
+    if (!wrap(cx, value.address(), existing))
         return false;
     *objp = &value.get().toObject();
     return true;
@@ -561,7 +580,11 @@ JSCompartment::sweep(FreeOp *fop, bool releaseTypes)
             ionCompartment_->sweep(fop);
 #endif
 
-        /* JIT code can hold references on RegExpShared, so sweep regexps after clearing code. */
+        /*
+         * JIT code increments activeUseCount for any RegExpShared used by jit
+         * code for the lifetime of the JIT script. Thus, we must perform
+         * sweeping after clearing jit code.
+         */
         regExps.sweep(rt);
     }
 

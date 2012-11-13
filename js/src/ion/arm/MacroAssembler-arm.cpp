@@ -1323,7 +1323,7 @@ bool
 MacroAssemblerARMCompat::buildFakeExitFrame(const Register &scratch, uint32 *offset)
 {
     DebugOnly<uint32> initialDepth = framePushed();
-    uint32 descriptor = MakeFrameDescriptor(framePushed(), IonFrame_JS);
+    uint32 descriptor = MakeFrameDescriptor(framePushed(), IonFrame_OptimizedJS);
 
     Push(Imm32(descriptor)); // descriptor_
 
@@ -1349,7 +1349,7 @@ bool
 MacroAssemblerARMCompat::buildOOLFakeExitFrame(void *fakeReturnAddr)
 {
     DebugOnly<uint32> initialDepth = framePushed();
-    uint32 descriptor = MakeFrameDescriptor(framePushed(), IonFrame_JS);
+    uint32 descriptor = MakeFrameDescriptor(framePushed(), IonFrame_OptimizedJS);
 
     Push(Imm32(descriptor)); // descriptor_
 
@@ -1363,7 +1363,7 @@ MacroAssemblerARMCompat::buildOOLFakeExitFrame(void *fakeReturnAddr)
 void
 MacroAssemblerARMCompat::callWithExitFrame(IonCode *target)
 {
-    uint32 descriptor = MakeFrameDescriptor(framePushed(), IonFrame_JS);
+    uint32 descriptor = MakeFrameDescriptor(framePushed(), IonFrame_OptimizedJS);
     Push(Imm32(descriptor)); // descriptor
 
     addPendingJump(m_buffer.nextOffset(), target->raw(), Relocation::IONCODE);
@@ -1375,7 +1375,7 @@ void
 MacroAssemblerARMCompat::callWithExitFrame(IonCode *target, Register dynStack)
 {
     ma_add(Imm32(framePushed()), dynStack);
-    makeFrameDescriptor(dynStack, IonFrame_JS);
+    makeFrameDescriptor(dynStack, IonFrame_OptimizedJS);
     Push(dynStack); // descriptor
 
     addPendingJump(m_buffer.nextOffset(), target->raw(), Relocation::IONCODE);
@@ -1552,13 +1552,6 @@ void
 MacroAssemblerARMCompat::load16ZeroExtend(const Address &address, const Register &dest)
 {
     ma_dataTransferN(IsLoad, 16, false, address.base, Imm32(address.offset), dest);
-}
-
-void
-MacroAssemblerARMCompat::load16ZeroExtend_mask(const Address &address, Imm32 mask, const Register &dest)
-{
-    load16ZeroExtend(address, dest);
-    ma_and(mask, dest, dest);
 }
 
 void

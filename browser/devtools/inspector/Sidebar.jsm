@@ -19,7 +19,8 @@ Cu.import("resource:///modules/devtools/EventEmitter.jsm");
  * @param {Node} a <tabbox> node.
  * @param {ToolPanel} Related ToolPanel instance.
  */
-this.InspectorSidebar = function InspectorSidebar(tabbox, panel) {
+this.InspectorSidebar = function InspectorSidebar(tabbox, panel)
+{
   this.tabbox = tabbox;
   this.panelDoc = this.tabbox.ownerDocument;
   this.panel = panel;
@@ -30,18 +31,20 @@ InspectorSidebar.prototype = {
    * Register a view. A view is a document.
    * The document must have a title, which will be used as the name of the tab.
    *
+   * @param {string} view id
    * @param {string} url
    */
-  addView: function InspectorSidebar_addView(url) {
-    let tab = this.panelDoc.createElement("tab");
-    this.tabbox.tabs.appendChild(tab);
-
+  addView: function InspectorSidebar_addView(id, url) {
     let iframe = this.panelDoc.createElement("iframe");
+    iframe.className = "iframe-" + id;
     iframe.setAttribute("flex", "1");
     iframe.setAttribute("src", url);
 
     let onIFrameLoaded = function() {
-      tab.setAttribute("label", iframe.contentDocument.title);
+      let tab = this.tabbox.tabs.appendItem(iframe.contentDocument.title);
+      if (this.tabbox.selectedIndex < 0) {
+        this.tabbox.selectedTab = tab;
+      }
       iframe.removeEventListener("DOMContentLoaded", onIFrameLoaded, true);
       iframe.contentWindow.setPanel(this.panel, iframe);
     }.bind(this);
@@ -80,8 +83,15 @@ InspectorSidebar.prototype = {
   /**
    * Clean-up.
    */
-  destroy: function() {
-    this.hide();
+  destroy: function InspectorSidebar_destroy() {
+    while (this.tabbox.tabpanels.hasChildNodes()) {
+      this.tabbox.tabpanels.removeChild(this.tabbox.tabpanels.firstChild);
+    }
+
+    while (this.tabbox.tabs.hasChildNodes()) {
+      this.tabbox.tabs.removeChild(this.tabbox.tabs.firstChild);
+    }
+
     this.tabbox = null;
     this.panelDoc = null;
     this.panel = null;
