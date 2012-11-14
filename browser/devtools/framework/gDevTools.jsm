@@ -161,12 +161,13 @@ DevTools.prototype = {
     }
 
     let tb = new Toolbox(target, hostType, defaultToolId);
+    let tab = target.tab;
 
-    this._toolboxes.set(target.tab, tb);
+    this._toolboxes.set(tab, tb);
     tb.once("destroyed", function() {
-      this.emit("toolbox-destroyed", target.tab);
-      this._toolboxes.delete(target.tab);
+      this._toolboxes.delete(tab);
       this._updateMenuCheckbox();
+      this.emit("toolbox-destroyed", tab);
     }.bind(this));
 
     tb.once("ready", function() {

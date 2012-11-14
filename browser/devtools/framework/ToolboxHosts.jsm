@@ -75,6 +75,10 @@ BottomHost.prototype = {
    * Destroy the bottom dock.
    */
   destroy: function BH_destroy() {
+    if (this._destroyed) {
+      return;
+    }
+    this._destroyed = true;
     Services.prefs.setIntPref(this.heightPref, this.frame.height);
 
     this._nbox.removeChild(this._splitter);

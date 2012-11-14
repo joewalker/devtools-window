@@ -6,7 +6,11 @@
 
 this.EXPORTED_SYMBOLS = [ "TargetFactory" ];
 
-Components.utils.import("resource:///modules/devtools/EventEmitter.jsm");
+const Cu = Components.utils;
+const Ci = Components.interfaces;
+Cu.import("resource:///modules/devtools/EventEmitter.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+
 
 /**
  * Functions for creating Targets
@@ -101,8 +105,11 @@ function supports(feature) {
  * - close: The target window has been closed. All tools attached to this
  *     target should close. This event is not currently cancelable.
  * - navigate: The target window has navigated to a different URL
- * - reload: The target window has been refreshed via F5 or a similar mechanism
- * - change: One of the read-only
+ *
+ * Optional events:
+ * - will-navigate: The target window will navigate to a different URL
+ * - hidden: The target is not visible anymore (for TargetTab, another tab is selected)
+ * - visible: The target is visible (for TargetTab, tab is selected)
  *
  * Target also supports 2 functions to help allow 2 different versions of
  * Firefox debug each other. The 'version' property is the equivalent of
@@ -131,6 +138,7 @@ Object.defineProperty(Target.prototype, "version", {
 function TabTarget(tab) {
   new EventEmitter(this);
   this._tab = tab;
+  this._setupListeners();
 }
 
 TabTarget.prototype = {
@@ -151,6 +159,81 @@ TabTarget.prototype = {
 
   get remote() {
     return false;
+  },
+
+  /**
+   * Listen to the different tabs events.
+   */
+  _setupListeners: function TabTarget__setupListeners() {
+    this._webProgressListener.target = this;
+    this.tab.linkedBrowser.addProgressListener(this._webProgressListener);
+    this.tab.addEventListener("TabClose", this);
+    this.tab.parentNode.addEventListener("TabSelect", this);
+  },
+
+  /**
+   * Handle tabs events.
+   */
+  handleEvent: function (event) {
+    switch (event.type) {
+      case "TabClose":
+        this.destroy();
+        break;
+      case "TabSelect":
+        if (this.tab.selected) {
+          this.emit("visible", event);
+        } else {
+          this.emit("hidden", event);
+        }
+        break;
+    }
+  },
+
+  /**
+   * Handle webProgress events.
+   */
+  _webProgressListener: {
+    QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener, Ci.nsISupportsWeakReference]),
+    onProgressChange: function() {},
+    onStateChange: function(aProgress, aRequest, aFlag, aStatus) {
+      let isStart = aFlag & Ci.nsIWebProgressListener.STATE_START;
+      let isDocument = aFlag & Ci.nsIWebProgressListener.STATE_IS_DOCUMENT;
+      let isNetwork = aFlag & Ci.nsIWebProgressListener.STATE_IS_NETWORK;
+      let isRequest = aFlag & Ci.nsIWebProgressListener.STATE_IS_REQUEST;
+
+      // Skip non-interesting states.
+      if (!isStart || !isDocument || !isRequest || !isNetwork) {
+        return;
+      }
+
+      if (this.target) {
+        this.target.emit("will-navigate", aRequest);
+      }
+    },
+    onSecurityChange: function() {},
+    onStatusChange: function() {},
+    onLocationChange: function(webProgress){
+      let window = webProgress.DOMWindow;
+      if (this.target) {
+        this.target.emit("navigate", window);
+      }
+    },
+  },
+
+  /**
+   * Target is not alive anymore.
+   */
+  destroy: function() {
+    if (this._destroyed) {
+      return;
+    }
+    this.tab.linkedBrowser.removeProgressListener(this._webProgressListener)
+    this._webProgressListener.target = null;
+    this.tab.removeEventListener("TabClose", this);
+    this.tab.parentNode.removeEventListener("TabSelect", this);
+    this._tab = null;
+    this._destroyed = true;
+    this.emit("close");
   },
 };
 
@@ -173,11 +256,11 @@ WindowTarget.prototype = {
   },
 
   get name() {
-    return this._window.content.ownerDocument.title;
+    return this._window.document.title;
   },
 
   get url() {
-    return this._window.content.ownerDocument.location.href;
+    return this._window.document.location.href;
   },
 
   get remote() {

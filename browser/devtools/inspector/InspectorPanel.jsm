@@ -148,6 +148,11 @@ InspectorPanel.prototype = {
    * Destroy the inspector.
    */
   destroy: function InspectorPanel__destroy() {
+    if (this._destroyed) {
+      return;
+    }
+    this._destroyed = true;
+
     if (this.highlighter) {
       this.highlighter.off("locked", this.updateInspectorButton);
       this.highlighter.off("unlocked", this.updateInspectorButton);

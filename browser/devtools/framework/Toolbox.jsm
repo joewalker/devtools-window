@@ -45,6 +45,8 @@ this.Toolbox = function Toolbox(target, hostType, selectedTool) {
   this._toolUnregistered = this._toolUnregistered.bind(this);
   this.destroy = this.destroy.bind(this);
 
+  this._target.once("close", this.destroy);
+
   if (!hostType) {
     hostType = Services.prefs.getCharPref(this._prefs.LAST_HOST);
   }
@@ -486,6 +488,9 @@ Toolbox.prototype = {
    * Remove all UI elements, detach from target and clear up
    */
   destroy: function TBOX_destroy() {
+    this._target.destroy();
+    this._target = null;
+
     for (let [id, panel] of this._toolPanels) {
       panel.destroy();
     }
