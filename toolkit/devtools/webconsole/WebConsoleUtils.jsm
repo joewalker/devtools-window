@@ -1539,7 +1539,13 @@ this.JSTermHelpers = function JSTermHelpers(aOwner)
   Object.defineProperty(aOwner.sandbox, "$0", {
     get: function() {
       try {
-        return aOwner.chromeWindow().InspectorUI.selection;
+        let window = aOwner.chromeWindow();
+        let browser = window.gBrowser;
+        let devtools = window.gDevTools;
+        let panel = devtools.getPanelForTarget("inspector", browser.selectedTab);
+        if (panel) {
+          return panel.selection.node;
+        }
       }
       catch (ex) {
         aOwner.window.console.error(ex.message);

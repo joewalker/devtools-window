@@ -311,3 +311,16 @@ function waitForSuccess(aOptions)
 
   wait(aOptions.validatorFn, aOptions.successFn, aOptions.failureFn);
 }
+
+function openInspector(aCallback, aTab = gBrowser.selectedTab)
+{
+  let inspector = gDevTools.getPanelForTarget("inspector", aTab);
+  if (inspector && inspector.isReady) {
+    aCallback(inspector);
+  } else {
+    let toolbox = gDevTools.openToolboxForTab(aTab, "inspector");
+    toolbox.once("inspector-ready", function _onSelect(aEvent, aPanel) {
+      aCallback(aPanel);
+    });
+  }
+}
