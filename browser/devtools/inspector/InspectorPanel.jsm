@@ -97,11 +97,11 @@ this.InspectorPanel = function InspectorPanel(iframeWindow, toolbox) {
   }.bind(this));
 
   let tabbox = this.panelDoc.querySelector("#inspector-sidebar");
-  this.sidebar = new InspectorSidebar(tabbox, this);
+  this.sidebar = new ToolSidebar(tabbox, this);
 
-  this.sidebar.addView("ruleview", "chrome://browser/content/devtools/cssruleview.xul");
-  this.sidebar.addView("propertyview", "chrome://browser/content/devtools/csshtmltree.xul");
-  this.sidebar.addView("layoutview", "chrome://browser/content/devtools/layoutview/view.xhtml");
+  this.sidebar.addTab("ruleview", "chrome://browser/content/devtools/cssruleview.xul");
+  this.sidebar.addTab("propertyview", "chrome://browser/content/devtools/csshtmltree.xul");
+  this.sidebar.addTab("layoutview", "chrome://browser/content/devtools/layoutview/view.xhtml");
 
   this.sidebar.show();
 }
