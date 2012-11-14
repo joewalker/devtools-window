@@ -13,6 +13,9 @@
 
 <window xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
 
+  <script type="application/javascript"
+          src="chrome://global/content/viewSourceUtils.js"/>
+
   <popupset id="inspectorPopupSet">
     <!-- Used by the Markup Panel, the Highlighter and the Breadcrumbs -->
     <menupopup id="inspector-node-popup">

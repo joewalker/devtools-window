@@ -17,6 +17,10 @@ Cu.import("resource://gre/modules/PluralForm.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource:///modules/devtools/CssLogic.jsm");
 Cu.import("resource:///modules/devtools/Templater.jsm");
+Cu.import("resource:///modules/devtools/StyleEditorDefinition.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
+                                  "resource:///modules/devtools/gDevTools.jsm");
 
 this.EXPORTED_SYMBOLS = ["CssHtmlTree", "PropertyView"];
 
@@ -1204,27 +1208,35 @@ SelectorView.prototype = {
 
   /**
    * When a css link is clicked this method is called in order to either:
-   *   1. Open the link in view source (for element style attributes).
+   *   1. Open the link in view source (for chrome stylesheets).
    *   2. Open the link in the style editor.
    *
-   *   Like the style editor, we only view stylesheets contained in
-   *   document.styleSheets inside the style editor.
+   *   We can only view stylesheets contained in document.styleSheets inside the
+   *   style editor.
    *
    * @param aEvent The click event
    */
   openStyleEditor: function(aEvent)
   {
-    let rule = this.selectorInfo.selector._cssRule;
-    let doc = this.tree.win.content.document;
+    let inspector = this.tree.styleInspector.inspector;
+    let contentDoc = inspector.selection.document;
+    let cssSheet = this.selectorInfo.selector._cssRule._cssSheet;
     let line = this.selectorInfo.ruleLine || 0;
-    let cssSheet = rule._cssSheet;
     let contentSheet = false;
     let styleSheet;
     let styleSheets;
 
+    // The style editor can only display stylesheets coming from content because
+    // chrome stylesheets are not listed in the editor's stylesheet selector.
+    //
+    // If the stylesheet is a content stylesheet we send it to the style
+    // editor else we display it in the view source window.
+    //
+    // We check if cssSheet exists in case of inline styles (which contain no
+    // sheet)
     if (cssSheet) {
       styleSheet = cssSheet.domSheet;
-      styleSheets = doc.styleSheets;
+      styleSheets = contentDoc.styleSheets;
 
       // Array.prototype.indexOf always returns -1 here so we loop through
       // the styleSheets array instead.
@@ -1237,15 +1249,24 @@ SelectorView.prototype = {
     }
 
     if (contentSheet) {
-      this.tree.win.StyleEditor.openChrome(styleSheet, line);
+      let target = inspector.target;
+
+      if (StyleEditorDefinition.isTargetSupported(target)) {
+        let toolbox = gDevTools.getToolboxForTarget(target.tab);
+
+        toolbox.once("styleeditor-selected", function SE_selected(id, styleEditor) {
+          styleEditor.selectStyleSheet(styleSheet, line);
+        });
+        toolbox.selectTool("styleeditor");
+      }
     } else {
       let href = styleSheet ? styleSheet.href : "";
-      let viewSourceUtils = this.tree.win.gViewSourceUtils;
+      let viewSourceUtils = inspector.viewSourceUtils;
 
       if (this.selectorInfo.sourceElement) {
         href = this.selectorInfo.sourceElement.ownerDocument.location.href;
       }
-      viewSourceUtils.viewSource(href, null, doc, line);
+      viewSourceUtils.viewSource(href, null, contentDoc, line);
     }
   },
 };
