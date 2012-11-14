@@ -203,41 +203,6 @@
   position: relative;
 }
 
-/* Tabs */
-
-.devtools-tabbar {
-  -moz-appearance: none;
-  background-image: url(background-noise-toolbar.png), -moz-linear-gradient(top, hsl(210,11%,36%), hsl(210,11%,18%));
-  color: hsl(210,30%,85%);
-  padding: 4px 3px 3px;
-  box-shadow: 0 -3px 0 0 rgb(20,20,20) inset, 0 -4px 0 0 rgba(0,0,0,0.8) inset;
-}
-
-.devtools-tab {
-  -moz-appearance: none;
-  min-width: 78px;
-  min-height: 22px;
-  text-shadow: 0 -1px 0 hsla(210,8%,5%,.45);
-  border-radius: @toolbarbuttonCornerRadius@ @toolbarbuttonCornerRadius@ 0 0;
-  color: inherit;
-  border-style: solid;
-  border-color: transparent;
-  border-width: 1px 1px 0;
-  margin: 0 5px;
-  padding: 0 10px 1px;
-}
-
-.devtools-tab[selected=true] {
-  border-color: hsla(210,8%,5%,.6);
-  background-color: rgb(20,20,20);
-  text-shadow: none;
-  color: white;
-}
-
-.devtools-tab > .radio-check {
-  display: none;
-}
-
 /* In-tools sidebar */
 
 .devtools-sidebar-tabs {
