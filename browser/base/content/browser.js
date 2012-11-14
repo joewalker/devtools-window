@@ -1455,8 +1455,8 @@ var gBrowserInit = {
       cmd.removeAttribute("hidden");
     }
 
-    // Initialize gDevTools
-    gDevTools.init(window.document);
+    // Add Devtools menuitems and listeners
+    gDevTools.addToBrowserWindow(window.document);
 
     let appMenuButton = document.getElementById("appmenu-button");
     let appMenuPopup = document.getElementById("appmenu-popup");

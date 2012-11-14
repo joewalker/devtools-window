@@ -25,10 +25,6 @@ this.DevTools = function DevTools() {
   this._tools = new Map();
   this._toolboxes = new Map();
 
-  // Because init() is called from browser.js's _delayedStartup() method we need
-  // to use bind in order to preserve the context of "this."
-  this.init = this.init.bind(this);
-
   // destroy() is an observer's handler so we need to preserve context.
   this.destroy = this.destroy.bind(this);
 
@@ -36,30 +32,18 @@ this.DevTools = function DevTools() {
   this._updateMenuCheckbox = this._updateMenuCheckbox.bind(this);
 
   new EventEmitter(this);
+
+  Services.obs.addObserver(this.destroy, "quit-application-granted", false);
+
+  /**
+   * Register the set of default tools
+   */
+  for (let definition of defaultTools) {
+    this.registerTool(definition);
+  }
 }
 
 DevTools.prototype = {
-  /**
-   * Initialize the DevTools class.
-   *
-   * @param  {XULDocument} doc
-   *         The document to which any menu items are to be added
-   */
-  init: function DT_init(doc) {
-    /**
-     * Register the set of default tools
-     */
-    for (let definition of defaultTools) {
-      this.registerTool(definition);
-    }
-    this._addAllToolsToMenu(doc);
-
-    let tabContainer = doc.getElementById("tabbrowser-tabs")
-    tabContainer.addEventListener("TabSelect", this._updateMenuCheckbox, false);
-
-    Services.obs.addObserver(this.destroy, "quit-application-granted", false);
-  },
-
   /**
    * Register a new developer tool.
    *
@@ -281,6 +265,19 @@ DevTools.prototype = {
       return undefined;
     }
     return toolbox.getToolPanels().get(toolId);
+  },
+
+  /**
+   * Add this DevTools's presence to a browser window's document
+   *
+   * @param  {XULDocument} doc
+   *         The document to which menuitems and handlers are to be added
+   */
+  addToBrowserWindow: function DT_addToBrowserWindow(doc) {
+    this._addAllToolsToMenu(doc);
+
+    let tabContainer = doc.getElementById("tabbrowser-tabs")
+    tabContainer.addEventListener("TabSelect", this._updateMenuCheckbox, false);
   },
 
   /**
