@@ -22,7 +22,7 @@ function test() {
     toolbox.once("ready", function() {
       info("Toolbox fired a `ready` event");
 
-      toolbox.on("select", function(event, id) {
+      toolbox.on("select", function selectCB(event, id) {
         info("`select` event form " + id);
         called[id] = true;
         for (let tool in called) {
@@ -30,6 +30,7 @@ function test() {
             return;
           }
           ok(true, "All the tools fired a 'select event'");
+          toolbox.off("select", selectCB);
           reselect();
         }
       });
