@@ -31,6 +31,7 @@ _BROWSER_FILES = \
 		helpers.js \
 		$(NULL)
 
+# FIXME: FAILING TESTS
 # Not portable yet
 # browser_inspector_highlighter_autohide.js \
 # browser_inspector_pseudoclass_lock.js depends on sidebar API work \
