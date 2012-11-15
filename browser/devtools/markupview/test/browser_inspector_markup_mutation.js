@@ -11,9 +11,6 @@ http://creativecommons.org/publicdomain/zero/1.0/ */
  */
 
 function test() {
-  // FIXME: commented out for failing test
-  return;
-
   waitForExplicitFinish();
 
   // Will hold the doc we're viewing
@@ -26,6 +23,8 @@ function test() {
   // Holds the document we use to help re-parse the markup tool's output.
   let parseTab;
   let parseDoc;
+
+  let inspector;
 
   // Strip whitespace from a node and its children.
   function stripWhitespace(node)
@@ -146,32 +145,26 @@ function test() {
   content.location = "data:text/html,<html></html>";
 
   function setupTest() {
-    Services.obs.addObserver(runTests, InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED, false);
-    InspectorUI.toggleInspectorUI();
-  }
-
-  function runTests() {
-    Services.obs.removeObserver(runTests, InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED);
-    InspectorUI.currentInspector.once("markuploaded", startTests);
-    InspectorUI.select(doc.body, true, true, true);
-    InspectorUI.stopInspecting();
-    InspectorUI.toggleHTMLPanel();
+    let toolbox = gDevTools.openToolboxForTab(gBrowser.selectedTab, "inspector");
+    toolbox.once("inspector-selected", function BIMMT_selected(id, aInspector) {
+      inspector = aInspector;
+      startTests();
+    });
   }
 
   function startTests() {
-    markup = InspectorUI.currentInspector.markup;
+    markup = inspector.markup;
     checkMarkup();
     nextStep(0);
   }
 
   function nextStep(cursor) {
     if (cursor >= mutations.length) {
-      Services.obs.addObserver(finishUp, InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED, false);
-      InspectorUI.closeInspectorUI();
+      finishUp();
       return;
     }
     mutations[cursor]();
-    InspectorUI.currentInspector.once("markupmutation", function() {
+    inspector.once("markupmutation", function() {
       executeSoon(function() {
         checkMarkup();
         nextStep(cursor + 1);
@@ -180,8 +173,7 @@ function test() {
   }
 
   function finishUp() {
-    Services.obs.removeObserver(finishUp, InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED);
-    doc = null;
+    doc = inspector = null;
     gBrowser.removeTab(contentTab);
     gBrowser.removeTab(parseTab);
     finish();
