@@ -276,14 +276,7 @@ Toolbox.prototype = {
     vbox.className = "toolbox-panel";
     vbox.id = "toolbox-panel-" + id;
 
-    let iframe = this.doc.createElement("iframe");
-    iframe.className = "toolbox-panel-iframe";
-    iframe.id = "toolbox-panel-iframe-" + id;
-    iframe.setAttribute("toolid", id);
-    iframe.setAttribute("flex", 1);
-
     tabs.appendChild(radio);
-    vbox.appendChild(iframe);
     deck.appendChild(vbox);
   },
 
@@ -315,28 +308,34 @@ Toolbox.prototype = {
     let deck = this.doc.getElementById("toolbox-deck");
     deck.selectedIndex = index;
 
-    let iframe = this.doc.getElementById("toolbox-panel-iframe-" + id);
-
     let definition = gDevTools.getToolDefinitions().get(id);
 
-    // only build the tab's content if we haven't already
-    if (iframe.getAttribute("src") != definition.url) {
+    let iframe = this.doc.getElementById("toolbox-panel-iframe-" + id);
+    if (!iframe) {
+      iframe = this.doc.createElement("iframe");
+      iframe.className = "toolbox-panel-iframe";
+      iframe.id = "toolbox-panel-iframe-" + id;
+      iframe.setAttribute("flex", 1);
+
+      let vbox = this.doc.getElementById("toolbox-panel-" + id);
+      vbox.appendChild(iframe);
+
       let boundLoad = function() {
         iframe.removeEventListener("DOMContentLoaded", boundLoad, true);
         let panel = definition.build(iframe.contentWindow, this);
         this._toolPanels.set(id, panel);
-        if (panel.isReady) {
+
+        let panelReady = function() {
           this.emit(id + "-ready", panel);
           this.emit("select", id);
           this.emit(id + "-selected", panel);
           gDevTools.emit(id + "-ready", this, panel);
+        }.bind(this);
+
+        if (panel.isReady) {
+          panelReady();
         } else {
-          panel.once("ready", function(event) {
-            this.emit(id + "-ready", panel);
-            this.emit("select", id);
-            this.emit(id + "-selected", panel);
-            gDevTools.emit(id + "-ready", this, panel);
-          }.bind(this));
+          panel.once("ready", panelReady);
         }
       }.bind(this);
 
