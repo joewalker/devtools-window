@@ -21,6 +21,8 @@ Cu.import("resource:///modules/devtools/Breadcrumbs.jsm");
 Cu.import("resource:///modules/devtools/Highlighter.jsm");
 Cu.import("resource:///modules/devtools/Sidebar.jsm");
 
+const LAYOUT_CHANGE_TIMER = 250;
+
 /**
  * Represents an open instance of the Inspector for a tab.
  * The inspector controls the highlighter, the breadcrumbs,
@@ -28,6 +30,7 @@ Cu.import("resource:///modules/devtools/Sidebar.jsm");
  * and layout view).
  */
 this.InspectorPanel = function InspectorPanel(iframeWindow, toolbox) {
+  this._toolbox = toolbox;
   this._target = toolbox._target;
 
   if (this.target.isRemote) {
@@ -35,9 +38,14 @@ this.InspectorPanel = function InspectorPanel(iframeWindow, toolbox) {
   }
 
   this.tabTarget = (this.target.tab != null);
-  this.chromeTarget = (this.target.window != null);
+  this.winTarget = (this.target.window != null);
 
   new EventEmitter(this);
+
+  this.preventNavigateAway = this.preventNavigateAway.bind(this);
+  this.onNavigatedAway = this.onNavigatedAway.bind(this);
+  this.target.on("will-navigate", this.preventNavigateAway);
+  this.target.on("navigate", this.onNavigatedAway);
 
   this.panelDoc = iframeWindow.document;
   this.panelWin = iframeWindow;
@@ -58,6 +66,10 @@ this.InspectorPanel = function InspectorPanel(iframeWindow, toolbox) {
   this.breadcrumbs = new HTMLBreadcrumbs(this);
 
   if (this.tabTarget) {
+    this.browser = this.target.tab.linkedBrowser;
+    this.scheduleLayoutChange = this.scheduleLayoutChange.bind(this);
+    this.browser.addEventListener("resize", this.scheduleLayoutChange, true);
+
     this.highlighter = new Highlighter(this.target, this);
     let button = this.panelDoc.getElementById("inspector-inspect-toolbutton");
     button.hidden = false;
@@ -80,11 +92,10 @@ this.InspectorPanel = function InspectorPanel(iframeWindow, toolbox) {
 
     // All the components are initialized. Let's select a node.
     if (this.tabTarget) {
-      let browser = this.target.tab.linkedBrowser;
-      let root = browser.contentDocument.documentElement;
+      let root = this.browser.contentDocument.documentElement;
       this._selection.setNode(root);
     }
-    if (this.chromeTarget) {
+    if (this.winTarget) {
       let root = this.target.window.document.documentElement;
       this._selection.setNode(root);
     }
@@ -96,14 +107,7 @@ this.InspectorPanel = function InspectorPanel(iframeWindow, toolbox) {
     this.emit("ready");
   }.bind(this));
 
-  let tabbox = this.panelDoc.querySelector("#inspector-sidebar");
-  this.sidebar = new ToolSidebar(tabbox, this);
-
-  this.sidebar.addTab("ruleview", "chrome://browser/content/devtools/cssruleview.xul");
-  this.sidebar.addTab("propertyview", "chrome://browser/content/devtools/csshtmltree.xul");
-  this.sidebar.addTab("layoutview", "chrome://browser/content/devtools/layoutview/view.xhtml");
-
-  this.sidebar.show();
+  this.setupSidebar();
 }
 
 InspectorPanel.prototype = {
@@ -145,10 +149,122 @@ InspectorPanel.prototype = {
   },
 
   /**
+   * Build the sidebar.
+   */
+  setupSidebar: function InspectorPanel_setupSidebar() {
+    let tabbox = this.panelDoc.querySelector("#inspector-sidebar");
+    this.sidebar = new ToolSidebar(tabbox, this);
+
+    let defaultTab = Services.prefs.getCharPref("devtools.inspector.activeSidebar");
+
+    this._setDefaultSidebar = function(event, toolId) {
+      Services.prefs.setCharPref("devtools.inspector.activeSidebar", toolId);
+    }.bind(this);
+
+    this.sidebar.on("select", this._setDefaultSidebar);
+
+    this.sidebar.addTab("ruleview",
+                        "chrome://browser/content/devtools/cssruleview.xul",
+                        "ruleview" == defaultTab);
+
+    this.sidebar.addTab("computedview",
+                        "chrome://browser/content/devtools/csshtmltree.xul",
+                        "computedview" == defaultTab);
+
+    this.sidebar.addTab("layoutview",
+                        "chrome://browser/content/devtools/layoutview/view.xhtml",
+                        "layoutview" == defaultTab);
+
+    this.sidebar.show();
+  },
+
+  /**
+   * Reset the inspector on navigate away.
+   */
+  onNavigatedAway: function InspectorPanel_onNavigatedAway(event, newWindow) {
+    this.selection.setNode(null);
+    this._destroyMarkup();
+    this.isDirty = false;
+    let self = this;
+    newWindow.addEventListener("DOMContentLoaded", function onDOMReady() {
+      newWindow.removeEventListener("DOMContentLoaded", onDOMReady, true);;
+      if (!self.selection.node) {
+        self.selection.setNode(newWindow.document.documentElement);
+      }
+      self._initMarkup();
+    }, true);
+  },
+
+  /**
+   * Show a message if the inspector is dirty.
+   */
+  preventNavigateAway: function InspectorPanel_preventNavigateAway(event, request) {
+    if (!this.isDirty) {
+      return;
+    }
+
+    request.suspend();
+
+    let notificationBox = this._toolbox.getNotificationBox();
+    let notification = notificationBox.
+      getNotificationWithValue("inspector-page-navigation");
+
+    if (notification) {
+      notificationBox.removeNotification(notification, true);
+    }
+
+    let cancelRequest = function onCancelRequest() {
+      if (request) {
+        request.cancel(Cr.NS_BINDING_ABORTED);
+        request.resume(); // needed to allow the connection to be cancelled.
+        request = null;
+      }
+    };
+
+    let eventCallback = function onNotificationCallback(event) {
+      if (event == "removed") {
+        cancelRequest();
+      }
+    };
+
+    let buttons = [
+      {
+        id: "inspector.confirmNavigationAway.buttonLeave",
+        label: this.strings.GetStringFromName("confirmNavigationAway.buttonLeave"),
+        accessKey: this.strings.GetStringFromName("confirmNavigationAway.buttonLeaveAccesskey"),
+        callback: function onButtonLeave() {
+          if (request) {
+            request.resume();
+            request = null;
+            return true;
+          }
+          return false;
+        }.bind(this),
+      },
+      {
+        id: "inspector.confirmNavigationAway.buttonStay",
+        label: this.strings.GetStringFromName("confirmNavigationAway.buttonStay"),
+        accessKey: this.strings.GetStringFromName("confirmNavigationAway.buttonStayAccesskey"),
+        callback: cancelRequest
+      },
+    ];
+
+    let message = this.strings.GetStringFromName("confirmNavigationAway.message2");
+
+    notification = notificationBox.appendNotification(message,
+      "inspector-page-navigation", "chrome://browser/skin/Info.png",
+      notificationBox.PRIORITY_WARNING_HIGH, buttons, eventCallback);
+
+    // Make sure this not a transient notification, to avoid the automatic
+    // transient notification removal.
+    notification.persistence = -1;
+  },
+
+  /**
    * When a new node is selected.
    */
   onNewSelection: function InspectorPanel_onNewSelection() {
-    // Nothing yet.
+    this.cancelLayoutChange();
   },
 
   /**
@@ -158,7 +274,18 @@ InspectorPanel.prototype = {
     if (this._destroyed) {
       return;
     }
+    this.cancelLayoutChange();
     this._destroyed = true;
+
+    this._toolbox = null;
+
+    if (this.browser) {
+      this.browser.removeEventListener("resize", this.scheduleLayoutChange, true);
+      this.browser = null;
+    }
+
+    this.target.off("will-navigate", this.preventNavigateAway);
+    this.target.off("navigate", this.onNavigatedAway);
 
     if (this.highlighter) {
       this.highlighter.off("locked", this.updateInspectorButton);
@@ -166,6 +293,7 @@ InspectorPanel.prototype = {
       this.highlighter.destroy();
     }
 
+    this.sidebar.off("select", this._setDefaultSidebar);
     this.sidebar.destroy();
     this.sidebar = null;
 
@@ -262,7 +390,7 @@ InspectorPanel.prototype = {
     let controllerWindow;
     if (this.tabTarget) {
       controllerWindow = this.target.tab.ownerDocument.defaultView;
-    } else if (this.chromeTarget) {
+    } else if (this.winTarget) {
       controllerWindow = this.target.window;
     }
     this.markup = new MarkupView(this, this._markupFrame, controllerWindow);
@@ -282,6 +410,7 @@ InspectorPanel.prototype = {
     }
 
     if (this._markupFrame) {
+      this._markupFrame.parentNode.removeChild(this._markupFrame);
       delete this._markupFrame;
     }
   },
@@ -289,7 +418,7 @@ InspectorPanel.prototype = {
   /**
    * Toggle a pseudo class.
    */
-  togglePseudoClass: function togglePseudoClass(aPseudo) {
+  togglePseudoClass: function InspectorPanel_togglePseudoClass(aPseudo) {
     if (this.selection.isElementNode()) {
       if (DOMUtils.hasPseudoClassLock(this.selection.node, aPseudo)) {
         this.breadcrumbs.nodeHierarchy.forEach(function(crumb) {
@@ -357,6 +486,34 @@ InspectorPanel.prototype = {
       parent.removeChild(toDelete);
     }
   },
+
+  /**
+   * Schedule a low-priority change event for things like paint
+   * and resize.
+   */
+  scheduleLayoutChange: function Inspector_scheduleLayoutChange()
+  {
+    if (this._timer) {
+      return null;
+    }
+    this._timer = this.panelWin.setTimeout(function() {
+      this.emit("layout-change");
+      this._timer = null;
+    }.bind(this), LAYOUT_CHANGE_TIMER);
+  },
+
+  /**
+   * Cancel a pending low-priority change event if any is
+   * scheduled.
+   */
+  cancelLayoutChange: function Inspector_cancelLayoutChange()
+  {
+    if (this._timer) {
+      this.panelWin.clearTimeout(this._timer);
+      delete this._timer;
+    }
+  },
+
 }
 
 /////////////////////////////////////////////////////////////////////////

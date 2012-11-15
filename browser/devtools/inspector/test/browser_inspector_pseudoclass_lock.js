@@ -5,6 +5,8 @@ let DOMUtils = Cc["@mozilla.org/inspector/dom-utils;1"].getService(Ci.inIDOMUtil
 
 let doc;
 let div;
+let inspector;
+let ruleview;
 
 let pseudo = ":hover";
 
@@ -38,41 +40,35 @@ function createDocument()
   openInspector(selectNode);
 }
 
-function selectNode(inspector)
+function selectNode(aInspector)
 {
+  inspector = aInspector;
   inspector.selection.setNode(div);
-  openRuleView();
-}
-
-function openRuleView()
-{
-  InspectorUI.sidebar.show();
-  InspectorUI.currentInspector.once("sidebaractivated-ruleview", performTests);
-  InspectorUI.sidebar.activatePanel("ruleview");
+  inspector.sidebar.once("ruleview-ready", function() {
+    ruleview = inspector.sidebar.getWindowForTab("ruleview").ruleview.view;
+    inspector.sidebar.select("ruleview");
+    performTests();
+  });
 }
 
 function performTests()
 {
-  InspectorUI.highlighter.removeListener("locked", performTests);
-
   // toggle the class
-  InspectorUI.highlighter.pseudoClassLockToggled(pseudo);
+  inspector.togglePseudoClass(pseudo);
 
   testAdded();
 
   // toggle the lock off
-  InspectorUI.highlighter.pseudoClassLockToggled(pseudo);
+  inspector.togglePseudoClass(pseudo);
 
   testRemoved();
   testRemovedFromUI();
 
   // toggle it back on
-  InspectorUI.highlighter.pseudoClassLockToggled(pseudo);  
+  inspector.togglePseudoClass(pseudo);
 
   // close the inspector
-  Services.obs.addObserver(testInspectorClosed,
-    InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED, false);
-  InspectorUI.closeInspectorUI();
+  finishUp();
 }
 
 function testAdded()
@@ -86,14 +82,14 @@ function testAdded()
   } while (node.parentNode)
 
   // infobar selector contains pseudo-class
-  let pseudoClassesBox = document.getElementById("highlighter-nodeinfobar-pseudo-classes");
+  let pseudoClassesBox = getActiveInspector().highlighter.nodeInfo.pseudoClassesBox;
   is(pseudoClassesBox.textContent, pseudo, "pseudo-class in infobar selector");
-  
+
   // ruleview contains pseudo-class rule
-  is(ruleView().element.children.length, 3,
+  is(ruleview.element.children.length, 3,
      "rule view is showing 3 rules for pseudo-class locked div");
-     
-  is(ruleView().element.children[1]._ruleEditor.rule.selectorText,
+
+  is(ruleview.element.children[1]._ruleEditor.rule.selectorText,
      "div:hover", "rule view is showing " + pseudo + " rule");
 }
 
@@ -111,27 +107,23 @@ function testRemoved()
 function testRemovedFromUI()
 {
   // infobar selector doesn't contain pseudo-class
-  let pseudoClassesBox = document.getElementById("highlighter-nodeinfobar-pseudo-classes");
+  let pseudoClassesBox = getActiveInspector().highlighter.nodeInfo.pseudoClassesBox;
   is(pseudoClassesBox.textContent, "", "pseudo-class removed from infobar selector");    
 
   // ruleview no longer contains pseudo-class rule
-  is(ruleView().element.children.length, 2,
+  is(ruleview.element.children.length, 2,
      "rule view is showing 2 rules after removing lock");    
-}
-
-function testInspectorClosed()
-{
-  Services.obs.removeObserver(testInspectorClosed,
-    InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED);
-
-  testRemoved();
-
-  finishUp();  
 }
 
 function finishUp()
 {
-  doc = div = null;
-  gBrowser.removeCurrentTab();
-  finish();
+  gDevTools.once("toolbox-destroyed", function() {
+    testRemoved();
+    inspector = ruleview = null;
+    doc = div = null;
+    gBrowser.removeCurrentTab();
+    finish();
+  });
+  let toolbox = gDevTools.getToolboxForTarget(gBrowser.selectedTab);
+  toolbox.destroy();
 }

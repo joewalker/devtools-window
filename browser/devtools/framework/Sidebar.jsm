@@ -33,7 +33,7 @@ this.ToolSidebar = function ToolSidebar(tabbox, panel, showTabstripe=true)
   this._panelDoc = this._tabbox.ownerDocument;
   this._toolPanel = panel;
 
-  this._tabbox.addEventListener("select", this, true);
+  this._tabbox.tabpanels.addEventListener("select", this, true);
 
   this._tabs = new Map();
 
@@ -50,41 +50,87 @@ ToolSidebar.prototype = {
    * @param {string} tab uniq id
    * @param {string} url
    */
-  addTab: function ToolSidebar_addTab(id, url) {
+  addTab: function ToolSidebar_addTab(id, url, selected=false) {
     let iframe = this._panelDoc.createElementNS(XULNS, "iframe");
     iframe.className = "iframe-" + id;
     iframe.setAttribute("flex", "1");
     iframe.setAttribute("src", url);
 
+    let tab = this._tabbox.tabs.appendItem();
+
     let onIFrameLoaded = function() {
-      let tab = this._tabbox.tabs.appendItem(iframe.contentDocument.title);
+      tab.setAttribute("label", iframe.contentDocument.title);
       iframe.removeEventListener("DOMContentLoaded", onIFrameLoaded, true);
       if ("setPanel" in iframe.contentWindow) {
         iframe.contentWindow.setPanel(this._toolPanel, iframe);
       }
-      this.emit("new-tab-registered", id);
       this.emit(id + "-ready");
-      this._tabs.set(id, tab);
-      if (this._tabbox.selectedIndex < 0) {
-        this.select(id);
-      }
     }.bind(this);
 
     iframe.addEventListener("DOMContentLoaded", onIFrameLoaded, true);
 
     let tabpanel = this._panelDoc.createElementNS(XULNS, "tabpanel");
+    tabpanel.setAttribute("id", "sidebar-panel-" + id);
     tabpanel.appendChild(iframe);
     this._tabbox.tabpanels.appendChild(tabpanel);
+
+    tab.linkedPanel = "sidebar-panel-" + id;
+
+    // We store the index of this tab.
+    this._tabs.set(id, tab);
+
+    if (selected) {
+      // For some reason I don't understand, if we call this.select in this
+      // event loop (after inserting the tab), the tab will never get the
+      // the "selected" attribute set to true.
+      this._panelDoc.defaultView.setTimeout(function() {
+        this.select(id);
+      }.bind(this), 0);
+    }
+
+    this.emit("new-tab-registered", id);
   },
 
   /**
    * Select a specific tab.
    */
   select: function ToolSidebar_select(id) {
-    if (this._tabs.has(id)) {
-      this._tabbox.selectedTab = this._tabs.get(id);
+    let tab = this._tabs.get(id);
+    if (tab) {
+      this._tabbox.selectedTab = tab;
     }
   },
+
+  /**
+   * Return the id of the selected tab.
+   */
+  getCurrentTabID: function ToolSidebar_getCurrentTabID() {
+    let currentID = null;
+    for (let [id, tab] of this._tabs) {
+      if (this._tabbox.tabs.selectedItem == tab) {
+        currentID = id;
+        break;
+      }
+    }
+    return currentID;
+  },
+
+  /**
+   * Event handler.
+   */
+  handleEvent: function ToolSidebar_eventHandler(event) {
+    if (event.type == "select") {
+      let previousTool = this._currentTool;
+      this._currentTool = this.getCurrentTabID();
+      if (previousTool) {
+        this.emit(previousTool + "-unselected");
+      }
+
+      this.emit(this._currentTool + "-selected");
+      this.emit("select", this._currentTool);
+    }
+  },
+
 
   /**
    * Toggle sidebar's visibility state.
@@ -119,30 +165,8 @@ ToolSidebar.prototype = {
       return null;
     }
 
-    let idx = this._tabs.get(id).tabIndex;
-    let panel = this._tabbox.tabpanels.childNodes[idx];
+    let panel = this._panelDoc.getElementById(this._tabs.get(id).linkedPanel);
     return panel.firstChild.contentWindow;
-  },
-
-  /**
-   * Event handler.
-   */
-  handleEvent: function ToolSidebar_eventHandler(event) {
-    if (event.type == "select") {
-      let newTool;
-      let previousTool = this._currentTool;
-      for (let [id, tab] of this._tabs) {
-        if (tab === this._tabbox.selectedTab) {
-          newTool = id;
-          break;
-        }
-      }
-      this._currentTool = newTool;
-      if (previousTool) {
-        this.emit(previousTool + "-unselected");
-      }
-      this.emit(this._currentTool + "-selected");
-    }
   },
 
   /**

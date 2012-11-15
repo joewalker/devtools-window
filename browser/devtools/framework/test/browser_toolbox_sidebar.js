@@ -77,7 +77,7 @@ function test() {
         }
       });
 
-      panel.sidebar.addTab("tab1", tab1URL);
+      panel.sidebar.addTab("tab1", tab1URL, true);
       panel.sidebar.addTab("tab2", tab2URL);
       panel.sidebar.addTab("tab3", tab3URL);
 
@@ -94,12 +94,14 @@ function test() {
     ok(readyTabs.tab3, "tab3 ready");
 
     let tabs = panel.sidebar._tabbox.querySelectorAll("tab");
+    let panels = panel.sidebar._tabbox.querySelectorAll("tabpanel");
     let label = 1;
     for (let tab of tabs) {
       is(tab.getAttribute("label"), label++, "Tab has the right title");
     }
     is(label, 4, "Found the right amount of tabs.");
-    ok(tabs[0].selected, "First tab is selected");
+    is(panel.sidebar._tabbox.selectedPanel, panels[0], "First tab is selected");
+    ok(panel.sidebar.getCurrentTabID(), "tab1", "getCurrentTabID() is correct");
 
     panel.sidebar.once("tab1-unselected", function() {
       ok(true, "received 'unselected' event");

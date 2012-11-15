@@ -16,7 +16,9 @@
       this.ruleview = new RuleViewTool(panel, window, iframe);
     }
     window.onunload = function() {
-      this.ruleview.destroy();
+      if (this.ruleview) {
+        this.ruleview.destroy();
+      }
     }
   </script>
 </window>

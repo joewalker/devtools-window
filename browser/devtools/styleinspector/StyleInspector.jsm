@@ -29,6 +29,12 @@ this.RuleViewTool = function RVT_RuleViewTool(aInspector, aWindow, aIFrame)
   this.view = new CssRuleView(this.doc);
   this.doc.documentElement.appendChild(this.view.element);
 
+  this._changeHandler = function() {
+    this.inspector.markDirty();
+  }.bind(this);
+
+  this.view.element.addEventListener("CssRuleViewChanged", this._changeHandler)
+
   this._cssLinkHandler = function(aEvent) {
     let contentDoc = this.inspector.selection.document;
     let rule = aEvent.detail.rule;
@@ -78,6 +84,9 @@ this.RuleViewTool = function RVT_RuleViewTool(aInspector, aWindow, aIFrame)
 
   this._onSelect = this.onSelect.bind(this);
   this.inspector.selection.on("new-node", this._onSelect);
+  this.refresh = this.refresh.bind(this);
+  this.inspector.on("layout-change", this.refresh);
+  this.inspector.selection.on("pseudoclass", this.refresh);
   if (this.inspector.highlighter) {
     this.inspector.highlighter.on("locked", this._onSelect);
   }
@@ -106,8 +115,13 @@ RuleViewTool.prototype = {
     }
   },
 
+  refresh: function RVT_refresh() {
+    this.view.nodeChanged();
+  },
 
   destroy: function RVT_destroy() {
+    this.inspector.off("layout-change", this.refresh);
+    this.inspector.selection.off("pseudoclass", this.refresh);
     this.inspector.selection.off("new-node", this._onSelect);
     if (this.inspector.highlighter) {
       this.inspector.highlighter.off("locked", this._onSelect);
@@ -115,6 +129,9 @@ RuleViewTool.prototype = {
 
     this.view.element.removeEventListener("CssRuleViewCSSLinkClicked",
       this._cssLinkHandler);
+
+    this.view.element.removeEventListener("CssRuleViewChanged",
+      this._changeHandler);
 
     this.doc.documentElement.removeChild(this.view.element);
 
@@ -141,6 +158,9 @@ this.ComputedViewTool = function CVT_ComputedViewTool(aInspector, aWindow, aIFra
   if (this.inspector.highlighter) {
     this.inspector.highlighter.on("locked", this._onSelect);
   }
+  this.refresh = this.refresh.bind(this);
+  this.inspector.on("layout-change", this.refresh);
+  this.inspector.selection.on("pseudoclass", this.refresh);
 
   this.cssLogic.highlight(null);
   this.view.highlight(null);
@@ -172,8 +192,15 @@ ComputedViewTool.prototype = {
     }
   },
 
+  refresh: function CVT_refresh() {
+    this.cssLogic.highlight(this.inspector.selection.node);
+    this.view.refreshPanel();
+  },
+
   destroy: function CVT_destroy(aContext)
   {
+    this.inspector.off("layout-change", this.refresh);
+    this.inspector.selection.off("pseudoclass", this.refresh);
     this.inspector.selection.off("new-node", this._onSelect);
     if (this.inspector.highlighter) {
       this.inspector.highlighter.off("locked", this._onSelect);

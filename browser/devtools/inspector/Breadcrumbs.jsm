@@ -14,6 +14,7 @@ this.EXPORTED_SYMBOLS = ["HTMLBreadcrumbs"];
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource:///modules/devtools/DOMHelpers.jsm");
+Cu.import("resource:///modules/devtools/LayoutHelpers.jsm");
 
 const LOW_PRIORITY_ELEMENTS = {
   "HEAD": true,
@@ -288,6 +289,12 @@ HTMLBreadcrumbs.prototype = {
    */
   destroy: function BC_destroy()
   {
+    this.nodeHierarchy.forEach(function(crumb) {
+      if (LayoutHelpers.isNodeConnected(crumb.node)) {
+        DOMUtils.clearPseudoClassLocks(crumb.node);
+      }
+    });
+
     this.selection.off("new-node", this.update);
     this.selection.off("detached", this.update);
     this.selection.off("pseudoclass", this.updateSelectors);

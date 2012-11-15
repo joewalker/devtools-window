@@ -2,50 +2,49 @@
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
 let doc;
+let inspector;
 
 function createDocument()
 {
   doc.body.innerHTML = '<h1>Sidebar state test</h1>';
   doc.title = "Sidebar State Test";
 
-  InspectorUI.openInspectorUI();
-
-  // Open the sidebar and wait for the default view (the rule view) to show.
-  InspectorUI.currentInspector.once("sidebaractivated-ruleview", inspectorRuleViewOpened);
-
-  InspectorUI.sidebar.show();
-  InspectorUI.sidebar.activatePanel("ruleview");
+  openInspector(function(panel) {
+    inspector = panel;
+    inspector.sidebar.select("ruleview");
+    inspectorRuleViewOpened();
+  });
 }
 
 function inspectorRuleViewOpened()
 {
-  is(InspectorUI.sidebar.activePanel, "ruleview", "Rule View is selected by default");
+  is(inspector.sidebar.getCurrentTabID(), "ruleview", "Rule View is selected by default");
 
   // Select the computed view and turn off the inspector.
-  InspectorUI.sidebar.activatePanel("computedview");
+  inspector.sidebar.select("computedview");
 
-  Services.obs.addObserver(inspectorClosed,
-    InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED, false);
-  InspectorUI.closeInspectorUI();
+  gDevTools.once("toolbox-destroyed", inspectorClosed);
+  let toolbox = gDevTools.getToolboxForTarget(gBrowser.selectedTab);
+  executeSoon(function() {
+    toolbox.destroy();
+  });
 }
 
 function inspectorClosed()
 {
-  // Reopen the inspector, expect the computed view to be loaded.
-  Services.obs.removeObserver(inspectorClosed,
-    InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED);
-
   Services.obs.addObserver(computedViewPopulated,
     "StyleInspector-populated", false);
 
-  InspectorUI.openInspectorUI();
+  openInspector(function(panel) {
+    inspector = panel;
+  });
 }
 
 function computedViewPopulated()
 {
   Services.obs.removeObserver(computedViewPopulated,
     "StyleInspector-populated");
-  is(InspectorUI.sidebar.activePanel, "computedview", "Computed view is selected by default.");
+  is(inspector.sidebar.getCurrentTabID(), "computedview", "Computed view is selected by default.");
 
   finishTest();
 }
@@ -53,7 +52,6 @@ function computedViewPopulated()
 
 function finishTest()
 {
-  InspectorUI.closeInspectorUI();
   gBrowser.removeCurrentTab();
   finish();
 }
@@ -70,4 +68,3 @@ function test()
 
   content.location = "data:text/html,basic tests for inspector";
 }
-

@@ -6,7 +6,7 @@ function test()
 {
   waitForExplicitFinish();
 
-  Cu.import("resource:///modules/devtools/Target.jsm");
+  Cu.import("resource:///modules/devtools/Target.jsm", this);
 
   gBrowser.selectedTab = gBrowser.addTab();
   gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {

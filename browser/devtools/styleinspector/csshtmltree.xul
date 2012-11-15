@@ -33,7 +33,9 @@
     this.computedview = new ComputedViewTool(panel, window, iframe);
   }
   window.onunload = function() {
-    this.computedview.destroy();
+    if (this.computedview) {
+      this.computedview.destroy();
+    }
   }
 </script>
 

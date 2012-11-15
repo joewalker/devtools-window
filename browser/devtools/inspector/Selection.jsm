@@ -104,10 +104,16 @@ Selection.prototype = {
   },
 
   _detachEvents: function SN__detachEvents() {
-    if (this._nodeObserver)
-      this._nodeObserver.disconnect();
-    if (this._docObserver)
-      this._docObserver.disconnect();
+    // `disconnect` fail if node's document has
+    // been deleted.
+    try {
+      if (this._nodeObserver)
+        this._nodeObserver.disconnect();
+    } catch(e) {}
+    try {
+      if (this._docObserver)
+        this._docObserver.disconnect();
+    } catch(e) {}
   },
 
   destroy: function SN_destroy() {
