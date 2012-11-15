@@ -3,10 +3,6 @@
 
 function test()
 {
-  // FIXME: memory leaks
-  // TEST-UNEXPECTED-FAIL | chrome://mochitests/content/browser/browser/devtools/inspector/test/browser_inspector_destroyselection.js | leaked until shutdown [nsGlobalWindow #1629 about:blank]
-  return;
-
   waitForExplicitFinish();
   //ignoreAllUncaughtExceptions();
 

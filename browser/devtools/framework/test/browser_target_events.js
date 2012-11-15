@@ -10,11 +10,6 @@ var target;
 
 function test()
 {
-  // FIXME: Commented out for 2 test failures
-  // TEST-UNEXPECTED-FAIL | chrome://mochitests/content/browser/browser/devtools/framework/test/browser_toolbox_select_event.js | leaked until shutdown [nsGlobalWindow #107 about:blank]
-  // TEST-UNEXPECTED-FAIL | chrome://mochitests/content/browser/browser/devtools/framework/test/browser_toolbox_select_event.js | leaked until shutdown [nsGlobalWindow #106 about:blank]
-  return;
-
   waitForExplicitFinish();
 
   gBrowser.selectedTab = gBrowser.addTab();

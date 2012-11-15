@@ -7,8 +7,7 @@ const TEST_URI = "http://example.com/browser/browser/devtools/commandline/" +
                  "test/browser_dbg_cmd_break.html";
 
 function test() {
-  // FIXME: commented out for failing test
-  //DeveloperToolbarTest.test(TEST_URI, [ testBreakCommands ]);
+  DeveloperToolbarTest.test(TEST_URI, [ testBreakCommands ]);
 }
 
 function testBreakCommands() {
