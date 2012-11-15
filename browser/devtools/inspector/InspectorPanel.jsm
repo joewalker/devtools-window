@@ -70,7 +70,7 @@ this.InspectorPanel = function InspectorPanel(iframeWindow, toolbox) {
     this.scheduleLayoutChange = this.scheduleLayoutChange.bind(this);
     this.browser.addEventListener("resize", this.scheduleLayoutChange, true);
 
-    this.highlighter = new Highlighter(this.target, this);
+    this.highlighter = new Highlighter(this.target, this, this._toolbox);
     let button = this.panelDoc.getElementById("inspector-inspect-toolbutton");
     button.hidden = false;
     this.updateInspectorButton = function() {

@@ -86,6 +86,7 @@ this.RuleViewTool = function RVT_RuleViewTool(aInspector, aWindow, aIFrame)
   this.inspector.selection.on("new-node", this._onSelect);
   this.refresh = this.refresh.bind(this);
   this.inspector.on("layout-change", this.refresh);
+  this.inspector.sidebar.on("ruleview-selected", this.refresh);
   this.inspector.selection.on("pseudoclass", this.refresh);
   if (this.inspector.highlighter) {
     this.inspector.highlighter.on("locked", this._onSelect);
@@ -115,12 +116,19 @@ RuleViewTool.prototype = {
     }
   },
 
+  isActive: function RVT_isActive() {
+    return this.inspector.sidebar.getCurrentTabID() == "ruleview";
+  },
+
   refresh: function RVT_refresh() {
-    this.view.nodeChanged();
+    if (this.isActive()) {
+      this.view.nodeChanged();
+    }
   },
 
   destroy: function RVT_destroy() {
     this.inspector.off("layout-change", this.refresh);
+    this.inspector.sidebar.off("ruleview-selected", this.refresh);
     this.inspector.selection.off("pseudoclass", this.refresh);
     this.inspector.selection.off("new-node", this._onSelect);
     if (this.inspector.highlighter) {
@@ -160,6 +168,7 @@ this.ComputedViewTool = function CVT_ComputedViewTool(aInspector, aWindow, aIFra
   }
   this.refresh = this.refresh.bind(this);
   this.inspector.on("layout-change", this.refresh);
+  this.inspector.sidebar.on("computedview-selected", this.refresh);
   this.inspector.selection.on("pseudoclass", this.refresh);
 
   this.cssLogic.highlight(null);
@@ -192,14 +201,21 @@ ComputedViewTool.prototype = {
     }
   },
 
+  isActive: function CVT_isActive() {
+    return this.inspector.sidebar.getCurrentTabID() == "computedview";
+  },
+
   refresh: function CVT_refresh() {
-    this.cssLogic.highlight(this.inspector.selection.node);
-    this.view.refreshPanel();
+    if (this.isActive()) {
+      this.cssLogic.highlight(this.inspector.selection.node);
+      this.view.refreshPanel();
+    }
   },
 
   destroy: function CVT_destroy(aContext)
   {
     this.inspector.off("layout-change", this.refresh);
+    this.inspector.sidebar.off("computedview-selected", this.refresh);
     this.inspector.selection.off("pseudoclass", this.refresh);
     this.inspector.selection.off("new-node", this._onSelect);
     if (this.inspector.highlighter) {

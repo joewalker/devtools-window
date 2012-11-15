@@ -37,6 +37,7 @@ LayoutView.prototype = {
     this.onHighlighterLocked = this.onHighlighterLocked.bind(this);
     this.inspector.selection.on("detached", this.onNewNode);
     this.inspector.selection.on("new-node", this.onNewNode);
+    this.inspector.sidebar.on("layoutview-selected", this.onNewNode);
     if (this.inspector.highlighter) {
       this.inspector.highlighter.on("locked", this.onHighlighterLocked);
     }
@@ -88,9 +89,17 @@ LayoutView.prototype = {
   },
 
   /**
+   * Is the layoutview visible in the sidebar?
+   */
+  isActive: function LV_isActive() {
+    return this.inspector.sidebar.getCurrentTabID() == "layoutview";
+  },
+
+  /**
    * Destroy the nodes. Remove listeners.
    */
   destroy: function LV_destroy() {
+    this.inspector.sidebar.off("layoutview-selected", this.onNewNode);
     this.inspector.selection.off("new-node", this.onNewNode);
     this.inspector.selection.off("detached", this.onNewNode);
     if (this.browser) {
@@ -109,7 +118,8 @@ LayoutView.prototype = {
    * Selection 'new-node' event handler.
    */
   onNewNode: function LV_onNewNode() {
-    if (this.inspector.selection.isConnected() &&
+    if (this.isActive() &&
+        this.inspector.selection.isConnected() &&
         this.inspector.selection.isElementNode() &&
         this.inspector.selection.reason != "highlighter") {
       this.cssLogic.highlight(this.inspector.selection.node);
@@ -117,13 +127,6 @@ LayoutView.prototype = {
       this.update();
     } else {
       this.dim();
-      // If we didn't update because it comes from the highlighter,
-      // we stil update, but because it just has been dimmed, only
-      // the header is updated.
-      if (this.inspector.selection.isConnected() &&
-          this.inspector.selection.isElementNode()) {
-        this.update();
-      }
     }
   },
 
@@ -167,7 +170,8 @@ LayoutView.prototype = {
    * the layoutview/view.xhtml document.
    */
   update: function LV_update() {
-    if (!this.inspector.selection.isConnected() ||
+    if (!this.isActive() ||
+        !this.inspector.selection.isConnected() ||
         !this.inspector.selection.isElementNode()) {
       return;
     }

@@ -30,18 +30,14 @@ _BROWSER_FILES = \
 		browser_inspector_bug_566084_location_changed.js \
 		browser_inspector_sidebarstate.js \
 		browser_inspector_pseudoclass_lock.js \
+		$(browser_inspector_cmd_inspect.js fail ) \
+		browser_inspector_cmd_inspect.html \
+		browser_inspector_highlighter_autohide.js \
+		browser_inspector_changes.js \
+		browser_inspector_bug_674871.js \
 		head.js \
 		helpers.js \
 		$(NULL)
-
-# FIXME: FAILING TESTS
-# Not portable yet
-# browser_inspector_highlighter_autohide.js \
-# browser_inspector_changes.js depends on the sidebar-freeze mechanism \
-# browser_inspector_bug_674871.js \
-# browser_inspector_cmd_inspect.js \
-# browser_inspector_cmd_inspect.html \
-# browser_inspector_keybindings.js \
 
 libs::	$(_BROWSER_FILES)
 	$(INSTALL) $(foreach f,$^,"$f") $(DEPTH)/_tests/testing/mochitest/browser/$(relativesrcdir)

@@ -72,11 +72,13 @@ const PSEUDO_CLASSES = [":hover", ":active", ":focus"];
  *
  * @param aTarget The inspection target.
  * @param aInspector Inspector panel.
+ * @param aToolbox The toolbox holding the inspector.
  */
-this.Highlighter = function Highlighter(aTarget, aInspector)
+this.Highlighter = function Highlighter(aTarget, aInspector, aToolbox)
 {
   this.target = aTarget;
   this.tab = aTarget.tab;
+  this.toolbox = aToolbox;
   this.browser = this.tab.linkedBrowser;
   this.chromeDoc = this.tab.ownerDocument;
   this.chromeWin = this.chromeDoc.defaultView;
@@ -135,6 +137,15 @@ Highlighter.prototype = {
     this.selection.on("pseudoclass", this.updateInfobar);
     this.selection.on("attribute-changed", this.updateInfobar);
 
+    this.onToolSelected = function(event, id) {
+      if (id != "inspector") {
+        this.hide();
+      } else {
+        this.show();
+      }
+    }.bind(this);
+    this.toolbox.on("select", this.onToolSelected);
+
     this.hidden = true;
     this.highlight();
   },
@@ -146,6 +157,9 @@ Highlighter.prototype = {
   {
     this.inspectButton.removeEventListener("command", this.unlock);
     this.inspectButton = null;
+
+    this.toolbox.off("select", this.onToolSelected);
+    this.toolbox = null;
 
     this.selection.off("new-node", this.highlight);
     this.selection.off("new-node", this.updateInfobar);
@@ -728,6 +742,8 @@ Highlighter.prototype = {
     if (aEvent.button == 0) {
       let win = aEvent.target.ownerDocument.defaultView;
       this.lock();
+      let node = this.selection.node;
+      this.selection.setNode(node, "highlighter-lock");
       win.focus();
       aEvent.preventDefault();
       aEvent.stopPropagation();

@@ -6,6 +6,10 @@ const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 this.EXPORTED_SYMBOLS = [ ];
 
 Cu.import("resource:///modules/devtools/gcli.jsm");
+Cu.import('resource://gre/modules/XPCOMUtils.jsm');
+
+XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
+                                  "resource:///modules/devtools/gDevTools.jsm");
 
 /**
  * 'inspect' command
@@ -23,7 +27,21 @@ gcli.addCommand({
     }
   ],
   exec: function Command_inspect(args, context) {
-    let document = context.environment.chromeDocument;
-    document.defaultView.InspectorUI.openInspectorUI(args.selector);
+    let browserDoc = context.environment.chromeDocument;
+    let browserWindow = browserDoc.defaultView;
+    let tab = browserWindow.gBrowser.selectedTab;
+
+    let node = args.selector;
+
+    let inspector = gDevTools.getPanelForTarget("inspector", tab);
+    if (inspector && inspector.isReady) {
+      inspector.selection.setNode(node, "gcli");
+    } else {
+      let toolbox = gDevTools.openToolboxForTab(tab, "inspector");
+      toolbox.once("inspector-ready", function(event, panel) {
+        let inspector = gDevTools.getPanelForTarget("inspector", tab);
+        inspector.selection.setNode(node, "gcli");
+      }.bind(this));
+    }
   }
 });
