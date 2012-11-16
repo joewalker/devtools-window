@@ -31,35 +31,12 @@
                          class="devtools-toolbarbutton"
                          label="New"
                          disabled="true"/>
-
-          <!-- TODO: Export/import feature.
-          <toolbarbutton id="profiler-import"
-                         class="devtools-toolbarbutton"
-                         label="Import"
-                         disabled="true"/>
-          -->
         </toolbar>
       </box> <!-- splitview-nav-container -->
     </box> <!-- splitview-controller -->
 
     <box flex="1">
-      <vbox flex="1" align="center" id="profiler-control">
-        <spacer flex="1"/>
-        <p id="profiler-start-wrapper">
-          Click
-          <button id="profiler-start" disabled="true" label="Start"/>
-          to start profiling.
-        </p>
-
-        <p id="profiler-stop-wrapper" hidden="true">
-          Click
-          <button id="profiler-stop" label="Stop"/>
-          to stop profiling.
-        </p>
-        <spacer flex="1"/>
-      </vbox>
-
-      <vbox flex="1" hidden="true" id="profiler-report">
+      <vbox flex="1" id="profiler-report">
         <!-- Example:
         <iframe id="profiler-cleo-1"
           src="devtools/cleopatra.html" flex="1"></iframe>

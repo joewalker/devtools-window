@@ -43,133 +43,102 @@ const ProfilerDefinition = {
   }
 };
 
-function ProfilerPanel(frame, toolbox) {
-  this.isReady = false;
-  this.window = frame.window;
-  this.document = frame.document;
-  this.target = toolbox.target;
-  this.controller = new ProfilerController();
-
-  this._profiles = new Map();
-  this._uid = 0;
+/**
+ * An instance of a profile UI. Profile UI consists of
+ * an iframe with Cleopatra loaded in it and some
+ * surrounding meta-data (such as uids).
+ *
+ * Its main function is to talk to the Cleopatra instance
+ * inside of the iframe.
+ *
+ * ProfileUI is also an event emitter. Currently, it emits
+ * only one event, 'ready', when Cleopatra is done loading.
+ * You can also check 'isReady' property to see if a
+ * particular instance has been loaded yet.
+ *
+ * @param number uid
+ *   Unique ID for this profile.
+ * @param ProfilerPanel panel
+ *   A reference to the container panel.
+ */
+function ProfileUI(uid, panel) {
+  let doc = panel.document;
+  let win = panel.window;
 
   new EventEmitter(this);
 
-  this.controller.connect(function onConnect() {
-    this.switchToProfile(this.createProfile());
+  this.isReady = false;
+  this.panel = panel;
+  this.uid = uid;
 
-    let create = this.document.getElementById("profiler-create");
-    create.addEventListener("click", this.createProfile.bind(this), false);
-    create.removeAttribute("disabled");
+  this.iframe = doc.createElement("iframe");
+  this.iframe.setAttribute("flex", "1");
+  this.iframe.setAttribute("id", "profiler-cleo-" + uid);
+  this.iframe.setAttribute("src", "devtools/cleopatra.html?" + uid);
+  this.iframe.setAttribute("hidden", "true");
 
-    let stop = this.document.getElementById("profiler-stop");
-    stop.addEventListener("click", this.onToggle.bind(this), false);
+  // Append our iframe and subscribe to postMessage events.
+  // They'll tell us when the underlying page is done loading
+  // or when user clicks on start/stop buttons.
 
-    let start = this.document.getElementById("profiler-start");
-    start.addEventListener("click", this.onToggle.bind(this), false);
-    start.removeAttribute("disabled");
-
-    this.isReady = true;
-    this.emit("ready");
-  }.bind(this));
-}
-
-ProfilerPanel.prototype = {
-  isReady: null,
-  _uid: null,
-  _activeUid: null,
-  _profiles: null,
-
-  getReporter: function PP_getReporter(uid=this._activeUid) {
-    let meta = this._profiles.get(uid);
-    return meta ?
-      [this.document.getElementById("profiler-cleo-" + uid), meta] :
-      [null,null];
-  },
-
-  showReporter: function PP_showReporter(uid=this._activeUid) {
-    let [el] = this.getReporter();
-    if (el) {
-      el.setAttribute("hidden", "true");
-    }
-
-    [el] = this.getReporter(uid);
-    el.removeAttribute("hidden");
-  },
-
-  createProfile: function PP_addProfile() {
-    let list = this.document.getElementById("profiles-list");
-    let item = this.document.createElement("li");
-    let wrap = this.document.createElement("h1");
-    let meta = { uid: ++this._uid, data: null };
-
-    item.setAttribute("id", "profile-" + meta.uid);
-    item.setAttribute("data-uid", meta.uid);
-    item.addEventListener("click", function (ev) {
-      this.switchToProfile(parseInt(ev.target.getAttribute("data-uid"), 10));
-    }.bind(this), false);
-
-    wrap.className = "profile-name";
-    wrap.textContent = "Profile " + meta.uid;
-
-    item.appendChild(wrap);
-    list.appendChild(item);
-
-    let report = this.document.getElementById("profiler-report");
-    let iframe = this.document.createElement("iframe");
-
-    iframe.setAttribute("flex", "1");
-    iframe.setAttribute("id", "profiler-cleo-" + meta.uid);
-    iframe.setAttribute("src", "devtools/cleopatra.html");
-    iframe.setAttribute("hidden", "true");
-    report.appendChild(iframe);
-
-    this._profiles.set(meta.uid, meta);
-    return meta.uid;
-  },
-
-  switchToProfile: function PP_switchToProfile(uid) {
-    let [el, meta] = this.getReporter(uid);
-
-    if (!el || !meta) {
+  doc.getElementById("profiler-report").appendChild(this.iframe);
+  win.addEventListener("message", function (event) {
+    if (parseInt(event.data.uid, 10) !== parseInt(this.uid, 10)) {
       return;
     }
 
-    let active = this.document.querySelector("#profiles-list > li.splitview-active");
-    if (active) {
-      active.className = "";
+    switch (event.data.status) {
+      case "loaded":
+        this.isReady = true;
+        this.emit("ready");
+        break;
+      case "start":
+        // Start profiling and, once started, notify the
+        // underlying page so that it could update the UI.
+        this.panel.startProfiling(function onStart() {
+          var data = JSON.stringify({task: "onStarted"});
+          this.iframe.contentWindow.postMessage(data, "*");
+        }.bind(this));
+
+        break;
+      case "stop":
+        // Stop profiling and, once stopped, notify the
+        // underlying page so that it could update the UI.
+        this.panel.stopProfiling(function onStop() {
+          var data = JSON.stringify({task: "onStopped"});
+          this.iframe.contentWindow.postMessage(data, "*");
+        }.bind(this));
     }
+  }.bind(this));
+}
 
-    let item = this.document.getElementById("profile-" + uid);
-    item.className = "splitview-active";
-
-    let control = this.document.getElementById("profiler-control");
-    let report = this.document.getElementById("profiler-report");
-
-    if (meta.data) {
-      report.removeAttribute("hidden");
-      control.setAttribute("hidden", true);
-    } else {
-      control.removeAttribute("hidden");
-      report.setAttribute("hidden", true);
-    }
-
-    this.showReporter(uid);
-    this._activeUid = uid;
-
-    return true;
+ProfileUI.prototype = {
+  show: function () {
+    this.iframe.removeAttribute("hidden");
   },
 
-  cacheProfileData: function PP_cacheProfileData(data) {
-    let [el, meta] = this.getReporter();
-    meta.data = data;
-    this._profiles.set(meta.uid, meta);
+  hide: function () {
+    this.iframe.setAttribute("hidden", true);
   },
 
-  parseProfileData: function PP_parseProfileData(data) {
-    let [el, meta] = this.getReporter();
+  /**
+   * Send raw profiling data to Cleopatra for parsing.
+   *
+   * @param object data
+   *   Raw profiling data from the SPS Profiler.
+   * @param function onParsed
+   *   A callback to be called when Cleopatra finishes
+   *   parsing and displaying results.
+   *
+   */
+  parse: function (data, onParsed) {
+    if (!this.isReady) {
+      return;
+    }
 
-    el.contentWindow.postMessage(JSON.stringify({
+    let win = this.iframe.contentWindow;
+
+    win.postMessage(JSON.stringify({
       task: "receiveProfileData",
       rawProfile: data
     }), "*");
@@ -178,8 +147,8 @@ ProfilerPanel.prototype = {
     // Cleopatra finishes parsing data.
 
     let poll = function pollBreadcrumbs() {
-      let wait = this.window.setTimeout.bind(null, poll, 100);
-      let trail = el.contentWindow.gBreadcrumbTrail;
+      let wait = this.panel.window.setTimeout.bind(null, poll, 100);
+      let trail = win.gBreadcrumbTrail;
 
       if (!trail) {
         return wait();
@@ -189,18 +158,186 @@ ProfilerPanel.prototype = {
         return wait();
       }
 
-      this.emit("parsed");
+      onParsed();
     }.bind(this);
 
     poll();
+  }
+};
+
+/**
+ * Profiler panel. It is responsible for creating and managing
+ * different profile instances (see ProfileUI).
+ *
+ * ProfilerPanel is an event emitter. It can emit the following
+ * events:
+ *
+ *   - ready:     after the panel is done loading everything,
+ *                including the default profile instance.
+ *   - started:   after the panel successfuly starts our SPS
+ *                profiler.
+ *   - stopped:   after the panel successfuly stops our SPS
+ *                profiler and is ready to hand over profiling
+ *                data
+ *   - parsed:    after Cleopatra finishes parsing profiling
+ *                data.
+ *   - destroyed: after the panel cleans up after itself and
+ *                is ready to be destroyed.
+ *
+ * The following events are used mainly by tests to prevent
+ * accidential oranges:
+ *
+ *   - profileCreated:  after a new profile is created.
+ *   - profileSwitched: after user switches to a different
+ *                      profile.
+ */
+function ProfilerPanel(frame, toolbox) {
+  this.isReady = false;
+  this.window = frame.window;
+  this.document = frame.document;
+  this.target = toolbox.target;
+  this.controller = new ProfilerController();
+
+  this.profiles = new Map();
+  this._uid = 0;
+
+  new EventEmitter(this);
+
+  this.controller.connect(function onConnect() {
+    let create = this.document.getElementById("profiler-create");
+    create.addEventListener("click", this.createProfile.bind(this), false);
+    create.removeAttribute("disabled");
+
+    let profile = this.createProfile();
+    this.switchToProfile(profile, function () {
+      this.isReady = true;
+      this.emit("ready");
+    }.bind(this))
+  }.bind(this));
+}
+
+ProfilerPanel.prototype = {
+  isReady:    null,
+  window:     null,
+  document:   null,
+  target:     null,
+  controller: null,
+  profiles:   null,
+
+  _uid:       null,
+  _activeUid: null,
+
+  get activeProfile() {
+    return this.profiles.get(this._activeUid);
   },
 
-  onToggle: function PP_onToggle() {
-    let start = this.document.getElementById("profiler-start-wrapper");
-    let stop = this.document.getElementById("profiler-stop-wrapper");
-    let control = this.document.getElementById("profiler-control");
-    let report = this.document.getElementById("profiler-report");
+  set activeProfile(profile) {
+    this._activeUid = profile.uid;
+  },
 
+  /**
+   * Creates a new profile instance (see ProfileUI) and
+   * adds an appropriate item to the sidebar. Note that
+   * this method doesn't automatically switch user to
+   * the newly created profile, they have do to switch
+   * explicitly.
+   *
+   * @return ProfilerPanel
+   */
+  createProfile: function PP_addProfile() {
+    let uid  = ++this._uid;
+    let list = this.document.getElementById("profiles-list");
+    let item = this.document.createElement("li");
+    let wrap = this.document.createElement("h1");
+
+    item.setAttribute("id", "profile-" + uid);
+    item.setAttribute("data-uid", uid);
+    item.addEventListener("click", function (ev) {
+      let uid = parseInt(ev.target.getAttribute("data-uid"), 10);
+      this.switchToProfile(this.profiles.get(uid));
+    }.bind(this), false);
+
+    wrap.className = "profile-name";
+    wrap.textContent = "Profile " + uid;
+
+    item.appendChild(wrap);
+    list.appendChild(item);
+
+    let profile = new ProfileUI(uid, this);
+    this.profiles.set(uid, profile);
+
+    this.emit("profileCreated", uid);
+    return profile;
+  },
+
+  /**
+   * Switches to a different profile by making its instance an
+   * active one.
+   *
+   * @param ProfileUI profile
+   *   A profile instance to switch to.
+   * @param function onLoad
+   *   A function to call when profile instance is ready.
+   *   If the instance is already loaded, onLoad will be
+   *   called synchronously.
+   */
+  switchToProfile: function PP_switchToProfile(profile, onLoad) {
+    let doc = this.document;
+
+    if (this.activeProfile) {
+      this.activeProfile.hide();
+    }
+
+    let active = doc.querySelector("#profiles-list > li.splitview-active");
+    if (active) {
+      active.className = "";
+    }
+
+    doc.getElementById("profile-" + profile.uid).className = "splitview-active";
+    profile.show();
+    this.activeProfile = profile;
+
+    if (profile.isReady) {
+      this.emit("profileSwitched", profile.uid);
+      onLoad();
+      return;
+    }
+
+    profile.once("ready", function () {
+      this.emit("profileSwitched", profile.uid);
+      onLoad();
+    }.bind(this));
+  },
+
+  /**
+   * Start collecting profile data.
+   *
+   * @param function onStart
+   *   A function to call once we get the message
+   *   that profiling had been successfuly started.
+   */
+  startProfiling: function PP_startProfiling(onStart) {
+    this.controller.start(function (err) {
+      if (err) {
+        // FIXME: Error handling.
+        Cu.reportError("ProfilerController.start: " + err.message);
+        return;
+      }
+
+      onStart();
+      this.emit("started");
+    }.bind(this));
+  },
+
+  /**
+   * Stop collecting profile data and send it to Cleopatra
+   * for parsing.
+   *
+   * @param function onStop
+   *   A function to call once we get the message
+   *   that profiling had been successfuly stopped.
+   */
+  stopProfiling: function PP_stopProfiling(onStop) {
     this.controller.isActive(function (err, isActive) {
       if (err) {
         // FIXME: Error handling.
@@ -208,45 +345,30 @@ ProfilerPanel.prototype = {
         return;
       }
 
-      if (isActive) {
-        this.controller.stop(function (err, data) {
-          if (err) {
-            // FIXME: Error handling.
-            Cu.reportError("ProfilerController.stop: " + err.message);
-            return;
-          }
-
-          this.cacheProfileData(data);
-          this.parseProfileData(data);
-          this.showReporter();
-
-          stop.setAttribute("hidden", true);
-          start.removeAttribute("hidden");
-
-          control.setAttribute("hidden", true);
-          report.removeAttribute("hidden");
-
-          this.emit("stopped");
-        }.bind(this));
-
+      if (!isActive) {
         return;
       }
 
-      this.controller.start(function (err) {
+      this.controller.stop(function (err, data) {
         if (err) {
           // FIXME: Error handling.
-          Cu.reportError("ProfilerController.start: " + err.message);
+          Cu.reportError("ProfilerController.stop: " + err.message);
           return;
         }
 
-        start.setAttribute("hidden", true);
-        stop.removeAttribute("hidden");
+        this.activeProfile.parse(data, function onParsed() {
+          this.emit("parsed");
+        }.bind(this));
 
-        this.emit("started");
+        onStop();
+        this.emit("stopped");
       }.bind(this));
     }.bind(this));
   },
 
+  /**
+   * Cleanup.
+   */
   destroy: function PP_destroy() {
     // FIXME: Need an actualt destroy function that closes
     // connections and all that.

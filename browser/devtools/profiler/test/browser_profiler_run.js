@@ -33,31 +33,39 @@ function attemptTearDown() {
   });
 }
 
+function getProfileInternals() {
+  let win = gPanel.activeProfile.iframe.contentWindow;
+  let doc = win.document;
+
+  return [win, doc];
+}
+
 function testUI() {
   ok(gPanel, "Profiler panel exists");
+  ok(gPanel.activeProfile, "Active profile exists");
 
-  let toggle = gPanel.document.getElementById("profiler-toggle");
-  ok(toggle, "Toggle button exists");
-  ok(toggle.getAttribute("label") == "Start", "Toggle button says 'Start'");
-  ok(!toggle.hasAttribute("disabled"), "Toggle button is enabled");
+  let [win, doc] = getProfileInternals();
+  let startButton = doc.querySelector(".controlPane #startWrapper button");
+  let stopButton = doc.querySelector(".controlPane #stopWrapper button");
 
-  toggle.click();
+  ok(startButton, "Start button exists");
+  ok(stopButton, "Stop button exists");
+
+  startButton.click();
 }
 
 function onStart() {
-  let toggle = gPanel.document.getElementById("profiler-toggle");
-  ok(toggle.getAttribute("label") == "Stop", "Toggle button says 'Stop'");
-
   gPanel.controller.isActive(function (err, isActive) {
     ok(isActive, "Profiler is running");
-    toggle.click();
+
+    let [win, doc] = getProfileInternals();
+    let stopButton = doc.querySelector(".controlPane #stopWrapper button");
+
+    stopButton.click();
   });
 }
 
 function onStop() {
-  let toggle = gPanel.document.getElementById("profiler-toggle");
-  ok(toggle.getAttribute("label") == "Start", "Toggle button says 'Start' again");
-
   gPanel.controller.isActive(function (err, isActive) {
     ok(!isActive, "Profiler is idle");
     attemptTearDown();
@@ -66,9 +74,8 @@ function onStop() {
 
 function onParsed() {
   function assertSample() {
-    let iframe = gPanel.document.getElementById("profiler-cleo");
-    let sample = iframe.contentWindow.document
-      .getElementsByClassName("samplePercentage");
+    let [win,doc] = getProfileInternals();
+    let sample = doc.getElementsByClassName("samplePercentage");
 
     if (sample.length <= 0) {
       return void setTimeout(assertSample, 100);

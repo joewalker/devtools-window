@@ -1,21 +1,26 @@
 <!DOCTYPE html>
+
 <html>
   <head>
-    <title>Cleopatra - UI for SPS</title>
+    <title>Firefox Profiler (SPS)</title>
     <meta charset="utf-8">
+
     <link rel="stylesheet" type="text/css" href="profiler/cleopatra/css/ui.css">
     <link rel="stylesheet" type="text/css" href="profiler/cleopatra/css/tree.css">
+    <link rel="stylesheet" type="text/css" href="profiler/cleopatra/css/devtools.css">
+
     <script src="profiler/cleopatra/js/parser.js"></script>
     <script src="profiler/cleopatra/js/tree.js"></script>
     <script src="profiler/cleopatra/js/ui.js"></script>
     <script src="profiler/cleopatra/js/ProgressReporter.js"></script>
+    <script src="profiler/cleopatra/js/devtools.js"></script>
 
     <link rel="shortcut icon" href="favicon.png" />
-
   </head>
-  <body>
+
+  <body onload="notifyParent('loaded');">
     <script>
-      enterMainUI(true);
+      initUI();
     </script>
   </body>
 </html>

@@ -1,0 +1,9 @@
+#mainarea > .controlPane {
+  font-size: 120%;
+  padding-top: 75px;
+  text-align: center;
+}
+
+#stopWrapper {
+  display: none;
+}
