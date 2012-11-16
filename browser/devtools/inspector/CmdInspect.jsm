@@ -10,6 +10,8 @@ Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 
 XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
                                   "resource:///modules/devtools/gDevTools.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "TargetFactory",
+                                  "resource:///modules/devtools/Target.jsm");
 
 /**
  * 'inspect' command
@@ -30,6 +32,7 @@ gcli.addCommand({
     let browserDoc = context.environment.chromeDocument;
     let browserWindow = browserDoc.defaultView;
     let tab = browserWindow.gBrowser.selectedTab;
+    let target = TargetFactory.forTab(tab);
 
     let node = args.selector;
 
@@ -37,7 +40,7 @@ gcli.addCommand({
     if (inspector && inspector.isReady) {
       inspector.selection.setNode(node, "gcli");
     } else {
-      let toolbox = gDevTools.openToolboxForTab(tab, "inspector");
+      let toolbox = gDevTools.openToolboxForTab(target, "inspector");
       toolbox.once("inspector-ready", function(event, panel) {
         let inspector = gDevTools.getPanelForTarget("inspector", tab);
         inspector.selection.setNode(node, "gcli");

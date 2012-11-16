@@ -12,6 +12,8 @@ Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 
+const targets = new WeakMap();
+
 /**
  * Functions for creating Targets
  */
@@ -23,7 +25,23 @@ this.TargetFactory = {
    * @return A target object
    */
   forTab: function TF_forTab(tab) {
-    return new TabTarget(tab);
+    let target = targets.get(tab);
+    if (target == null) {
+      target = new TabTarget(tab);
+      targets.set(tab, target);
+    }
+    return target;
+  },
+
+  /**
+   * Creating a target for a tab that is being closed is a problem because it
+   * allows a leak as a result of coming after the close event which normally
+   * clears things up. This function allows us to ask if there is a known
+   * target for a tab without creating a target
+   * @return true/false
+   */
+  isKnownTab: function TF_isKnownTab(tab) {
+    return targets.has(tab);
   },
 
   /**
@@ -33,7 +51,12 @@ this.TargetFactory = {
    * @return A target object
    */
   forWindow: function TF_forWindow(window) {
-    return new WindowTarget(window);
+    let target = targets.get(window);
+    if (target == null) {
+      target = new WindowTarget(window);
+      targets.set(window, target);
+    }
+    return target;
   },
 
   /**
@@ -43,7 +66,12 @@ this.TargetFactory = {
    * @return A target object
    */
   forRemote: function TF_forRemote(actor) {
-    return new RemoteTarget(actor);
+    let target = targets.get(actor);
+    if (target == null) {
+      target = new RemoteTarget(actor);
+      targets.set(actor, target);
+    }
+    return target;
   },
 
   /**
@@ -194,12 +222,12 @@ TabTarget.prototype = {
    */
   _webProgressListener: {
     QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener, Ci.nsISupportsWeakReference]),
-    onProgressChange: function() {},
-    onStateChange: function(aProgress, aRequest, aFlag, aStatus) {
-      let isStart = aFlag & Ci.nsIWebProgressListener.STATE_START;
-      let isDocument = aFlag & Ci.nsIWebProgressListener.STATE_IS_DOCUMENT;
-      let isNetwork = aFlag & Ci.nsIWebProgressListener.STATE_IS_NETWORK;
-      let isRequest = aFlag & Ci.nsIWebProgressListener.STATE_IS_REQUEST;
+
+    onStateChange: function(progress, request, flag, status) {
+      let isStart = flag & Ci.nsIWebProgressListener.STATE_START;
+      let isDocument = flag & Ci.nsIWebProgressListener.STATE_IS_DOCUMENT;
+      let isNetwork = flag & Ci.nsIWebProgressListener.STATE_IS_NETWORK;
+      let isRequest = flag & Ci.nsIWebProgressListener.STATE_IS_REQUEST;
 
       // Skip non-interesting states.
       if (!isStart || !isDocument || !isRequest || !isNetwork) {
@@ -207,12 +235,15 @@ TabTarget.prototype = {
       }
 
       if (this.target) {
-        this.target.emit("will-navigate", aRequest);
+        this.target.emit("will-navigate", request);
       }
     },
+
+    onProgressChange: function() {},
     onSecurityChange: function() {},
     onStatusChange: function() {},
-    onLocationChange: function(webProgress){
+
+    onLocationChange: function(webProgress) {
       let window = webProgress.DOMWindow;
       if (this.target) {
         this.target.emit("navigate", window);
@@ -231,9 +262,15 @@ TabTarget.prototype = {
     this._webProgressListener.target = null;
     this.tab.removeEventListener("TabClose", this);
     this.tab.parentNode.removeEventListener("TabSelect", this);
-    this._tab = null;
     this._destroyed = true;
     this.emit("close");
+
+    targets.delete(this._tab);
+    this._tab = null;
+  },
+
+  toString: function() {
+    return 'TabTarget:' + this.tab;
   },
 };
 
@@ -266,6 +303,10 @@ WindowTarget.prototype = {
   get remote() {
     return false;
   },
+
+  toString: function() {
+    return 'WindowTarget:' + this.window;
+  },
 };
 
 /**
@@ -294,5 +335,9 @@ RemoteTarget.prototype = {
 
   get remote() {
     return true;
+  },
+
+  toString: function() {
+    return 'RemoteTarget:' + this.actor;
   },
 };

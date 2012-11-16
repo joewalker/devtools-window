@@ -6,6 +6,10 @@
 let doc;
 let salutation;
 
+let tempScope = {};
+Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
+let TargetFactory = tempScope.TargetFactory;
+
 function createDocument()
 {
   doc.body.innerHTML = '<div id="first" style="{ margin: 10em; ' +
@@ -52,10 +56,11 @@ function startInspectorTests()
   testMarkupView(span);
   testBreadcrumbs(span);
 
-  let toolbox = gDevTools.getToolboxForTarget(gBrowser.selectedTab);
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+  let toolbox = gDevTools.getToolboxForTarget(target);
   toolbox.once("destroyed", function() {
     ok("true", "'destroyed' notification received.");
-    let toolbox = gDevTools.getToolboxForTarget(gBrowser.selectedTab);
+    let toolbox = gDevTools.getToolboxForTarget(target);
     ok(!toolbox, "Toolbox destroyed.");
     executeSoon(runContextMenuTest);
   });

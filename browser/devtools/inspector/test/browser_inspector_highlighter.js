@@ -135,7 +135,8 @@ function finishTestComparisons()
 }
 
 function finishUp() {
-  gDevTools.closeToolbox(gBrowser.selectedTab);
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+  gDevTools.closeToolbox(target);
   gBrowser.removeCurrentTab();
   finish();
 }

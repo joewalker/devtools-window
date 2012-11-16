@@ -17,6 +17,9 @@ function test() {
   Components.utils.import("resource:///modules/devtools/gDevTools.jsm", imported);
   let gDevTools = imported.gDevTools;
 
+  Cu.import("resource:///modules/devtools/Target.jsm", imported);
+  let TargetFactory = imported.TargetFactory;
+
   let webconsole = document.getElementById("developer-toolbar-webconsole");
   let toolbar = document.getElementById("Tools:DevToolbar");
   let tab1, tab2;
@@ -111,7 +114,8 @@ function test() {
 
     oneTimeObserve("web-console-created", _onWebConsoleOpen);
 
-    gDevTools.openToolboxForTab(tab, "webconsole");
+    let target = TargetFactory.forTab(tab);
+    gDevTools.openToolboxForTab(target, "webconsole");
   }
 
   function onWebConsoleOpen(hud) {
@@ -213,7 +217,8 @@ function test() {
 
   function testEnd() {
     document.getElementById("developer-toolbar-closebutton").doCommand();
-    gDevTools.closeToolbox(tab1);
+    let target1 = TargetFactory.forTab(tab1);
+    gDevTools.closeToolbox(target1);
     gBrowser.removeTab(tab1);
     gBrowser.removeTab(tab2);
     finish();

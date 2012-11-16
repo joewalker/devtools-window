@@ -88,7 +88,7 @@
 
     <command id="Tools:Search" oncommand="BrowserSearch.webSearch();"/>
     <command id="Tools:Downloads" oncommand="BrowserDownloadsUI();"/>
-    <command id="Tools:DevToolbox" oncommand="gDevTools.toggleToolboxForTab(gBrowser.selectedTab);"/>
+    <command id="Tools:DevToolbox" oncommand="gDevTools.toggleToolboxCommand(gBrowser);"/>
     <command id="Tools:DevToolbar" oncommand="DeveloperToolbar.toggle();" disabled="true" hidden="true"/>
     <command id="Tools:DevToolbarFocus" oncommand="DeveloperToolbar.focusToggle();" disabled="true"/>
     <command id="Tools:RemoteWebConsole" oncommand="HUDConsoleUI.toggleRemoteHUD();" disabled="true" hidden="true"/>

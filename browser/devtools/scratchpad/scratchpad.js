@@ -27,6 +27,7 @@ Cu.import("resource:///modules/devtools/LayoutHelpers.jsm");
 Cu.import("resource:///modules/devtools/scratchpad-manager.jsm");
 Cu.import("resource://gre/modules/jsdebugger.jsm");
 Cu.import("resource:///modules/devtools/gDevTools.jsm");
+Cu.import("resource:///modules/devtools/Target.jsm");
 
 const SCRATCHPAD_CONTEXT_CONTENT = 1;
 const SCRATCHPAD_CONTEXT_BROWSER = 2;
@@ -1054,7 +1055,8 @@ var Scratchpad = {
    */
   openWebConsole: function SP_openWebConsole()
   {
-    gDevTools.openToolboxForTab(this.gBrowser.selectedTab, "webconsole");
+    let target = TargetFactory.forTab(this.gBrowser.selectedTab);
+    gDevTools.openToolboxForTab(target, "webconsole");
     this.browserWindow.focus();
   },
 

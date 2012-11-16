@@ -11,7 +11,8 @@ function test() {
     ok(!gDevTools.getPanelForTarget("jsdebugger", tab1),
       "Shouldn't have a debugger panel for this tab yet.");
 
-    let toolbox = gDevTools.openToolboxForTab(tab1, "jsdebugger");
+    let target1 = TargetFactory.forTab(tab1);
+    let toolbox = gDevTools.openToolboxForTab(target1, "jsdebugger");
     toolbox.once("jsdebugger-ready", function dbgReady() {
       let dbg = gDevTools.getPanelForTarget("jsdebugger", tab1);
       ok(dbg, "We should have a debugger panel.");

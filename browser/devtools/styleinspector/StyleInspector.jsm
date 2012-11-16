@@ -62,7 +62,7 @@ this.RuleViewTool = function RVT_RuleViewTool(aInspector, aWindow, aIFrame)
       let target = this.inspector.target;
 
       if (StyleEditorDefinition.isTargetSupported(target)) {
-        let toolbox = gDevTools.getToolboxForTarget(target.tab);
+        let toolbox = gDevTools.getToolboxForTarget(target);
 
         toolbox.once("styleeditor-selected", function SE_selected(id, styleEditor) {
           styleEditor.selectStyleSheet(styleSheet, line);

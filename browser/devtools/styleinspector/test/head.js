@@ -11,6 +11,8 @@ let ConsoleUtils = tempScope.ConsoleUtils;
 let CssLogic = tempScope.CssLogic;
 let CssHtmlTree = tempScope.CssHtmlTree;
 let gDevTools = tempScope.gDevTools;
+Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
+let TargetFactory = tempScope.TargetFactory;
 
 function log(aMsg)
 {
@@ -135,12 +137,14 @@ function addStyle(aDocument, aString)
 
 function openConsole()
 {
-  gDevTools.openToolboxForTab(tab, "webconsole");
+  let target = TargetFactory.forTab(tab);
+  gDevTools.openToolboxForTab(target, "webconsole");
 }
 
 function closeConsole()
 {
-  gDevTools.closeToolbox(tab);
+  let target = TargetFactory.forTab(tab);
+  gDevTools.closeToolbox(target);
 }
 
 function finishTest()
@@ -151,7 +155,8 @@ function finishTest()
 function tearDown()
 {
   try {
-    gDevTools.closeToolbox(gBrowser.selectedTab);
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    gDevTools.closeToolbox(target);
   }
   catch (ex) {
     log(ex);

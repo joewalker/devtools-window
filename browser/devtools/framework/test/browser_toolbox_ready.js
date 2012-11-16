@@ -2,6 +2,10 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+let tempScope = {};
+Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
+let TargetFactory = tempScope.TargetFactory;
+
 let toolbox;
 
 function test()
@@ -19,10 +23,10 @@ function test()
 
 function openToolbox()
 {
-  let tab = gBrowser.selectedTab;
-  gDevTools.toggleToolboxForTab(tab);
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+  gDevTools.toggleToolboxForTarget(target);
 
-  toolbox = gDevTools.getToolboxForTarget(tab);
+  toolbox = gDevTools.getToolboxForTarget(target);
 
   ok(!toolbox.isReady, "toolbox isReady isn't set yet");
 
