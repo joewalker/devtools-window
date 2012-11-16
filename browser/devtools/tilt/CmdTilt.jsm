@@ -161,7 +161,7 @@ gcli.addCommand({
   manual: gcli.lookup("tiltCloseManual"),
   exec: function(args, context) {
     let chromeWindow = context.environment.chromeDocument.defaultView;
-    let Tilt = chromeWindow.Tilt;
+    let Tilt = TiltManager.getTiltForBrowser(chromeWindow);
 
     Tilt.destroy(Tilt.currentWindowId);
   }
