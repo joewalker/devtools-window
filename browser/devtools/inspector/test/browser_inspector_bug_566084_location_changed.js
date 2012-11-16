@@ -17,11 +17,13 @@ function test() {
     ok(para, "found the paragraph element");
     is(para.textContent, "init", "paragraph content is correct");
 
-    inspector.isDirty = true;
+    inspector.markDirty();
 
     let toolbox = gDevTools.getToolboxForTarget(gBrowser.selectedTab);
     notificationBox = toolbox.getNotificationBox();
     notificationBox.addEventListener("AlertActive", alertActive1, false);
+
+    ok(toolbox, "We have access to the notificationBox");
 
     gBrowser.selectedBrowser.addEventListener("load", onPageLoad, true);
 
@@ -51,7 +53,7 @@ function test() {
     ok(para, "found the paragraph element, second time");
     is(para.textContent, "init", "paragraph content is correct");
 
-    let inspector = gDevTools.getPanelForTarget("inspector", tab);
+    let inspector = gDevTools.getPanelForTarget("inspector", gBrowser.selectedTab);
     ok(inspector, "Inspector still alive");
 
     notificationBox.addEventListener("AlertActive", alertActive2, false);
@@ -95,7 +97,8 @@ function test() {
     ok(para, "found the paragraph element, third time");
     is(para.textContent, "test2", "paragraph content is correct");
 
-    ok(inspector.selection.node, null, "Selection is null");
+    let root = content.document.documentElement;
+    ok(inspector.selection.node, root, "Selection is the root of the new page.");
 
     ok(alertActive1_called, "first notification box has been showed");
     ok(alertActive2_called, "second notification box has been showed");

@@ -1455,8 +1455,8 @@ var gBrowserInit = {
       cmd.removeAttribute("hidden");
     }
 
-    // Initialize gDevTools
-    gDevTools.init(window.document);
+    // Add Devtools menuitems and listeners
+    gDevTools.registerBrowserWindow(window);
 
     let appMenuButton = document.getElementById("appmenu-button");
     let appMenuPopup = document.getElementById("appmenu-popup");
@@ -1501,7 +1501,7 @@ var gBrowserInit = {
       return;
     }
 
-    gDevTools.forgetWindow(window);
+    gDevTools.forgetBrowserWindow(window);
 
     // First clean up services initialized in gBrowserInit.onLoad (or those whose
     // uninit methods don't depend on the services having been initialized).

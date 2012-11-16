@@ -36,9 +36,7 @@ function test()
     ok(!tmp.LayoutHelpers.isNodeConnected(node), "Node considered as disconnected.");
     ok(!inspector.selection.isConnected(), "Selection considered as disconnected");
 
-    executeSoon(function() {
-      finishUp();
-    });
+    finishUp();
   }
 
   function finishUp() {

@@ -18,6 +18,9 @@ MOCHITEST_BROWSER_FILES = \
 		browser_toolbox_hosts.js \
 		browser_toolbox_ready.js \
 		browser_toolbox_select_event.js \
-		browser_toolbox_tool_ready.js
+		browser_target_events.js \
+		browser_toolbox_tool_ready.js \
+		browser_toolbox_sidebar.js \
+		$(NULL)
 
 include $(topsrcdir)/config/rules.mk

@@ -19,8 +19,13 @@ this.StyleEditorPanel = function StyleEditorPanel(panelWin, toolbox) {
   this._toolbox = toolbox;
   this._target = toolbox.target;
 
-  this._webProgressListener = new WebProgresslistener(this);
-  this._target.tab.linkedBrowser.addProgressListener(this._webProgressListener);
+  this.reset = this.reset.bind(this);
+  this.newPage = this.newPage.bind(this);
+  this.destroy = this.destroy.bind(this);
+
+  this._target.on("will-navigate", this.reset);
+  this._target.on("navigate", this.newPage);
+  this._target.on("close", this.destroy);
 
   this._panelWin = panelWin;
   this._panelDoc = panelWin.document;
@@ -64,6 +69,20 @@ StyleEditorPanel.prototype = {
   },
 
   /**
+   * Navigated to a new page.
+   */
+  newPage: function StyleEditor_newPage(event, window) {
+    this.setPage(window);
+  },
+
+  /**
+   * No window available anymore.
+   */
+  reset: function StyleEditor_reset() {
+    this._panelWin.styleEditorChrome.resetChrome();
+  },
+
+  /**
    * Select a stylesheet.
    */
   selectStyleSheet: function StyleEditor_selectStyleSheet(stylesheet, line, col) {
@@ -74,39 +93,17 @@ StyleEditorPanel.prototype = {
    * Destroy StyleEditor
    */
   destroy: function StyleEditor_destroy() {
-    this._target.tab.linkedBrowser.removeProgressListener(this._webProgressListener);
+    if (this._destroyed) {
+      return;
+    }
+    this._destroyed = true;
+
+    this._target.off("will-navigate", this.reset);
+    this._target.off("navigate", this.newPage);
+    this._target.off("close", this.destroy);
     this._target = null;
     this._toolbox = null;
     this._panelWin = null;
     this._panelDoc = null;
-  },
-}
-
-function WebProgresslistener(panel) {
-  this._panel = panel;
-}
-WebProgresslistener.prototype = {
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener, Ci.nsISupportsWeakReference]),
-  onProgressChange: function() {},
-  onStateChange: function(aProgress, aRequest, aFlag, aStatus) {
-    let isStart = aFlag & Ci.nsIWebProgressListener.STATE_START;
-    let isDocument = aFlag & Ci.nsIWebProgressListener.STATE_IS_DOCUMENT;
-    let isNetwork = aFlag & Ci.nsIWebProgressListener.STATE_IS_NETWORK;
-    let isRequest = aFlag & Ci.nsIWebProgressListener.STATE_IS_REQUEST;
-
-    // Skip non-interesting states.
-    if (!isStart || !isDocument || !isRequest || !isNetwork) {
-      return;
-    }
-
-    // Page is being unloaded, let's reset the UI.
-    this._panel._panelWin.styleEditorChrome.resetChrome();
-  },
-  onSecurityChange: function() {},
-  onStatusChange: function() {},
-  onLocationChange: function(webProgress){
-    // New page is available.
-    let window = webProgress.DOMWindow;
-    this._panel.setPage(window);
   },
 }

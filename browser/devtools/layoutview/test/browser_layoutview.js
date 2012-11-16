@@ -10,6 +10,7 @@ function test() {
   let doc;
   let node;
   let view;
+  let inspector;
 
   // Expected values:
   let res1 = [
@@ -61,44 +62,35 @@ function test() {
     node = doc.querySelector("div");
     ok(node, "node found");
 
-    Services.obs.addObserver(openLayoutView,
-      InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED, false);
-    InspectorUI.toggleInspectorUI();
+    let toolbox = gDevTools.openToolboxForTab(gBrowser.selectedTab, "inspector");
+    toolbox.once("inspector-ready", function(event, panel) {
+      let inspector = gDevTools.getPanelForTarget("inspector", gBrowser.selectedTab);
+      openLayoutView(inspector);
+    });
   }
 
-  function openLayoutView() {
-    Services.obs.removeObserver(openLayoutView,
-      InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED);
+  function openLayoutView(aInspector) {
+    inspector = aInspector;
 
     info("Inspector open");
 
-    let highlighter = InspectorUI.highlighter;
-    highlighter.highlight(node);
-    highlighter.lock();
-
-    window.addEventListener("message", viewReady, true);
+    inspector.selection.setNode(node);
+    inspector.sidebar.select("layoutview");
+    inspector.sidebar.once("layoutview-ready", viewReady);
   }
 
-  function viewReady(e) {
-    if (e.data != "layoutview-ready") return;
-
-    window.removeEventListener("message", viewReady, true);
-
+  function viewReady() {
     info("Layout view ready");
 
-    view = InspectorUI._sidebar._layoutview;
+    view = inspector.sidebar.getWindowForTab("layoutview");
 
-    ok(!!view, "LayoutView document is alive.");
-
-    view.open();
-
-    ok(view.iframe.getAttribute("open"), "true", "View is open.");
+    ok(!!view.layoutview, "LayoutView document is alive.");
 
     test1();
   }
 
   function test1() {
-    let viewdoc = view.iframe.contentDocument;
+    let viewdoc = view.document;
 
     for (let i = 0; i < res1.length; i++) {
       let elt = viewdoc.querySelector(res1[i].selector);
@@ -107,14 +99,14 @@ function test() {
 
     gBrowser.selectedBrowser.addEventListener("MozAfterPaint", test2, false);
 
-    InspectorUI.selection.style.height = "150px";
-    InspectorUI.selection.style.paddingRight = "50px";
+    inspector.selection.node.style.height = "150px";
+    inspector.selection.node.style.paddingRight = "50px";
   }
 
   function test2() {
     gBrowser.selectedBrowser.removeEventListener("MozAfterPaint", test2, false);
 
-    let viewdoc = view.iframe.contentDocument;
+    let viewdoc = view.document;
 
     for (let i = 0; i < res2.length; i++) {
       let elt = viewdoc.querySelector(res2[i].selector);
@@ -122,16 +114,14 @@ function test() {
     }
 
     executeSoon(function() {
-      Services.obs.addObserver(finishUp,
-        InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED, false);
-      InspectorUI.closeInspectorUI();
+      gDevTools.once("toolbox-destroyed", finishUp);
+      inspector._toolbox.destroy();
     });
   }
 
   function finishUp() {
     Services.prefs.clearUserPref("devtools.layoutview.enabled");
     Services.prefs.clearUserPref("devtools.inspector.sidebarOpen");
-    Services.obs.removeObserver(finishUp, InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED);
     gBrowser.removeCurrentTab();
     finish();
   }

@@ -13,14 +13,14 @@ function test() {
   {
     doc.body.innerHTML = '<div id="testdiv">Test div!</div>';
     doc.title = "Inspector Change Test";
-    startInspectorTests();
     openInspector(runInspectorTests);
   }
 
 
   function getInspectorProp(aName)
   {
-    for each (let view in computedViewTree().propertyViews) {
+    let computedview = inspector.sidebar.getWindowForTab("computedview").computedview.view;
+    for each (let view in computedview.propertyViews) {
       if (view.name == aName) {
         return view;
       }
@@ -31,23 +31,27 @@ function test() {
   function runInspectorTests(aInspector)
   {
     inspector = aInspector;
+    inspector.sidebar.once("computedview-ready", function() {
+      info("Computed View ready");
+      inspector.sidebar.select("computedview");
 
-    testDiv = doc.getElementById("testdiv");
+      testDiv = doc.getElementById("testdiv");
 
-    testDiv.style.fontSize = "10px";
+      testDiv.style.fontSize = "10px";
 
-    inspector.selection.setNode(testDiv);
+      // Start up the style inspector panel...
+      Services.obs.addObserver(stylePanelTests, "StyleInspector-populated", false);
 
-    // Start up the style inspector panel...
-    Services.obs.addObserver(stylePanelTests, "StyleInspector-populated", false);
+      inspector.selection.setNode(testDiv);
+    });
   }
 
   function stylePanelTests()
   {
     Services.obs.removeObserver(stylePanelTests, "StyleInspector-populated");
 
-    ok(InspectorUI.sidebar.visible, "Inspector Sidebar is open");
-    ok(computedViewTree(), "Style Panel has a cssHtmlTree");
+    let computedview = inspector.sidebar.getWindowForTab("computedview").computedview;
+    ok(computedview, "Style Panel has a cssHtmlTree");
 
     let propView = getInspectorProp("font-size");
     is(propView.value, "10px", "Style inspector should be showing the correct font size.");
@@ -55,7 +59,7 @@ function test() {
     Services.obs.addObserver(stylePanelAfterChange, "StyleInspector-populated", false);
 
     testDiv.style.fontSize = "15px";
-    InspectorUI.nodeChanged();
+    inspector.emit("layout-change");
   }
 
   function stylePanelAfterChange()
@@ -71,13 +75,12 @@ function test() {
   function stylePanelNotActive()
   {
     // Tests changes made while the style panel is not active.
-    InspectorUI.sidebar.activatePanel("ruleview");
+    inspector.sidebar.select("ruleview");
 
     executeSoon(function() {
       Services.obs.addObserver(stylePanelAfterSwitch, "StyleInspector-populated", false);
       testDiv.style.fontSize = "20px";
-      InspectorUI.nodeChanged();
-      InspectorUI.sidebar.activatePanel("computedview");
+      inspector.sidebar.select("computedview");
     });
   }
 
@@ -88,16 +91,11 @@ function test() {
     let propView = getInspectorProp("font-size");
     is(propView.value, "20px", "Style inspector should be showing the newest font size.");
 
-    Services.obs.addObserver(finishTest, InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED, false);
-    executeSoon(function() {
-      InspectorUI.closeInspectorUI(true);
-    });
+    finishTest();
   }
 
   function finishTest()
   {
-    Services.obs.removeObserver(finishTest,
-      InspectorUI.INSPECTOR_NOTIFICATIONS.CLOSED);
     gBrowser.removeCurrentTab();
     finish();
   }

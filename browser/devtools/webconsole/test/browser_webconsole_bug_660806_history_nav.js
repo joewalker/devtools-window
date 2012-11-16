@@ -5,10 +5,6 @@
 const TEST_URI = "data:text/html;charset=utf-8,<p>bug 660806 - history navigation must not show the autocomplete popup";
 
 function test() {
-  // FIXME: Commented out failing test: "TypeError: popup._panel is null", presumably because jsterm.autocompletePopup = null
-  finishTest();
-  return;
-
   addTab(TEST_URI);
   browser.addEventListener("load", function onLoad() {
     browser.removeEventListener("load", onLoad, true);
@@ -25,10 +21,11 @@ function consoleOpened(HUD)
 
   let jsterm = HUD.jsterm;
   let popup = jsterm.autocompletePopup;
-  popup._panel.addEventListener("popupshown", function() {
-    popup._panel.removeEventListener("popupshown", arguments.callee, false);
+  let onShown = function() {
     ok(false, "popup shown");
-  }, false);
+  };
+
+  popup._panel.addEventListener("popupshown", onShown, false);
 
   ok(!popup.isOpen, "popup is not open");
 
@@ -45,6 +42,7 @@ function consoleOpened(HUD)
 
   executeSoon(function() {
     ok(!popup.isOpen, "popup is not open");
+    popup._panel.removeEventListener("popupshown", onShown, false);
     executeSoon(finishTest);
   });
 }

@@ -77,13 +77,23 @@ function testWindowHost()
   let iframe = win.document.getElementById("toolbox-iframe");
   checkToolboxLoaded(iframe);
 
-  toolbox.once("destroyed", toolboxDestroyed);
-  toolbox.destroy();
+  testToolSelect();
 }
 
-function toolboxDestroyed()
+function testToolSelect()
 {
-  openToolbox(testRememberHost);
+  // make sure we can load a tool after switching hosts
+  toolbox.once("inspector-ready", testDestroy);
+  toolbox.selectTool("inspector");
+}
+
+function testDestroy()
+{
+  toolbox.once("destroyed", function() {
+    openToolbox(testRememberHost);
+  });
+
+  toolbox.destroy();
 }
 
 function testRememberHost()

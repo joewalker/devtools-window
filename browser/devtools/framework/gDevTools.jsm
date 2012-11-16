@@ -25,41 +25,27 @@ this.DevTools = function DevTools() {
   this._tools = new Map();
   this._toolboxes = new Map();
 
-  // Because init() is called from browser.js's _delayedStartup() method we need
-  // to use bind in order to preserve the context of "this."
-  this.init = this.init.bind(this);
-
   // destroy() is an observer's handler so we need to preserve context.
   this.destroy = this.destroy.bind(this);
+
+  this._trackedBrowserWindows = new Set();
 
   // Bind _updateMenuCheckbox() to preserve context.
   this._updateMenuCheckbox = this._updateMenuCheckbox.bind(this);
 
   new EventEmitter(this);
+
+  Services.obs.addObserver(this.destroy, "quit-application-granted", false);
+
+  /**
+   * Register the set of default tools
+   */
+  for (let definition of defaultTools) {
+    this.registerTool(definition);
+  }
 }
 
 DevTools.prototype = {
-  /**
-   * Initialize the DevTools class.
-   *
-   * @param  {XULDocument} doc
-   *         The document to which any menu items are to be added
-   */
-  init: function DT_init(doc) {
-    /**
-     * Register the set of default tools
-     */
-    for (let definition of defaultTools) {
-      this.registerTool(definition);
-    }
-    this._addAllToolsToMenu(doc);
-
-    let tabContainer = doc.getElementById("tabbrowser-tabs")
-    tabContainer.addEventListener("TabSelect", this._updateMenuCheckbox, false);
-
-    Services.obs.addObserver(this.destroy, "quit-application-granted", false);
-  },
-
   /**
    * Register a new developer tool.
    *
@@ -161,12 +147,13 @@ DevTools.prototype = {
     }
 
     let tb = new Toolbox(target, hostType, defaultToolId);
+    let tab = target.tab;
 
-    this._toolboxes.set(target.tab, tb);
+    this._toolboxes.set(tab, tb);
     tb.once("destroyed", function() {
-      this.emit("toolbox-destroyed", target.tab);
-      this._toolboxes.delete(target.tab);
+      this._toolboxes.delete(tab);
       this._updateMenuCheckbox();
+      this.emit("toolbox-destroyed", tab);
     }.bind(this));
 
     tb.once("ready", function() {
@@ -283,15 +270,27 @@ DevTools.prototype = {
   },
 
   /**
+   * Add this DevTools's presence to a browser window's document
+   *
+   * @param  {XULDocument} doc
+   *         The document to which menuitems and handlers are to be added
+   */
+  registerBrowserWindow: function DT_registerBrowserWindow(win) {
+    this._trackedBrowserWindows.add(win);
+    this._addAllToolsToMenu(win.document);
+
+    let tabContainer = win.document.getElementById("tabbrowser-tabs")
+    tabContainer.addEventListener("TabSelect", this._updateMenuCheckbox, false);
+  },
+
+  /**
    * Add the menuitem for a tool to all open browser windows.
    *
    * @param {object} toolDefinition
    *        properties of the tool to add
    */
   _addToolToWindows: function DT_addToolToWindows(toolDefinition) {
-    let enumerator = Services.wm.getEnumerator("navigator:browser");
-    while (enumerator.hasMoreElements()) {
-      let win = enumerator.getNext();
+    for (let win of this._trackedBrowserWindows) {
       this._addToolToMenu(toolDefinition, win.document);
     }
   },
@@ -440,49 +439,25 @@ DevTools.prototype = {
    * called when a toolbox is created or destroyed.
    */
   _updateMenuCheckbox: function DT_updateMenuCheckbox() {
-    let win = Services.wm.getMostRecentWindow("navigator:browser");
-
-    // In the case of a browser window being closed the checkbox no longer
-    // exists so we bail out.
-    if (!win) {
-      return;
+    for (let win of this._trackedBrowserWindows) {
+      let broadcaster = win.document.getElementById("devtoolsMenuBroadcaster_DevToolbox");
+      if (this._toolboxes.has(win.gBrowser.selectedTab)) {
+        broadcaster.setAttribute("checked", "true");
+      } else {
+        broadcaster.removeAttribute("checked");
+      }
     }
-
-    let tab = win.gBrowser.selectedTab;
-    let appmenuitem = win.document.getElementById("appmenu_devToolbox");
-    let menuitem = win.document.getElementById("menu_devToolbox");
-    let hasToolbox = !!this.getToolboxForTarget(tab);
-
-    if (appmenuitem) {
-      appmenuitem.setAttribute("checked", hasToolbox);
-    }
-    menuitem.setAttribute("checked", hasToolbox);
   },
 
   /**
-   * Add the menuitem for a tool to all open browser windows.
+   * Remove the menuitem for a tool to all open browser windows.
    *
    * @param {object} toolId
    *        id of the tool to remove
    */
   _removeToolFromWindows: function DT_removeToolFromWindows(toolId) {
-    this._forEachBrowserWindow(function(win) {
+    for (let win of this._trackedBrowserWindows) {
       this._removeToolFromMenu(toolId, win.document);
-    }.bind(this));
-  },
-
-  /**
-   * Iterate browser windows.
-   *
-   * @param  {Function} callback
-   *         Method to be called for each window. An instance of each window
-   *         will be passed to this function.
-   */
-  _forEachBrowserWindow: function DT_forEachBrowserWindow(callback) {
-    let enumerator = Services.wm.getEnumerator("navigator:browser");
-    while (enumerator.hasMoreElements()) {
-      let win = enumerator.getNext();
-      callback(win);
     }
   },
 
@@ -521,29 +496,11 @@ DevTools.prototype = {
    * @param  {XULWindow} win
    *         The window containing the menu entr
    */
-  forgetWindow: function DT_forgetWindow(win) {
+  forgetBrowserWindow: function DT_forgetBrowserWindow(win) {
+    this._trackedBrowserWindows.delete(win);
+
     if (!this._tools) {
       return;
-    }
-
-    let doc = win.document;
-
-    let nodeids = [
-      "Tools:",
-      "key_",
-      "devtoolsMenuBroadcaster_",
-      "appmenuitem_",
-      "menuitem_"
-    ];
-
-    // Remove menu entries
-    for (let [id, value] of this._tools) {
-      for each (let nodeid in nodeids) {
-        let node = doc.getElementById(nodeid + id);
-        if (node) {
-          node.parentNode.removeChild(node);
-        }
-      }
     }
 
     // Destroy toolboxes for closed window
@@ -553,7 +510,7 @@ DevTools.prototype = {
       }
     }
 
-    let tabContainer = doc.getElementById("tabbrowser-tabs")
+    let tabContainer = win.document.getElementById("tabbrowser-tabs")
     tabContainer.removeEventListener("TabSelect",
                                      this._updateMenuCheckbox, false);
   },
@@ -564,6 +521,7 @@ DevTools.prototype = {
   destroy: function() {
     Services.obs.removeObserver(this.destroy, "quit-application-granted");
 
+    delete this._trackedBrowserWindows;
     delete this._tools;
     delete this._toolboxes;
   },

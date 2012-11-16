@@ -1,30 +1,10 @@
-/* FIXME: move the themes/ */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#toolbox-tabs {
-  margin: 0;
+.devtools-tab > .radio-check,
+.devtools-tab > .radio-check-box1,
+.devtools-tab > .radio-spacer-box {
+  display: none;
 }
 
-.toolbox-dock-button {
-  background-size: 16px;
-  background-position: 3px 3px;
-  background-repeat: no-repeat;
-  width: 22px;
-  height: 22px;
-  border: 0;
-}
-
-.toolbox-dock-button:active {
-  transform: translateY(1px);
-}
-
-#toolbox-dock-bottom {
-  background-image: url("chrome://browser/skin/devtools/dock-bottom.png");
-}
-
-#toolbox-dock-side {
-  background-image: url("chrome://browser/skin/devtools/dock-side.png");
-}
-
-#toolbox-dock-window {
-  background-image: url("chrome://browser/skin/devtools/dock-window.png");
-}

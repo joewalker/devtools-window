@@ -44,18 +44,17 @@ function setupHighlighterTests()
 {
   let h1 = content.document.querySelector("h1");
   ok(h1, "we have the header node");
-  Services.obs.addObserver(runSelectionTests,
-    InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED, false);
-  InspectorUI.toggleInspectorUI();
+
+  openInspector(runSelectionTests);
 }
 
-function runSelectionTests()
+function runSelectionTests(aInspector)
 {
-  Services.obs.removeObserver(runSelectionTests,
-    InspectorUI.INSPECTOR_NOTIFICATIONS.OPENED, false);
+  aInspector.highlighter.unlock();
+  aInspector.highlighter.outline.setAttribute("disable-transitions", "true");
 
   executeSoon(function() {
-    InspectorUI.highlighter.addListener("nodeselected", performTestComparisons);
+    aInspector.selection.once("new-node", performTestComparisons);
     let h1 = content.document.querySelector("h1");
     EventUtils.synthesizeMouse(h1, 2, 2, {type: "mousemove"}, content);
   });
@@ -63,13 +62,16 @@ function runSelectionTests()
 
 function performTestComparisons()
 {
-  InspectorUI.highlighter.removeListener("nodeselected", performTestComparisons);
+  let inspector = gDevTools.getPanelForTarget("inspector", gBrowser.selectedTab);
+  inspector.highlighter.lock();
 
-  InspectorUI.stopInspecting();
+  let isHighlighting =
+    !(inspector.highlighter.outline.getAttribute("hidden") == "true");
+
+  ok(isHighlighting, "inspector is highlighting");
 
   let h1 = content.document.querySelector("h1");
-  is(InspectorUI.highlighter.node, h1, "node selected");
-  is(InspectorUI.selection, h1, "selection matches node");
+  is(inspector.selection.node, h1, "selection matches node");
 
   openConsole(gBrowser.selectedTab, performWebConsoleTests);
 }
@@ -112,7 +114,9 @@ function performWebConsoleTests(hud)
       let node = outputNode.querySelector(".webconsole-msg-output");
       isnot(node.textContent.indexOf("bug653531"), -1,
             "correct output for $0.textContent");
-      is(InspectorUI.selection.textContent, "bug653531",
+      let inspector = gDevTools.getPanelForTarget("inspector",
+                                                  gBrowser.selectedTab);
+      is(inspector.selection.node.textContent, "bug653531",
          "node successfully updated");
 
       executeSoon(finishUp);
@@ -122,20 +126,15 @@ function performWebConsoleTests(hud)
 }
 
 function finishUp() {
-  InspectorUI.closeInspectorUI();
   finishTest();
 }
 
 function test()
 {
-  // FIXME: Commenting out test dur to failure: "InspectorUI is not defined at chrome" line 48
-  finishTest();
-  return;
-
   waitForExplicitFinish();
   gBrowser.selectedTab = gBrowser.addTab();
-  gBrowser.selectedBrowser.addEventListener("load", function() {
-    gBrowser.selectedBrowser.removeEventListener("load", arguments.callee, true);
+  gBrowser.selectedBrowser.addEventListener("load", function onLoad() {
+    gBrowser.selectedBrowser.removeEventListener("load", onLoad, true);
     waitForFocus(createDocument, content);
   }, true);
 

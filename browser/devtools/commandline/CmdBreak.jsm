@@ -38,7 +38,7 @@ gcli.addCommand({
       return gcli.lookup("breakaddDebuggerStopped");
     }
 
-    let breakpoints = dbg.breakpoints;
+    let breakpoints = dbg.getAllBreakpoints();
 
     if (Object.keys(breakpoints).length === 0) {
       return gcli.lookup("breaklistNone");
@@ -83,7 +83,7 @@ gcli.addCommand({
           let dbg = gDevTools.getPanelForTarget("jsdebugger", win.gBrowser.selectedTab);
           let files = [];
           if (dbg) {
-            let sourcesView = dbg.contentWindow.DebuggerView.Sources;
+            let sourcesView = dbg.panelWin.DebuggerView.Sources;
             for (let item in sourcesView) {
               files.push(item.value);
             }
@@ -139,7 +139,7 @@ gcli.addCommand({
           if (!dbg) {
             return gcli.lookup("breakaddDebuggerStopped");
           }
-          return Object.keys(dbg.breakpoints).length - 1;
+          return Object.keys(dbg.getAllBreakpoints()).length - 1;
         },
       },
       description: gcli.lookup("breakdelBreakidDesc")
@@ -153,8 +153,8 @@ gcli.addCommand({
       return gcli.lookup("breakaddDebuggerStopped");
     }
 
-    let breakpoints = dbg.breakpoints;
-    let id = Object.keys(dbg.breakpoints)[args.breakid];
+    let breakpoints = dbg.getAllBreakpoints();
+    let id = Object.keys(breakpoints)[args.breakid];
     if (!id || !(id in breakpoints)) {
       return gcli.lookup("breakNotFound");
     }
