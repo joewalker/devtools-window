@@ -13,8 +13,11 @@ include $(DEPTH)/config/autoconf.mk
 
 MOCHITEST_BROWSER_FILES = \
   browser_csslogic_inherited.js \
+  browser_ruleview_734259_style_editor_link.js \
   browser_ruleview_editor.js \
   browser_ruleview_editor_changedvalues.js \
+  browser_ruleview_bug_703643_context_menu_copy.js \
+  browser_ruleview_focus.js \
   browser_ruleview_inherit.js \
   browser_ruleview_manipulation.js \
   browser_ruleview_override.js \
@@ -47,9 +50,6 @@ include $(topsrcdir)/config/rules.mk
 #browser_bug722196_property_view_media_queries.js \
 #browser_computedview_bug_703643_context_menu_copy.js \
 #browser_computedview_734259_style_editor_link.js \
-#browser_ruleview_focus.js \
-#browser_ruleview_bug_703643_context_menu_copy.js \
-#browser_ruleview_734259_style_editor_link.js \
 #browser_styleinspector.js \
 #browser_styleinspector_bug_672746_default_styles.js \
 #browser_styleinspector_bug_672744_search_filter.js \

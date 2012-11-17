@@ -302,7 +302,7 @@ ComputedViewPanel.prototype = {
 
 function ruleView()
 {
-  return InspectorUI.sidebar._toolContext("ruleview").view;
+  return inspector.sidebar.getWindowForTab("ruleview").ruleview.view;
 }
 
 function waitForEditorFocus(aParent, aCallback)
