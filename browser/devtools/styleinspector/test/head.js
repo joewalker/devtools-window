@@ -12,6 +12,26 @@ let CssLogic = tempScope.CssLogic;
 let CssHtmlTree = tempScope.CssHtmlTree;
 let gDevTools = tempScope.gDevTools;
 
+
+function openInspector(callback)
+{
+  let tab = gBrowser.selectedTab;
+  let inspector = gDevTools.getPanelForTarget("inspector", tab);
+  if (inspector && inspector.isReady) {
+    callback(inspector);
+  } else {
+    let toolbox = gDevTools.openToolboxForTab(tab, "inspector");
+    toolbox.once("inspector-ready", function(event, panel) {
+      let inspector = gDevTools.getPanelForTarget("inspector", tab);
+      callback(inspector);
+    });
+  }
+}
+
+function getComputedView(inspector) {
+  return inspector.sidebar.getWindowForTab("computedview").computedview.view;
+}
+
 function log(aMsg)
 {
   dump("*** WebConsoleTest: " + aMsg + "\n");
