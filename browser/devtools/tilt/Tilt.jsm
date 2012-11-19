@@ -86,6 +86,8 @@ this.Tilt = function Tilt(aWindow)
    * Shortcut for accessing notifications strings.
    */
   this.NOTIFICATIONS = TILT_NOTIFICATIONS;
+
+  this.setup();
 }
 
 Tilt.prototype = {
@@ -95,7 +97,14 @@ Tilt.prototype = {
    */
   initializeForCurrentTab: function T_initializeForCurrentTab()
   {
+    let contentWindow = this.chromeWindow.gBrowser.selectedBrowser.contentWindow;
     let id = this.currentWindowId;
+    let self = this;
+
+    contentWindow.addEventListener("beforeunload", function onUnload() {
+      contentWindow.removeEventListener("beforeunload", onUnload, false);
+      self.destroy(id, true);
+    }, false);
 
     // if the visualizer for the current tab is already open, destroy it now
     if (this.visualizers[id]) {
@@ -191,21 +200,14 @@ Tilt.prototype = {
 
   /**
    * Add the browser event listeners to handle state changes.
-   * Called from InspectorUI.
    */
   setup: function T_setup()
   {
-    if (this._setupFinished) {
-      return;
-    }
-
     // load the preferences from the devtools.tilt branch
     TiltVisualizer.Prefs.load();
 
-    this.chromeWindow.gBrowser.tabContainer.addEventListener("TabSelect",
-      this._onTabSelect.bind(this), false);
-
-    this._setupFinished = true;
+    this.chromeWindow.gBrowser.tabContainer.addEventListener(
+      "TabSelect", this._onTabSelect.bind(this), false);
   },
 
   /**
