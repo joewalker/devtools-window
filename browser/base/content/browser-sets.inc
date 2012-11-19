@@ -171,8 +171,7 @@
     <broadcaster id="devtoolsMenuBroadcaster_DevToolbox"
                  label="&devToolbarToolsButton.label;"
                  type="checkbox" autocheck="false"
-                 command="Tools:DevToolbox"
-                 accesskey="&devToolbox.accesskey;"/>
+                 command="Tools:DevToolbox"/>
     <broadcaster id="devtoolsMenuBroadcaster_DevToolbar"
                  label="&devToolbarMenu.label;"
                  type="checkbox" autocheck="false"
