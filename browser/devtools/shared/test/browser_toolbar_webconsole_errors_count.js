@@ -4,11 +4,8 @@
 // Tests that the developer toolbar errors count works properly.
 
 function test() {
-  // FIXME: commented out for failing test
-  return;
-
-
-  const TEST_URI = "http://example.com/browser/browser/devtools/shared/test/browser_toolbar_webconsole_errors_count.html";
+  const TEST_URI = "http://example.com/browser/browser/devtools/shared/test/" +
+                   "browser_toolbar_webconsole_errors_count.html";
 
   let imported = {};
   Components.utils.import("resource:///modules/HUDService.jsm", imported);
@@ -17,7 +14,7 @@ function test() {
   Components.utils.import("resource:///modules/devtools/gDevTools.jsm", imported);
   let gDevTools = imported.gDevTools;
 
-  let webconsole = document.getElementById("developer-toolbar-webconsole");
+  let webconsole = document.getElementById("developer-toolbar-toolbox-button");
   let toolbar = document.getElementById("Tools:DevToolbar");
   let tab1, tab2;
 
