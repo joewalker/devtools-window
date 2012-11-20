@@ -14,11 +14,6 @@ let gDevTools = tempScope.gDevTools;
 Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
 let TargetFactory = tempScope.TargetFactory;
 
-function log(aMsg)
-{
-  dump("*** WebConsoleTest: " + aMsg + "\n");
-}
-
 let browser, hudId, hud, hudBox, filterBox, outputNode, cs;
 
 function addTab(aURL)
@@ -64,7 +59,7 @@ function tearDown()
     gDevTools.closeToolbox(target);
   }
   catch (ex) {
-    log(ex);
+    dump(ex);
   }
   while (gBrowser.tabs.length > 1) {
     gBrowser.removeCurrentTab();
@@ -103,6 +98,18 @@ function waitForEditorBlur(aEditor, aCallback)
       aCallback();
     });
   }, false);
+}
+
+function contextMenuClick(element) {
+  var evt = element.ownerDocument.createEvent('MouseEvents');
+
+  var button = 2;  // right click
+
+  evt.initMouseEvent('contextmenu', true, true,
+       element.ownerDocument.defaultView, 1, 0, 0, 0, 0, false,
+       false, false, false, button, null);
+
+  element.dispatchEvent(evt);
 }
 
 registerCleanupFunction(tearDown);

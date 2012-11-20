@@ -94,7 +94,7 @@ function checkCopyRule() {
 
   // We need the context menu to open in the correct place in order for
   // popupNode to be propertly set.
-  EventUtils.synthesizeMouse(prop, 1, 1, { type: "contextmenu", button: 2 }, win);
+  contextMenuClick(prop);
 
   ruleView()._boundCopyRule();
   let menu = contentDoc.querySelector("#rule-view-context-menu");
@@ -114,7 +114,7 @@ function checkCopyProperty()
 
   // We need the context menu to open in the correct place in order for
   // popupNode to be propertly set.
-  EventUtils.synthesizeMouse(prop, 1, 1, { type: "contextmenu", button: 2 }, win);
+  contextMenuClick(prop);
 
   SimpleTest.waitForClipboard(function IUI_boundCopyPropCheck() {
     return checkClipboardData(expectedPattern);
@@ -217,7 +217,7 @@ function checkSimpleCopy() {
 
   // We need the context menu to open in the correct place in order for
   // popupNode to be propertly set.
-  EventUtils.synthesizeMouse(prop, 1, 1, { type: "contextmenu", button: 2 }, win);
+  contextMenuClick(prop);
 
   ruleView()._boundCopy();
   let menu = contentDoc.querySelector("#rule-view-context-menu");

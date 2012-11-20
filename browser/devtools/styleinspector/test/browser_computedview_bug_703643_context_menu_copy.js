@@ -65,8 +65,7 @@ function runStyleInspectorTests()
 
   // We need the context menu to open in the correct place in order for
   // popupNode to be propertly set.
-  EventUtils.synthesizeMouseAtCenter(prop, { type: "contextmenu", button: 2 },
-    win);
+  contextMenuClick(prop);
 
   checkCopyProperty();
 }
