@@ -7,13 +7,14 @@
 function test() {
   var tab1 = addTab(TAB1_URL, function() {
     gBrowser.selectedTab = tab1;
+    let target1 = TargetFactory.forTab(tab1);
 
-    ok(!gDevTools.getPanelForTarget("jsdebugger", tab1),
+    ok(!gDevTools.getPanelForTarget("jsdebugger", target1),
       "Shouldn't have a debugger panel for this tab yet.");
 
-    let toolbox = gDevTools.openToolboxForTab(tab1, "jsdebugger");
+    let toolbox = gDevTools.openToolboxForTab(target1, "jsdebugger");
     toolbox.once("jsdebugger-ready", function dbgReady() {
-      let dbg = gDevTools.getPanelForTarget("jsdebugger", tab1);
+      let dbg = gDevTools.getPanelForTarget("jsdebugger", target1);
       ok(dbg, "We should have a debugger panel.");
 
       let preferredSfw = Services.prefs.getIntPref("devtools.debugger.ui.stackframes-width");

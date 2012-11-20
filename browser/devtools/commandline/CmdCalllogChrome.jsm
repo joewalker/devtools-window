@@ -12,6 +12,8 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
                                   "resource:///modules/devtools/gDevTools.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "TargetFactory",
+                                  "resource:///modules/devtools/Target.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "Debugger", function() {
   let JsDebugger = {};
@@ -108,8 +110,9 @@ gcli.addCommand({
                                 ": " + this.callDescription(frame));
     }.bind(this);
 
-    let tab = context.environment.chromeDocument.defaultView.gBrowser.selectedTab;
-    gDevTools.openToolboxForTab(tab, "webconsole");
+    let gBrowser = context.environment.chromeDocument.defaultView.gBrowser;
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    gDevTools.openToolboxForTab(target, "webconsole");
 
     return gcli.lookup("calllogChromeStartReply");
   },

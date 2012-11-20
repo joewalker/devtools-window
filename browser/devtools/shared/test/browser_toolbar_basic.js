@@ -38,7 +38,8 @@ function checkOpen() {
     document.getElementById("devtoolsMenuBroadcaster_DevToolbox");
   ok(!isChecked(toggleToolbox), "toggle toolbox button is not checked");
 
-  let toolbox = gDevTools.openToolboxForTab(gBrowser.selectedTab, "webconsole");
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+  let toolbox = gDevTools.openToolboxForTab(target, "webconsole");
   toolbox.once("webconsole-selected", function BTBT_selected(id, aInspector) {
     ok(isChecked(toggleToolbox), "toggle toolbox button is checked");
 

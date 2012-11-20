@@ -4,7 +4,7 @@
 
 let toolbox;
 
-let temp = [];
+let temp = {};
 Cu.import("resource:///modules/devtools/Target.jsm", temp);
 let TargetFactory = temp.TargetFactory;
 

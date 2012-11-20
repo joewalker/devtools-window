@@ -91,7 +91,8 @@ function test() {
   content.location = "data:text/html,iframe tests for inspector";
 
   registerCleanupFunction(function () {
-    gDevTools.closeToolbox(gBrowser.selectedTab);
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    gDevTools.closeToolbox(target);
     gBrowser.removeCurrentTab();
   });
 }

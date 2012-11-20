@@ -141,19 +141,18 @@ DevTools.prototype = {
    *        The toolbox that was opened
    */
   openToolbox: function DT_openToolbox(target, hostType, defaultToolId) {
-    if (this._toolboxes.has(target.tab)) {
+    if (this._toolboxes.has(target)) {
       // only allow one toolbox per target
-      return this._toolboxes.get(target.tab);
+      return this._toolboxes.get(target);
     }
 
     let tb = new Toolbox(target, hostType, defaultToolId);
-    let tab = target.tab;
 
-    this._toolboxes.set(tab, tb);
+    this._toolboxes.set(target, tb);
     tb.once("destroyed", function() {
-      this._toolboxes.delete(tab);
+      this._toolboxes.delete(target);
       this._updateMenuCheckbox();
-      this.emit("toolbox-destroyed", tab);
+      this.emit("toolbox-destroyed", target);
     }.bind(this));
 
     tb.once("ready", function() {
@@ -167,13 +166,10 @@ DevTools.prototype = {
   },
 
   /**
-   * Close the toolbox for a given tab
-   *
-   * @param  {XULTab} tab
-   *         The tab the toolbox to close is debugging
+   * Close the toolbox for a given target
    */
-  closeToolbox: function DT_closeToolbox(tab) {
-    let toolbox = this._toolboxes.get(tab);
+  closeToolbox: function DT_closeToolbox(target) {
+    let toolbox = this._toolboxes.get(target);
     if (toolbox == null) {
       return;
     }
@@ -181,73 +177,67 @@ DevTools.prototype = {
   },
 
   /**
-   * Open the toolbox for a specific tab.
+   * Open the toolbox for a specific target (not tab).
+   * FIXME: We should probably merge this function and openToolbox
    *
-   * @param  {XULTab} tab
-   *         The tab that the toolbox should be debugging
+   * @param  {Target} target
+   *         The target that the toolbox should be debugging
    * @param  {String} toolId
    *         The id of the tool to open
    *
    * @return {Toolbox} toolbox
    *         The toolbox that has been opened
    */
-  openToolboxForTab: function DT_openToolboxForTab(tab, toolId) {
-    let tb = this.getToolboxForTarget(tab);
+  openToolboxForTab: function DT_openToolboxForTab(target, toolId) {
+    let tb = this.getToolboxForTarget(target);
 
     if (tb) {
       tb.selectTool(toolId);
     } else {
-      let target = TargetFactory.forTab(tab);
       tb = this.openToolbox(target, null, toolId);
     }
     return tb;
   },
 
   /**
-   * Toggle a toolbox for the given browser tab.
+   * This function is for the benefit of command#Tools:DevToolbox in
+   * browser/base/content/browser-sets.inc and should not be used outside
+   * of there
+   */
+  toggleToolboxCommand: function(gBrowser, toolId=null) {
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    this.toggleToolboxForTarget(target, toolId);
+  },
+
+  /**
+   * Toggle a toolbox for the given target.
    *
-   * @param  {XULTab} tab
-   *         The tab the toolbox is debugging
+   * @param  {Target} target
+   *         The target the toolbox is debugging
    * @param  {string} toolId
    *         The id of the tool to show in the toolbox, if it's to be opened.
    */
-  toggleToolboxForTab: function DT_toggleToolboxForTab(tab, toolId) {
-    let tb = this.getToolboxForTarget(tab);
+  toggleToolboxForTarget: function DT_toggleToolboxForTarget(target, toolId) {
+    let tb = this.getToolboxForTarget(target);
 
     if (tb /* FIXME: && tool is showing */ ) {
       tb.destroy();
     } else {
-      this.openToolboxForTab(tab, toolId);
+      this.openToolboxForTab(target, toolId);
     }
-  },
-
-  /**
-   * Return a map(DevToolsTarget, DevToolbox) of all the Toolboxes
-   * map is a copy, not reference (can't be altered).
-   *
-   * @return {Map} toolboxes
-   *         A map of open toolboxes
-   */
-  getToolboxes: function DT_getToolboxes() {
-    let toolboxes = new Map();
-
-    for (let [key, value] of this._toolboxes) {
-      toolboxes.set(key, value);
-    }
-    return toolboxes;
   },
 
   /**
    * Return the toolbox for a given target.
    *
-   * @param  {object} targetValue
-   *         Target value e.g. the tab that owns this toolbox
+   * @param  {object} target
+   *         Target value e.g. the target that owns this toolbox
    *
    * @return {Toolbox} toolbox
    *         The toobox that is debugging the given target
    */
-  getToolboxForTarget: function DT_getToolboxForTarget(targetValue) {
-    return this._toolboxes.get(targetValue);
+  getToolboxForTarget: function DT_getToolboxForTarget(target) {
+    return this._toolboxes.get(target);
   },
 
   /**
@@ -255,14 +245,14 @@ DevTools.prototype = {
    *
    * @param  {String} toolId
    *         The id of the tool to open.
-   * @param  {object} targetValue
+   * @param  {object} target
    *         The toolbox's target.
    *
    * @return {ToolPanel} panel
    *         Panel for the tool with the toolid
    */
-  getPanelForTarget: function DT_getPanelForTarget(toolId, targetValue) {
-    let toolbox = this.getToolboxForTarget(targetValue);
+  getPanelForTarget: function DT_getPanelForTarget(toolId, target) {
+    let toolbox = this.getToolboxForTarget(target);
     if (!toolbox) {
       return undefined;
     }
@@ -368,7 +358,7 @@ DevTools.prototype = {
     let cmd = doc.createElement("command");
     cmd.id = "Tools:" + id;
     cmd.setAttribute("oncommand",
-      'gDevTools.openToolboxForTab(gBrowser.selectedTab, "' + id + '");');
+        'gDevTools.toggleToolboxCommand(gBrowser, "' + id + '");');
 
     let key = null;
     if (toolDefinition.key) {
@@ -382,7 +372,7 @@ DevTools.prototype = {
       }
 
       key.setAttribute("oncommand",
-        'gDevTools.openToolboxForTab(gBrowser.selectedTab, "' + id + '");');
+          'gDevTools.toggleToolboxCommand(gBrowser, "' + id + '");');
       key.setAttribute("modifiers", toolDefinition.modifiers);
     }
 
@@ -439,8 +429,17 @@ DevTools.prototype = {
    */
   _updateMenuCheckbox: function DT_updateMenuCheckbox() {
     for (let win of this._trackedBrowserWindows) {
+
+      let hasToolbox = false;
+      if (TargetFactory.isKnownTab(win.gBrowser.selectedTab)) {
+        let target = TargetFactory.forTab(win.gBrowser.selectedTab);
+        if (this._toolboxes.has(target)) {
+          hasToolbox = true;
+        }
+      }
+
       let broadcaster = win.document.getElementById("devtoolsMenuBroadcaster_DevToolbox");
-      if (this._toolboxes.has(win.gBrowser.selectedTab)) {
+      if (hasToolbox) {
         broadcaster.setAttribute("checked", "true");
       } else {
         broadcaster.removeAttribute("checked");
@@ -496,11 +495,11 @@ DevTools.prototype = {
    *         The window containing the menu entry
    */
   forgetBrowserWindow: function DT_forgetBrowserWindow(win) {
-    this._trackedBrowserWindows.delete(win);
-
     if (!this._tools) {
       return;
     }
+
+    this._trackedBrowserWindows.delete(win);
 
     // Destroy toolboxes for closed window
     for (let [target, toolbox] of this._toolboxes) {

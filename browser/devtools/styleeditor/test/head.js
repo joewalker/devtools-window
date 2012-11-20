@@ -6,6 +6,10 @@ const TEST_BASE_HTTP = "http://example.com/browser/browser/devtools/styleeditor/
 const TEST_BASE_HTTPS = "https://example.com/browser/browser/devtools/styleeditor/test/";
 const TEST_HOST = 'mochi.test:8888';
 
+let tempScope = {};
+Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
+let TargetFactory = tempScope.TargetFactory;
+
 let gChromeWindow;               //StyleEditorChrome window
 let cache = Cc["@mozilla.org/network/cache-service;1"]
               .getService(Ci.nsICacheService);
@@ -25,15 +29,16 @@ function cleanup()
 
 function launchStyleEditorChrome(aCallback, aSheet, aLine, aCol)
 {
-  let tab = gBrowser.selectedTab;
-  let panel = gDevTools.getPanelForTarget("styleeditor", tab);
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+
+  let panel = gDevTools.getPanelForTarget("styleeditor", target);
   if (panel && panel.isReady) {
     gChromeWindow = panel._panelWin;
     gChromeWindow.styleEditorChrome._alwaysDisableAnimations = true;
     panel.selectStyleSheet(aSheet, aLine, aCol);
     aCallback(gChromeWindow.styleEditorChrome);
   } else {
-    let toolbox = gDevTools.openToolboxForTab(tab, "styleeditor");
+    let toolbox = gDevTools.openToolboxForTab(target, "styleeditor");
     toolbox.once("styleeditor-ready", function(event, panel) {
       gChromeWindow = panel._panelWin;
       gChromeWindow.styleEditorChrome._alwaysDisableAnimations = true;

@@ -36,7 +36,8 @@ function testViewSource(aHud)
     {
       nodes = hud.outputNode.querySelectorAll(".webconsole-location");
 
-      let toolbox = gDevTools.getToolboxForTarget(gBrowser.selectedTab);
+      let target = TargetFactory.forTab(gBrowser.selectedTab);
+      let toolbox = gDevTools.getToolboxForTarget(target);
       toolbox.once("styleeditor-selected", onStyleEditorReady);
 
       EventUtils.sendMouseEvent({ type: "click" }, nodes[0]);
@@ -58,7 +59,8 @@ function onStyleEditorReady(aEvent, aPanel)
     info("style editor window focused");
     checkStyleEditorForSheetAndLine(0, 7, function() {
       info("first check done");
-      let toolbox = gDevTools.getToolboxForTarget(gBrowser.selectedTab);
+      let target = TargetFactory.forTab(gBrowser.selectedTab);
+      let toolbox = gDevTools.getToolboxForTarget(target);
       toolbox.once("webconsole-selected", function(aEvent) {
         info(aEvent + " event fired");
         toolbox.once("styleeditor-selected", function() {

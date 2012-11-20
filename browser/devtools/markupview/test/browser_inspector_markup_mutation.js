@@ -145,7 +145,8 @@ function test() {
   content.location = "data:text/html,<html></html>";
 
   function setupTest() {
-    let toolbox = gDevTools.openToolboxForTab(gBrowser.selectedTab, "inspector");
+    var target = TargetFactory.forTab(gBrowser.selectedTab);
+    let toolbox = gDevTools.openToolboxForTab(target, "inspector");
     toolbox.once("inspector-selected", function BIMMT_selected(id, aInspector) {
       inspector = aInspector;
       startTests();

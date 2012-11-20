@@ -52,6 +52,7 @@ const TILT_PICKER = "resource:///modules/devtools/TiltWorkerPicker.js";
 
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource:///modules/devtools/gDevTools.jsm");
+Cu.import("resource:///modules/devtools/Target.jsm");
 Cu.import("resource:///modules/devtools/TiltGL.jsm");
 Cu.import("resource:///modules/devtools/TiltMath.jsm");
 Cu.import("resource:///modules/devtools/TiltUtils.jsm");
@@ -173,7 +174,8 @@ TiltVisualizer.prototype = {
                              this.presenter.NOTIFICATIONS.UNHIGHLIGHTING,
                              false);
 
-    let inspector = gDevTools.getPanelForTarget("inspector", aTab);
+    let target = TargetFactory.forTab(aTab);
+    let inspector = gDevTools.getPanelForTarget("inspector", target);
     if (inspector) {
       this.inspector = inspector;
       this.inspector.selection.on("new-node", this.onNewNodeFromInspector);

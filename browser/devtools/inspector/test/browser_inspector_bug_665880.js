@@ -35,7 +35,8 @@ function test()
   function performTestComparison()
   {
     is(getActiveInspector().selection.node, objectNode, "selection matches node");
-    gDevTools.closeToolbox(gBrowser.selectedTab);
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    gDevTools.closeToolbox(target);
     finishUp();
   }
 

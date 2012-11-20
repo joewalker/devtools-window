@@ -14,6 +14,8 @@ let DebuggerServer = tempScope.DebuggerServer;
 let DebuggerTransport = tempScope.DebuggerTransport;
 let DebuggerClient = tempScope.DebuggerClient;
 let Services = tempScope.Services;
+Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
+let TargetFactory = tempScope.TargetFactory;
 
 const EXAMPLE_URL = "http://example.com/browser/browser/devtools/debugger/test/";
 const TAB1_URL = EXAMPLE_URL + "browser_dbg_tab1.html";
@@ -90,7 +92,8 @@ function closeDebuggerAndFinish(aRemoteFlag, aCallback, aWindow) {
   // let dbg = gDevTools.getPanelForTarget("jsdebugger", targetWindow);
   let debuggerClosed = true;
   let debuggerDisconnected = true;
-  gDevTools.closeToolbox(gTab);
+  let target = TargetFactory.forTab(gTab);
+  gDevTools.closeToolbox(target);
   debuggerDisconnected = true;
   _maybeFinish();
 
@@ -150,7 +153,8 @@ function attach_thread_actor_for_url(aClient, aURL, aCallback) {
 }
 
 function wait_for_connect_and_resume(aOnDebugging, aTab) {
-  let dbg = gDevTools.getPanelForTarget("jsdebugger", aTab);
+  let target = TargetFactory.forTab(aTab);
+  let dbg = gDevTools.getPanelForTarget("jsdebugger", target);
   dbg.once("connected", function dbgConnected() {
     // Wait for the initial resume...
     dbg.panelWin.gClient.addOneTimeListener("resumed", function() {
@@ -162,11 +166,12 @@ function wait_for_connect_and_resume(aOnDebugging, aTab) {
 function debug_tab_pane(aURL, aOnDebugging) {
   let tab = addTab(aURL, function() {
     gBrowser.selectedTab = gTab;
-    let debuggee = tab.linkedBrowser.contentWindow.wrappedJSObject;
+    let debuggee = gBrowser.selectedTab.linkedBrowser.contentWindow.wrappedJSObject;
 
-    let toolbox = gDevTools.openToolboxForTab(tab, "jsdebugger");
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    let toolbox = gDevTools.openToolboxForTab(target, "jsdebugger");
     toolbox.once("jsdebugger-ready", function dbgReady() {
-      let dbg = gDevTools.getPanelForTarget("jsdebugger", tab);
+      let dbg = gDevTools.getPanelForTarget("jsdebugger", target);
       dbg.once("connected", function() {
         // Wait for the initial resume...
         dbg.panelWin.gClient.addOneTimeListener("resumed", function() {

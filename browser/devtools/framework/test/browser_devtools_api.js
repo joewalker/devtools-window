@@ -41,16 +41,17 @@ function runTests(aTab) {
   let target = TargetFactory.forTab(gBrowser.selectedTab);
 
   function onNewToolbox(event, toolboxFromEvent) {
-    let toolBoxes = gDevTools.getToolboxes();
-    let tb = toolBoxes.get(gBrowser.selectedTab);
+    let toolBoxes = gDevTools._toolboxes;
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    let tb = toolBoxes.get(target);
     is(toolboxFromEvent, tb, "'toolbox-ready' event fired. Correct toolbox value.");
     is(tb.target, target, "toolbox target is correct");
     is(tb._host.hostTab, gBrowser.selectedTab, "toolbox host is correct");
     gDevTools.once(toolId + "-ready", continueTests);
   }
 
-  function onToolboxClosed(event, tabFromEvent) {
-    is(tabFromEvent, gBrowser.selectedTab, "'toolbox-destroyed' event fired. Correct tab value.");
+  function onToolboxClosed(event, targetFromEvent) {
+    is(targetFromEvent, target, "'toolbox-destroyed' event fired. Correct tab value.");
     finishUp();
   }
 
@@ -64,8 +65,9 @@ function runTests(aTab) {
 }
 
 function continueTests(event, toolbox, panel) {
-  is (toolbox, gDevTools.getToolboxes().get(gBrowser.selectedTab), "{toolId}-ready event received, with correct toolbox value");
-  is (panel, toolbox.getToolPanels().get(toolId), "panel value is correct");
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+  is(toolbox, gDevTools._toolboxes.get(target), "{toolId}-ready event received, with correct toolbox value");
+  is(panel, toolbox.getToolPanels().get(toolId), "panel value is correct");
 
   is(toolbox.currentToolId, toolId, "toolbox _currentToolId is correct");
 

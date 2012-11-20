@@ -20,6 +20,7 @@ function test() {
     contentWindow: gBrowser.selectedBrowser.contentWindow,
     parentNode: gBrowser.selectedBrowser.parentNode,
     notifications: Tilt.NOTIFICATIONS,
+    tab: gBrowser.selectedTab,
 
     onError: function onWebGLError()
     {

@@ -10,6 +10,8 @@ Cu.import("resource://gre/modules/devtools/WebConsoleUtils.jsm", tempScope);
 let WebConsoleUtils = tempScope.WebConsoleUtils;
 Cu.import("resource:///modules/devtools/gDevTools.jsm", tempScope);
 let gDevTools = tempScope.gDevTools;
+Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
+let TargetFactory = tempScope.TargetFactory;
 
 const WEBCONSOLE_STRINGS_URI = "chrome://browser/locale/devtools/webconsole.properties";
 let WCU_l10n = new WebConsoleUtils.l10n(WEBCONSOLE_STRINGS_URI);
@@ -142,13 +144,15 @@ function openConsole(aTab, aCallback = function() { })
     executeSoon(aCallback.bind(null, aPanel.hud));
   }
 
-  let toolbox = gDevTools.getToolboxForTarget(aTab || tab);
+  let target = TargetFactory.forTab(aTab || tab);
+  let toolbox = gDevTools.getToolboxForTarget(target);
   if (toolbox) {
     toolbox.once("webconsole-selected", onWebConsoleOpen);
     toolbox.selectTool("webconsole");
   }
   else {
-    toolbox = gDevTools.openToolboxForTab(aTab || tab, "webconsole");
+    let target = TargetFactory.forTab(aTab || tab);
+    toolbox = gDevTools.openToolboxForTab(target, "webconsole");
     toolbox.once("webconsole-selected", onWebConsoleOpen);
   }
 }
@@ -165,9 +169,10 @@ function openConsole(aTab, aCallback = function() { })
  */
 function closeConsole(aTab, aCallback = function() { })
 {
-  let toolbox = gDevTools.getToolboxForTarget(aTab || tab);
+  let target = TargetFactory.forTab(aTab || tab);
+  let toolbox = gDevTools.getToolboxForTarget(target);
   if (toolbox) {
-    let panel = gDevTools.getPanelForTarget("webconsole", aTab || tab);
+    let panel = gDevTools.getPanelForTarget("webconsole", target);
     if (panel) {
       let hudId = panel.hud.hudId;
       panel.once("destroyed", function() {
@@ -254,7 +259,8 @@ function finishTest()
 
 function tearDown()
 {
-  gDevTools.closeToolbox(gBrowser.selectedTab);
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+  gDevTools.closeToolbox(target);
   while (gBrowser.tabs.length > 1) {
     gBrowser.removeCurrentTab();
   }
@@ -314,11 +320,12 @@ function waitForSuccess(aOptions)
 
 function openInspector(aCallback, aTab = gBrowser.selectedTab)
 {
-  let inspector = gDevTools.getPanelForTarget("inspector", aTab);
+  let target = TargetFactory.forTab(aTab);
+  let inspector = gDevTools.getPanelForTarget("inspector", target);
   if (inspector && inspector.isReady) {
     aCallback(inspector);
   } else {
-    let toolbox = gDevTools.openToolboxForTab(aTab, "inspector");
+    let toolbox = gDevTools.openToolboxForTab(target, "inspector");
     toolbox.once("inspector-ready", function _onSelect(aEvent, aPanel) {
       aCallback(aPanel);
     });

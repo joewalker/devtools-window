@@ -1,3 +1,11 @@
+/* vim: set ts=2 et sw=2 tw=80: */
+/* Any copyright is dedicated to the Public Domain.
+   http://creativecommons.org/publicdomain/zero/1.0/ */
+
+let tempScope = {};
+Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
+let TargetFactory = tempScope.TargetFactory;
+
 function test() {
   const TEST_URI = "http://example.com/browser/browser/devtools/commandline/" +
                    "test/browser_dbg_cmd.html";
@@ -37,8 +45,8 @@ function testCommands(dbg, cmd) {
                           blankOutput: true
                         });
 
-                        let tab = gBrowser.selectedTab;
-                        ok(!gDevTools.getToolboxForTarget(tab),
+                        let target = TargetFactory.forTab(gBrowser.selectedTab);
+                        ok(!gDevTools.getToolboxForTarget(target),
                           "Debugger was closed.");
                         finish();
                       });
@@ -65,11 +73,11 @@ function testDbgCmd() {
     blankOutput: true
   });
 
-  let tab = gBrowser.selectedTab;
-  let toolbox = gDevTools.getToolboxForTarget(tab);
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+  let toolbox = gDevTools.getToolboxForTarget(target);
 
   toolbox.once("jsdebugger-ready", function dbgReady() {
-    let dbg = gDevTools.getPanelForTarget("jsdebugger", gBrowser.selectedTab);
+    let dbg = gDevTools.getPanelForTarget("jsdebugger", target);
     ok(dbg, "DebuggerPanel exists");
 
     function cmd(aTyped, aCallback) {
