@@ -170,6 +170,8 @@ function TabTarget(tab) {
 }
 
 TabTarget.prototype = {
+  _webProgressListener: null,
+
   supports: supports,
   get version() { return getVersion(); },
 
@@ -193,7 +195,7 @@ TabTarget.prototype = {
    * Listen to the different tabs events.
    */
   _setupListeners: function TabTarget__setupListeners() {
-    this._webProgressListener.target = this;
+    this._webProgressListener = new TabWebProgressListener(this);
     this.tab.linkedBrowser.addProgressListener(this._webProgressListener);
     this.tab.addEventListener("TabClose", this);
     this.tab.parentNode.addEventListener("TabSelect", this);
@@ -217,39 +219,6 @@ TabTarget.prototype = {
     }
   },
 
-  /**
-   * Handle webProgress events.
-   */
-  _webProgressListener: {
-    QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener, Ci.nsISupportsWeakReference]),
-
-    onStateChange: function(progress, request, flag, status) {
-      let isStart = flag & Ci.nsIWebProgressListener.STATE_START;
-      let isDocument = flag & Ci.nsIWebProgressListener.STATE_IS_DOCUMENT;
-      let isNetwork = flag & Ci.nsIWebProgressListener.STATE_IS_NETWORK;
-      let isRequest = flag & Ci.nsIWebProgressListener.STATE_IS_REQUEST;
-
-      // Skip non-interesting states.
-      if (!isStart || !isDocument || !isRequest || !isNetwork) {
-        return;
-      }
-
-      if (this.target) {
-        this.target.emit("will-navigate", request);
-      }
-    },
-
-    onProgressChange: function() {},
-    onSecurityChange: function() {},
-    onStatusChange: function() {},
-
-    onLocationChange: function(webProgress) {
-      let window = webProgress.DOMWindow;
-      if (this.target) {
-        this.target.emit("navigate", window);
-      }
-    },
-  },
 
   /**
    * Target is not alive anymore.
@@ -260,6 +229,7 @@ TabTarget.prototype = {
     }
     this.tab.linkedBrowser.removeProgressListener(this._webProgressListener)
     this._webProgressListener.target = null;
+    this._webProgressListener = null;
     this.tab.removeEventListener("TabClose", this);
     this.tab.parentNode.removeEventListener("TabSelect", this);
     this._destroyed = true;
@@ -271,6 +241,50 @@ TabTarget.prototype = {
 
   toString: function() {
     return 'TabTarget:' + this.tab;
+  },
+};
+
+
+/**
+ * WebProgressListener for TabTarget.
+ *
+ * @param object aTarget
+ *        The TabTarget instance to work with.
+ */
+function TabWebProgressListener(aTarget) {
+  this.target = aTarget;
+}
+
+TabWebProgressListener.prototype = {
+  target: null,
+
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener, Ci.nsISupportsWeakReference]),
+
+  onStateChange: function TWPL_onStateChange(progress, request, flag, status) {
+    let isStart = flag & Ci.nsIWebProgressListener.STATE_START;
+    let isDocument = flag & Ci.nsIWebProgressListener.STATE_IS_DOCUMENT;
+    let isNetwork = flag & Ci.nsIWebProgressListener.STATE_IS_NETWORK;
+    let isRequest = flag & Ci.nsIWebProgressListener.STATE_IS_REQUEST;
+
+    // Skip non-interesting states.
+    if (!isStart || !isDocument || !isRequest || !isNetwork) {
+      return;
+    }
+
+    if (this.target) {
+      this.target.emit("will-navigate", request);
+    }
+  },
+
+  onProgressChange: function() {},
+  onSecurityChange: function() {},
+  onStatusChange: function() {},
+
+  onLocationChange: function TwPL_onLocationChange(webProgress) {
+    let window = webProgress.DOMWindow;
+    if (this.target) {
+      this.target.emit("navigate", window);
+    }
   },
 };
 

@@ -35,14 +35,18 @@ function launchStyleEditorChrome(aCallback, aSheet, aLine, aCol)
   if (panel && panel.isReady) {
     gChromeWindow = panel._panelWin;
     gChromeWindow.styleEditorChrome._alwaysDisableAnimations = true;
-    panel.selectStyleSheet(aSheet, aLine, aCol);
+    if (aSheet) {
+      panel.selectStyleSheet(aSheet, aLine, aCol);
+    }
     aCallback(gChromeWindow.styleEditorChrome);
   } else {
     let toolbox = gDevTools.openToolboxForTab(target, "styleeditor");
     toolbox.once("styleeditor-ready", function(event, panel) {
       gChromeWindow = panel._panelWin;
       gChromeWindow.styleEditorChrome._alwaysDisableAnimations = true;
-      panel.selectStyleSheet(aSheet, aLine, aCol);
+      if (aSheet) {
+        panel.selectStyleSheet(aSheet, aLine, aCol);
+      }
       aCallback(gChromeWindow.styleEditorChrome);
     });
   }
