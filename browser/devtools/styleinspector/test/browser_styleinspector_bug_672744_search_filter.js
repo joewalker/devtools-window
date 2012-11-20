@@ -59,7 +59,7 @@ function SI_toggleDefaultStyles()
   let doc = computedView.styleDocument;
   let checkbox = doc.querySelector(".onlyuserstyles");
   Services.obs.addObserver(SI_AddFilterText, "StyleInspector-populated", false);
-  EventUtils.synthesizeMouse(checkbox, 5, 5, {}, computedView.styleWindow);
+  EventUtils.synthesizeMouseAtCenter(checkbox, {}, computedView.styleWindow);
 }
 
 function SI_AddFilterText()
