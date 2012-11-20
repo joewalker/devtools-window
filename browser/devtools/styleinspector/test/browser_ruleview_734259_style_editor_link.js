@@ -33,7 +33,8 @@ function createDocument()
     '</div>';
   doc.title = "Rule view style editor link test";
 
-  toolbox = gDevTools.openToolboxForTab(gBrowser.selectedTab, "inspector");
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+  toolbox = gDevTools.openToolboxForTab(target, "inspector");
   toolbox.once("inspector-selected", function SE_selected(id, aInspector) {
     inspector = aInspector;
     inspector.sidebar.select("ruleview");
