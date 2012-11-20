@@ -5,6 +5,7 @@
 // Tests that the style inspector works properly
 
 let doc;
+let win;
 let computedView;
 
 XPCOMUtils.defineLazyGetter(this, "osString", function() {
@@ -45,15 +46,18 @@ function selectNode(aInspector)
     aInspector.sidebar.select("computedview");
 
     computedView = getComputedView(aInspector);
+    win = aInspector.sidebar.getWindowForTab("computedview");
 
-    Services.obs.addObserver(runStyleInspectorTests, "StyleInspector-populated", false);
+    Services.obs.addObserver(runStyleInspectorTests,
+      "StyleInspector-populated", false);
   });
 }
 
 
 function runStyleInspectorTests()
 {
-  Services.obs.removeObserver(runStyleInspectorTests, "StyleInspector-populated", false);
+  Services.obs.removeObserver(runStyleInspectorTests,
+    "StyleInspector-populated", false);
 
   let contentDocument = computedView.styleDocument;
   let prop = contentDocument.querySelector(".property-view");
@@ -61,10 +65,10 @@ function runStyleInspectorTests()
 
   // We need the context menu to open in the correct place in order for
   // popupNode to be propertly set.
-  EventUtils.synthesizeMouse(prop, 1, 1, { type: "contextmenu", button: 2 },
-    computedView.styleWindow);
+  EventUtils.synthesizeMouseAtCenter(prop, { type: "contextmenu", button: 2 },
+    win);
 
-  checkCopyProperty()
+  checkCopyProperty();
 }
 
 function checkCopyProperty()
@@ -115,14 +119,13 @@ function checkCopyPropertyValue()
 function checkCopySelection()
 {
   let contentDocument = computedView.styleDocument;
-  let contentWindow = computedView.styleWindow;
   let props = contentDocument.querySelectorAll(".property-view");
   ok(props, "captain, we have the property-view nodes");
 
   let range = document.createRange();
   range.setStart(props[0], 0);
   range.setEnd(props[3], 4);
-  contentWindow.getSelection().addRange(range);
+  win.getSelection().addRange(range);
 
   info("Checking that cssHtmlTree.siBoundCopy() " +
        " returns the correct clipboard value");
@@ -176,7 +179,7 @@ function closeStyleInspector()
 
 function finishUp()
 {
-  doc = computedView = null;
+  computedView = doc = win = null;
   gBrowser.removeCurrentTab();
   finish();
 }
