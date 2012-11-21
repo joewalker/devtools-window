@@ -86,7 +86,7 @@ function testBreadcrumbs(node)
   let expectedText = b.prettyPrintNodeAsText(node);
   let button = b.container.querySelector("button[checked=true]");
   ok(button, "A crumbs is checked=true");
-  ok(button.getAttribute("tooltiptext"), expectedText, "Crumb refers to the right node");
+  is(button.getAttribute("tooltiptext"), expectedText, "Crumb refers to the right node");
 }
 
 function _clickOnInspectMenuItem(node) {

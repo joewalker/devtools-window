@@ -37,18 +37,14 @@ function inspectorRuleViewOpened()
 
 function inspectorClosed()
 {
-  Services.obs.addObserver(computedViewPopulated,
-    "StyleInspector-populated", false);
-
   openInspector(function(panel) {
     inspector = panel;
+    testNewDefaultTab();
   });
 }
 
-function computedViewPopulated()
+function testNewDefaultTab()
 {
-  Services.obs.removeObserver(computedViewPopulated,
-    "StyleInspector-populated");
   is(inspector.sidebar.getCurrentTabID(), "computedview", "Computed view is selected by default.");
 
   finishTest();
