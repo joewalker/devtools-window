@@ -3,7 +3,7 @@
 
 // Tests that the inspect command works as it should
 
-const TEST_URI = "http://example.com/browser/browser/devtools/highlighter/" +
+const TEST_URI = "http://example.com/browser/browser/devtools/inspector/" +
                  "test/browser_inspector_cmd_inspect.html";
 
 function test() {
