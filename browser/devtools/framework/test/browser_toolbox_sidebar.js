@@ -3,11 +3,13 @@
 
 function test() {
   const Cu = Components.utils;
-  Cu.import("resource:///modules/devtools/gDevTools.jsm", this);
-  Cu.import("resource:///modules/devtools/Target.jsm", this);
-  Cu.import("resource:///modules/devtools/Sidebar.jsm", this);
+  let tempScope = {};
+  Cu.import("resource:///modules/devtools/gDevTools.jsm", tempScope);
+  Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
+  Cu.import("resource:///modules/devtools/Sidebar.jsm", tempScope);
+  let {TargetFactory: TargetFactory, gDevTools: gDevTools, ToolSidebar: ToolSidebar} = tempScope;
 
-  const toolURL = "data:text/xml,<?xml version='1.0'?>" +
+  const toolURL = "data:text/xml;charset=utf8,<?xml version='1.0'?>" +
                   "<?xml-stylesheet href='chrome://browser/skin/devtools/common.css' type='text/css'?>" +
                   "<window xmlns='http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul'>" +
                   "<hbox flex='1'><description flex='1'>foo</description><splitter class='devtools-side-splitter'/>" +
@@ -15,9 +17,9 @@ function test() {
                   "</hbox>" +
                   "</window>";
 
-  const tab1URL = "data:text/html,<title>1</title><p>1</p>";
-  const tab2URL = "data:text/html,<title>2</title><p>2</p>";
-  const tab3URL = "data:text/html,<title>3</title><p>3</p>";
+  const tab1URL = "data:text/html;charset=utf8,<title>1</title><p>1</p>";
+  const tab2URL = "data:text/html;charset=utf8,<title>2</title><p>2</p>";
+  const tab3URL = "data:text/html;charset=utf8,<title>3</title><p>3</p>";
 
   let panelDoc;
 
@@ -110,20 +112,21 @@ function test() {
         ok(true, "received 'selected' event");
         panel.sidebar.hide();
         is(panel.sidebar._tabbox.getAttribute("hidden"), "true", "Sidebar hidden");
-        try {
         is(panel.sidebar.getWindowForTab("tab1").location.href, tab1URL, "Window is accessible");
-        finishUp();
-        } catch(e) {
-          ok(false, e);
-        }
+        finishUp(panel);
       });
     });
 
     panel.sidebar.select("tab2");
   }
 
-  function finishUp() {
-    gBrowser.removeCurrentTab();
-    finish();
+  function finishUp(panel) {
+    panel.sidebar.destroy();
+    gDevTools.unregisterTool(toolDefinition.id);
+
+    executeSoon(function() {
+      gBrowser.removeCurrentTab();
+      finish();
+    });
   }
 }
