@@ -134,7 +134,7 @@ function get_tab_actor_for_url(aClient, aURL, aCallback) {
 
 function attach_tab_actor_for_url(aClient, aURL, aCallback) {
   get_tab_actor_for_url(aClient, aURL, function(actor) {
-    aClient.request({ to: actor.actor, type: "attach" }, function(aResponse) {
+    aClient.attachTab(actor.actor, function(aResponse) {
       aCallback(actor, aResponse);
     });
   });
@@ -142,10 +142,10 @@ function attach_tab_actor_for_url(aClient, aURL, aCallback) {
 
 function attach_thread_actor_for_url(aClient, aURL, aCallback) {
   attach_tab_actor_for_url(aClient, aURL, function(aTabActor, aResponse) {
-    aClient.request({ "to": actor.threadActor, "type": "attach" }, function(aResponse) {
+    aClient.attachThread(actor.threadActor, function(aResponse, aThreadClient) {
       // We don't care about the pause right now (use
       // get_actor_for_url() if you do), so resume it.
-      aClient.request({ to: actor.threadActor, type: "resume" }, function(aResponse) {
+      aThreadClient.resume(function(aResponse) {
         aCallback(actor);
       });
     });

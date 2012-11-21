@@ -365,12 +365,13 @@ RemoteTarget.prototype = {
   /**
    * Target is not alive anymore.
    */
-  destroy: function() {
+  destroy: function RT_destroy() {
     if (this._destroyed) {
       return;
     }
     this.client.removeListener("tabNavigated", this._onTabNavigated);
     this.client.removeListener("tabDetached", this.destroy);
+
     this._client.close(function onClosed() {
       this._client = null;
       this._destroyed = true;

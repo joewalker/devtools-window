@@ -498,6 +498,14 @@ Toolbox.prototype = {
    * Remove all UI elements, detach from target and clear up
    */
   destroy: function TBOX_destroy() {
+    if (this._destroyed) {
+      return;
+    }
+
+    // Remote targets need to be notified that the toolbox is being torn down.
+    if (this._target && this._target.isRemote) {
+      this._target.destroy();
+    }
     this._target = null;
 
     for (let [id, panel] of this._toolPanels) {
@@ -509,6 +517,7 @@ Toolbox.prototype = {
     gDevTools.off("tool-registered", this._toolRegistered);
     gDevTools.off("tool-unregistered", this._toolUnregistered);
 
+    this._destroyed = true;
     this.emit("destroyed");
   }
 };
