@@ -68,7 +68,7 @@ function SI_toggleDefaultStyles()
   let checkbox = doc.querySelector(".onlyuserstyles");
   Services.obs.addObserver(SI_checkDefaultStyles, "StyleInspector-populated", false);
 
-  EventUtils.synthesizeMouseAtCenter(checkbox, {}, computedView.styleWindow);
+  checkbox.click();
 }
 
 function SI_checkDefaultStyles()

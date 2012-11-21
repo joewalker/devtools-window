@@ -79,7 +79,7 @@ function testInlineStyle()
 
     let link = getLinkByIndex(0);
     link.scrollIntoView();
-    EventUtils.synthesizeMouseAtCenter(link, { }, contentWindow);
+    link.click();
   });
 }
 
@@ -95,7 +95,7 @@ function testInlineStyleSheet()
 
   let link = getLinkByIndex(1);
   link.scrollIntoView();
-  EventUtils.synthesizeMouseAtCenter(link, { }, contentWindow);
+  link.click();
 }
 
 function validateStyleEditorSheet(aChrome, aEditor)
