@@ -29,7 +29,7 @@ function test()
     gTab = aTab;
     gDebuggee = aDebuggee;
     gPane = aPane;
-    gDebugger = gPane.contentWindow;
+    gDebugger = gPane.panelWin;
     gBreakpoints = gDebugger.DebuggerController.Breakpoints;
     gBreakpointsPane = gDebugger.DebuggerView.Breakpoints;
 
