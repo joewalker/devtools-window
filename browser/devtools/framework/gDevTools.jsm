@@ -503,7 +503,7 @@ DevTools.prototype = {
 
     // Destroy toolboxes for closed window
     for (let [target, toolbox] of this._toolboxes) {
-      if (target.ownerDocument.defaultView == win) {
+      if (toolbox.frame.ownerDocument.defaultView == win) {
         toolbox.destroy();
       }
     }

@@ -26,15 +26,18 @@ function testViewSource(aHud)
     nodes = hud = SEC = null;
   });
 
+  let selector = ".webconsole-msg-cssparser .webconsole-location";
+
   waitForSuccess({
     name: "find the location node",
     validatorFn: function()
     {
-      return hud.outputNode.querySelector(".webconsole-location");
+      return hud.outputNode.querySelector(selector);
     },
     successFn: function()
     {
-      nodes = hud.outputNode.querySelectorAll(".webconsole-location");
+      nodes = hud.outputNode.querySelectorAll(selector);
+      is(nodes.length, 2, "correct number of css messages");
 
       let target = TargetFactory.forTab(gBrowser.selectedTab);
       let toolbox = gDevTools.getToolboxForTarget(target);
@@ -55,17 +58,43 @@ function onStyleEditorReady(aEvent, aPanel)
   ok(win, "Style Editor Window is defined");
   ok(SEC, "Style Editor Chrome is defined");
 
+  function sheetForNode(aNode)
+  {
+    let href = aNode.getAttribute("title");
+    let sheet, i = 0;
+    while((sheet = content.document.styleSheets[i++])) {
+      if (sheet.href == href) {
+        return sheet;
+      }
+    }
+  }
+
   waitForFocus(function() {
     info("style editor window focused");
-    checkStyleEditorForSheetAndLine(0, 7, function() {
+
+    let sheet = sheetForNode(nodes[0]);
+    ok(sheet, "sheet found");
+    let line = nodes[0].sourceLine;
+    ok(line, "found source line");
+
+    checkStyleEditorForSheetAndLine(sheet, line - 1, function() {
       info("first check done");
+
       let target = TargetFactory.forTab(gBrowser.selectedTab);
       let toolbox = gDevTools.getToolboxForTarget(target);
+
+      let sheet = sheetForNode(nodes[1]);
+      ok(sheet, "sheet found");
+      let line = nodes[1].sourceLine;
+      ok(line, "found source line");
+
       toolbox.once("webconsole-selected", function(aEvent) {
         info(aEvent + " event fired");
+
         toolbox.once("styleeditor-selected", function() {
           info(aEvent + " event fired");
-          checkStyleEditorForSheetAndLine(1, 6, function() {
+
+          checkStyleEditorForSheetAndLine(sheet, line - 1, function() {
             info("second check done");
             finishTest();
           });
@@ -73,20 +102,21 @@ function onStyleEditorReady(aEvent, aPanel)
 
         EventUtils.sendMouseEvent({ type: "click" }, nodes[1]);
       });
+
       toolbox.selectTool("webconsole");
     });
   }, win);
 }
 
-function checkStyleEditorForSheetAndLine(aStyleSheetIndex, aLine, aCallback)
+function checkStyleEditorForSheetAndLine(aStyleSheet, aLine, aCallback)
 {
   let foundEditor = null;
   waitForSuccess({
-    name: "style editor for stylesheet index",
+    name: "style editor for stylesheet",
     validatorFn: function()
     {
       for (let editor of SEC.editors) {
-        if (editor.styleSheetIndex == aStyleSheetIndex) {
+        if (editor.styleSheet == aStyleSheet) {
           foundEditor = editor;
           return true;
         }
