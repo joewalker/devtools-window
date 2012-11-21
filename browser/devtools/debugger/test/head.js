@@ -14,6 +14,8 @@ let DebuggerServer = tempScope.DebuggerServer;
 let DebuggerTransport = tempScope.DebuggerTransport;
 let DebuggerClient = tempScope.DebuggerClient;
 let Services = tempScope.Services;
+Cu.import("resource:///modules/devtools/gDevTools.jsm", tempScope);
+let gDevTools = tempScope.gDevTools;
 Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
 let TargetFactory = tempScope.TargetFactory;
 
@@ -88,14 +90,25 @@ function removeTab(aTab, aWindow) {
 }
 
 function closeDebuggerAndFinish(aRemoteFlag, aCallback, aWindow) {
-  let targetWindow = aWindow || window;
-  // let dbg = gDevTools.getPanelForTarget("jsdebugger", targetWindow);
-  let debuggerClosed = true;
-  let debuggerDisconnected = true;
+  let debuggerClosed = false;
+  let debuggerDisconnected = false;
+  // let targetWindow = aWindow || window;
+  ok(gTab, "There is a gTab to use for getting a toolbox reference");
   let target = TargetFactory.forTab(gTab);
-  gDevTools.closeToolbox(target);
-  debuggerDisconnected = true;
-  _maybeFinish();
+
+  // let dbg = gDevTools.getPanelForTarget("jsdebugger", target);
+  window.addEventListener("Debugger:Shutdown", function cleanup() {
+    window.removeEventListener("Debugger:Shutdown", cleanup, false);
+    debuggerDisconnected = true;
+    _maybeFinish();
+  }, false);
+
+  let toolbox = gDevTools.getToolboxForTarget(target);
+  toolbox.once("destroyed", function() {
+    debuggerClosed = true;
+    _maybeFinish();
+  });
+  toolbox.destroy();
 
   function _maybeFinish() {
     if (debuggerClosed && debuggerDisconnected) {
@@ -105,11 +118,6 @@ function closeDebuggerAndFinish(aRemoteFlag, aCallback, aWindow) {
     }
   }
 
-  // dbg.chromeWindow.addEventListener("Debugger:Shutdown", function cleanup() {
-  //   dbg.chromeWindow.removeEventListener("Debugger:Shutdown", cleanup, false);
-  //   debuggerDisconnected = true;
-  //   _maybeFinish();
-  // }, false);
   // if (!aRemoteFlag) {
   //   dbg.getDebugger().close(function() {
   //     debuggerClosed = true;

@@ -11,10 +11,14 @@ this.EXPORTED_SYMBOLS = ["DebuggerDefinition"];
 
 const STRINGS_URI = "chrome://browser/locale/devtools/debugger.properties";
 
-Cu.import("resource://gre/modules/devtools/EventEmitter.jsm");
-Cu.import("resource://gre/modules/devtools/dbg-server.jsm");
-Cu.import('resource://gre/modules/XPCOMUtils.jsm');
-Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "Services",
+                                  "resource://gre/modules/Services.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "EventEmitter",
+                                  "resource:///modules/devtools/EventEmitter.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "DebuggerServer",
+                                  "resource://gre/modules/devtools/dbg-server.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
                                   "resource:///modules/devtools/gDevTools.jsm");
 XPCOMUtils.defineLazyGetter(this, "_strings",
@@ -91,6 +95,12 @@ DebuggerPanel.prototype = {
   },
 
   destroy: function() {
+    delete this._toolbox;
+    delete this._target;
+    delete this._controller;
+    delete this._view;
+    delete this._bkp;
+    delete this.panelWin;
   },
 
   // DebuggerPanel API
