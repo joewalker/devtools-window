@@ -50,6 +50,7 @@ function startInspectorTests()
   testBreadcrumbs(p);
 
   let span = doc.querySelector("span");
+  span.scrollIntoView();
 
   inspector.selection.setNode(span);
 
