@@ -50,13 +50,44 @@ function startInspectorTests()
   testBreadcrumbs(p);
 
   let span = doc.querySelector("span");
-  span.scrollIntoView();
 
   inspector.selection.setNode(span);
 
   testHighlighter(span);
   testMarkupView(span);
   testBreadcrumbs(span);
+
+  let closing = doc.querySelector("p#closing");
+
+  inspector.selection.setNode(closing);
+
+  testHighlighter(closing);
+  testMarkupView(closing);
+  testBreadcrumbs(closing);
+
+  let body = doc.querySelector("p#body");
+
+  inspector.selection.setNode(body);
+
+  testHighlighter(body);
+  testMarkupView(body);
+  testBreadcrumbs(body);
+
+  let salutation = doc.querySelector("salutation");
+
+  inspector.selection.setNode(salutation);
+
+  testHighlighter(salutation);
+  testMarkupView(salutation);
+  testBreadcrumbs(salutation);
+
+  let div = doc.querySelector("div");
+
+  inspector.selection.setNode(div);
+
+  testHighlighter(div);
+  testMarkupView(div);
+  testBreadcrumbs(div);
 
   let toolbox = gDevTools.getToolboxForTarget(target);
   toolbox.once("destroyed", function() {

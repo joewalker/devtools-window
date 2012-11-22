@@ -11,6 +11,7 @@ const Ci = Components.interfaces;
 this.EXPORTED_SYMBOLS = ["ToolSidebar"];
 
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
+Cu.import("resource:///modules/devtools/Console.jsm");
 
 const XULNS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
 
@@ -110,6 +111,15 @@ ToolSidebar.prototype = {
       if (this._tabbox.tabs.selectedItem == tab) {
         currentID = id;
         break;
+      }
+    }
+    console.log('getCurrentTabID is broken');
+    if (currentID == null) {
+      console.log('selectedItem is ', this._tabbox.tabs.selectedItem);
+      let i = 0;
+      for (let [id, tab] of this._tabs) {
+        console.log('_tabs[' + i + '] is ', tab);
+        i++;
       }
     }
     return currentID;
