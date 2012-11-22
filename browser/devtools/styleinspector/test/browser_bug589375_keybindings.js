@@ -25,17 +25,15 @@ function openComputedView(aInspector)
   inspector = aInspector;
   iframe = inspector._toolbox.frame;
 
-  inspector.sidebar.once("computedview-ready", function() {
-    inspector.sidebar.select("computedview");
-    computedView = getComputedView(inspector);
+  Services.obs.addObserver(runTests, "StyleInspector-populated", false);
 
-    Services.obs.addObserver(runTests, "StyleInspector-populated", false);
-  });
+  inspector.sidebar.select("computedview");
 }
 
 function runTests()
 {
   Services.obs.removeObserver(runTests, "StyleInspector-populated");
+  computedView = getComputedView(inspector);
 
   var span = doc.querySelector(".matches");
   ok(span, "captain, we have the matches span");
