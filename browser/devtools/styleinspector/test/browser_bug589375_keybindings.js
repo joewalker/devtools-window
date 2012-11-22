@@ -25,12 +25,9 @@ function openComputedView(aInspector)
   inspector = aInspector;
   iframe = inspector._toolbox.frame;
 
-  inspector.sidebar.once("computedview-ready", function() {
-    inspector.sidebar.select("computedview");
-    computedView = getComputedView(inspector);
+  Services.obs.addObserver(runTests, "StyleInspector-populated", false);
 
-    Services.obs.addObserver(runTests, "StyleInspector-populated", false);
-  });
+  aInspector.sidebar.select("computedview");
 }
 
 function runTests()
