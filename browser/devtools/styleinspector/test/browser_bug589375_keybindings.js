@@ -53,7 +53,7 @@ function runTests()
 
   info("Adding focus event handler to property expander");
   matchedExpander.addEventListener("focus", function expanderFocused() {
-    this.removeEventListener("focus", expanderFocused);
+    matchedExpander.removeEventListener("focus", expanderFocused);
     info("property expander is focused");
     info("checking expand / collapse");
     testKey(iframe.contentWindow, "VK_SPACE", rulesTable);
