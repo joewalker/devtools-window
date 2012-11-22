@@ -39,7 +39,13 @@ function inspectorClosed()
 {
   openInspector(function(panel) {
     inspector = panel;
-    testNewDefaultTab();
+    if (inspector.sidebar.getCurrentTabID()) {
+      // Default sidebar already selected.
+      testNewDefaultTab();
+    } else {
+      // Default sidebar still to be selected.
+      inspector.sidebar.once("select", testNewDefaultTab);
+    }
   });
 }
 
