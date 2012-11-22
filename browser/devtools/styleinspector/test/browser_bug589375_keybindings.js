@@ -51,6 +51,14 @@ function runTests()
   let rulesTable = propView.matchedSelectorsContainer;
   let matchedExpander = propView.matchedExpander;
 
+  info("Adding focus event handler to search filter");
+  searchbar.addEventListener("focus", function searchbarFocused() {
+    searchbar.removeEventListener("focus", searchbarFocused);
+    info("search filter is focused");
+    info("tabbing to property expander node");
+    EventUtils.synthesizeKey("VK_TAB", {}, iframe.contentWindow);
+  });
+
   info("Adding focus event handler to property expander");
   matchedExpander.addEventListener("focus", function expanderFocused() {
     matchedExpander.removeEventListener("focus", expanderFocused);
@@ -62,14 +70,6 @@ function runTests()
     checkHelpLinkKeybinding();
     computedView.destroy();
     finishUp();
-  });
-
-  info("Adding focus event handler to search filter");
-  searchbar.addEventListener("focus", function searchbarFocused() {
-    this.removeEventListener("focus", searchbarFocused);
-    info("search filter is focused");
-    info("tabbing to property expander node");
-    EventUtils.synthesizeKey("VK_TAB", {}, iframe.contentWindow);
   });
 
   info("Making sure that the style inspector panel is focused");
