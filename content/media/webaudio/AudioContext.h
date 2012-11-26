@@ -14,7 +14,7 @@
 #include "EnableWebAudioCheck.h"
 #include "nsAutoPtr.h"
 
-class JSContext;
+struct JSContext;
 class nsIDOMWindow;
 
 namespace mozilla {
@@ -73,7 +73,7 @@ public:
   CreateGain();
 
   already_AddRefed<DelayNode>
-  CreateDelay(float aMaxDelayTime, ErrorResult& aRv);
+  CreateDelay(double aMaxDelayTime, ErrorResult& aRv);
 
   already_AddRefed<PannerNode>
   CreatePanner();

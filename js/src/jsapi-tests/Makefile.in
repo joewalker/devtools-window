@@ -57,6 +57,7 @@ CPPSRCS = \
   testScriptInfo.cpp \
   testScriptObject.cpp \
   testSetProperty.cpp \
+  testSourcePolicy.cpp \
   testStringBuffer.cpp \
   testTrap.cpp \
   testTypedArrays.cpp \
@@ -84,6 +85,10 @@ DEFINES         += -DIMPL_MFBT
 LIBS      = $(DEPTH)/$(LIB_PREFIX)js_static.$(LIB_SUFFIX) $(NSPR_LIBS) $(MOZ_ZLIB_LIBS)
 
 LOCAL_INCLUDES += -I$(topsrcdir) -I..
+
+ifdef QEMU_EXE
+MOZ_POST_PROGRAM_COMMAND = $(topsrcdir)/build/qemu-wrap --qemu $(QEMU_EXE) --libdir $(CROSS_LIB)
+endif
 
 include $(topsrcdir)/config/rules.mk
 

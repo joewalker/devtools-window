@@ -252,6 +252,9 @@ Toolbox.prototype = {
    */
   _buildTabForTool: function TBOX_buildTabForTool(toolDefinition) {
     const MAX_ORDINAL = 99;
+    if (!toolDefinition.isTargetSupported(this._target)) {
+      return;
+    }
 
     let tabs = this.doc.getElementById("toolbox-tabs");
     let deck = this.doc.getElementById("toolbox-deck");
@@ -291,6 +294,11 @@ Toolbox.prototype = {
       throw new Error("Can't select tool, wait for toolbox 'ready' event");
     }
     let tab = this.doc.getElementById("toolbox-tab-" + id);
+
+    if (!tab) {
+      throw new Error("No tool found");
+    }
+
     let tabstrip = this.doc.getElementById("toolbox-tabs");
 
     // select the right tab
@@ -343,8 +351,11 @@ Toolbox.prototype = {
       iframe.setAttribute("src", definition.url);
     } else {
       let panel = this._toolPanels.get(id);
-      this.emit("select", id);
-      this.emit(id + "-selected", panel);
+      // only emit 'select' event if the iframe has been loaded
+      if (panel) {
+        this.emit("select", id);
+        this.emit(id + "-selected", panel);
+      }
     }
 
     Services.prefs.setCharPref(this._prefs.LAST_TOOL, id);
@@ -487,7 +498,14 @@ Toolbox.prototype = {
    * Remove all UI elements, detach from target and clear up
    */
   destroy: function TBOX_destroy() {
-    this._target.destroy();
+    if (this._destroyed) {
+      return;
+    }
+
+    // Remote targets need to be notified that the toolbox is being torn down.
+    if (this._target && this._target.isRemote) {
+      this._target.destroy();
+    }
     this._target = null;
 
     for (let [id, panel] of this._toolPanels) {
@@ -499,6 +517,7 @@ Toolbox.prototype = {
     gDevTools.off("tool-registered", this._toolRegistered);
     gDevTools.off("tool-unregistered", this._toolUnregistered);
 
+    this._destroyed = true;
     this.emit("destroyed");
   }
 };

@@ -37,6 +37,7 @@ struct xpc_qsHashEntry {
     uint16_t n_props;
     uint16_t func_index;
     uint16_t n_funcs;
+    const mozilla::dom::NativeProperties* newBindingProperties;
     // These last two fields index to other entries in the same table.
     // XPC_QS_NULL_ENTRY indicates there are no more entries in the chain.
     uint16_t parentInterface;
@@ -526,7 +527,7 @@ xpc_qsUnwrapArg(JSContext *cx, jsval v, Interface **ppArg,
     return rv;
 }
 
-inline nsISupports*
+MOZ_ALWAYS_INLINE nsISupports*
 castNativeArgFromWrapper(JSContext *cx,
                          jsval v,
                          uint32_t bit,

@@ -27,13 +27,20 @@
         <getter>
           return this.getAttribute("minimized") == "true";
         </getter>
-        <setter>
+        <setter><![CDATA[
           this.isActive = !val;
-          if (val)
+          let parent = this.parentNode;
+          if (val) {
             this.setAttribute("minimized", "true");
-          else
+            // If this chat is the selected one a new one needs to be selected.
+            if (parent.selectedChat == this)
+              parent._selectAnotherChat();
+          } else {
             this.removeAttribute("minimized");
-        </setter>
+            // this chat gets selected.
+            parent.selectedChat = this;
+          }
+        ]]></setter>
       </property>
 
       <property name="isActive">
@@ -49,17 +56,6 @@
           this.iframe.contentDocument.documentElement.dispatchEvent(evt);
         </setter>
       </property>
-
-      <method name="init">
-        <parameter name="aProvider"/>
-        <parameter name="aURL"/>
-        <parameter name="aCallback"/>
-        <body><![CDATA[
-          this._callback = aCallback;
-          this.setAttribute("origin", aProvider.origin);
-          this.setAttribute("src", aURL);
-        ]]></body>
-      </method>
 
       <method name="close">
         <body><![CDATA[
@@ -78,21 +74,6 @@
       <handler event="focus" phase="capturing">
         this.parentNode.selectedChat = this;
       </handler>
-      <handler event="DOMContentLoaded"><![CDATA[
-        this.isActive = !this.minimized;
-        if (this._callback) this._callback(this.iframe.contentWindow);
-        let chatbox = this;
-        function chatActivity() {
-          chatbox.setAttribute("activity", true);
-          chatbox.parentNode.updateTitlebar(chatbox);
-        };
-        let iframeWindow = this.iframe.contentWindow;
-        iframeWindow.addEventListener("socialChatActivity", chatActivity);
-        iframeWindow.addEventListener("unload", function unload() {
-          iframeWindow.removeEventListener("unload", unload);
-          iframeWindow.removeEventListener("socialChatActivity", chatActivity);
-        });
-      ]]></handler>
       <handler event="DOMTitleChanged"><![CDATA[
         this.setAttribute('label', this.iframe.contentDocument.title);
         this.parentNode.updateTitlebar(this);
@@ -149,6 +130,15 @@
         document.getAnonymousElementByAttribute(this, "anonid", "nub");
       </field>
 
+      <method name="focus">
+        <body><![CDATA[
+          if (!this.selectedChat)
+            return;
+          let commandDispatcher = gBrowser.ownerDocument.commandDispatcher;
+          commandDispatcher.advanceFocusIntoSubtree(this.selectedChat);
+        ]]></body>
+      </method>
+
       <property name="selectedChat">
         <getter><![CDATA[
           return this._selectedChat;
@@ -167,6 +157,7 @@
             this._selectedChat = val;
             if (val) {
               this._selectedChat.setAttribute("selected", "true");
+              this.focus();
             }
           }
           if (val) {
@@ -188,11 +179,11 @@
         <getter><![CDATA[
           // A generator yielding all collapsed chatboxes, in the order in
           // which they should be restored.
-          let child = this.lastChild;
+          let child = this.lastElementChild;
           while (child) {
             if (child.collapsed)
               yield child;
-            child = child.previousSibling;
+            child = child.previousElementSibling;
           }
         ]]></getter>
       </property>
@@ -200,11 +191,11 @@
       <property name="visibleChildren">
         <getter><![CDATA[
           // A generator yielding all non-collapsed chatboxes.
-          let child = this.firstChild;
+          let child = this.firstElementChild;
           while (child) {
             if (!child.collapsed)
               yield child;
-            child = child.nextSibling;
+            child = child.nextElementSibling;
           }
         ]]></getter>
       </property>
@@ -219,6 +210,26 @@
               yield child;
         ]]></getter>
       </property>
+
+      <method name="_selectAnotherChat">
+        <body><![CDATA[
+          // Select a different chat (as the currently selected one is no
+          // longer suitable as the selection - maybe it is being minimized or
+          // closed.)  We only select non-minimized and non-collapsed chats,
+          // and if none are found, set the selectedChat to null.
+          // It's possible in the future we will track most-recently-selected
+          // chats or similar to find the "best" candidate - for now though
+          // the choice is somewhat arbitrary.
+          for (let other of this.children) {
+            if (other != this.selectedChat && !other.minimized && !other.collapsed) {
+              this.selectedChat = other;
+              return;
+            }
+          }
+          // can't find another - so set no chat as selected.
+          this.selectedChat = null;
+        ]]></body>
+      </method>
 
       <method name="updateTitlebar">
         <parameter name="aChatbox"/>
@@ -290,8 +301,9 @@
 
       <method name="showChat">
         <parameter name="aChatbox"/>
+        <parameter name="aMode"/>
         <body><![CDATA[
-          if (aChatbox.minimized)
+          if ((aMode != "minimized") && aChatbox.minimized)
             aChatbox.minimized = false;
           if (this.selectedChat != aChatbox)
             this.selectedChat = aChatbox;
@@ -331,7 +343,7 @@
         <parameter name="aChatbox"/>
         <body><![CDATA[
           if (this.selectedChat == aChatbox) {
-            this.selectedChat = aChatbox.previousSibling ? aChatbox.previousSibling : aChatbox.nextSibling
+            this._selectAnotherChat();
           }
           this.removeChild(aChatbox);
           // child might have been collapsed.
@@ -346,14 +358,55 @@
 
       <method name="removeAll">
         <body><![CDATA[
-          while (this.firstChild) {
-            this._remove(this.firstChild);
+          this.selectedChat = null;
+          while (this.firstElementChild) {
+            this._remove(this.firstElementChild);
           }
           // and the nub/popup must also die.
           this.nub.collapsed = true;
         ]]></body>
       </method>
 
+      <method name="initChatBox">
+        <!-- ideally this would be a method on the chatbox itself, but the
+             vagaries of XBL bindings means that in some edge cases the
+             chatbox methods don't exist yet when we need them to...
+        -->
+        <parameter name="aChatBox"/>
+        <parameter name="aProvider"/>
+        <parameter name="aURL"/>
+        <parameter name="aCallback"/>
+        <body><![CDATA[
+          // callbacks to be called when onload fires - more might be added
+          // if the same chat is requested before onload has fired.  Set back
+          // to null in DOMContentLoaded, so null means DOMContentLoaded has
+          // already fired and new callbacks can be made immediately.
+          aChatBox._callbacks = [aCallback];
+          let iframeWindow = aChatBox.iframe.contentWindow;
+          aChatBox.addEventListener("DOMContentLoaded", function DOMContentLoaded() {
+            aChatBox.removeEventListener("DOMContentLoaded", DOMContentLoaded);
+            aChatBox.isActive = !aChatBox.minimized;
+            for (let callback of aChatBox._callbacks) {
+              if (callback)
+                callback(iframeWindow);
+            }
+            aChatBox._callbacks = null;
+            function chatActivity() {
+              aChatBox.setAttribute("activity", true);
+              aChatBox.parentNode.updateTitlebar(aChatBox);
+            };
+
+            iframeWindow.addEventListener("socialChatActivity", chatActivity);
+            iframeWindow.addEventListener("unload", function unload() {
+              iframeWindow.removeEventListener("unload", unload);
+              iframeWindow.removeEventListener("socialChatActivity", chatActivity);
+            });
+          });
+
+          aChatBox.setAttribute("origin", aProvider.origin);
+          aChatBox.setAttribute("src", aURL);
+        ]]></body>
+      </method>
       <method name="openChat">
         <parameter name="aProvider"/>
         <parameter name="aURL"/>
@@ -364,9 +417,16 @@
           if (cb) {
             cb = cb.get();
             if (cb.parentNode) {
-              this.showChat(cb);
-              if (aCallback)
-                aCallback(cb.iframe.contentWindow);
+              this.showChat(cb, aMode);
+              if (aCallback) {
+                if (cb._callbacks == null) {
+                  // DOMContentLoaded has already fired, so callback now.
+                  aCallback(cb.iframe.contentWindow);
+                } else {
+                  // DOMContentLoaded for this chat is yet to fire...
+                  cb._callbacks.push(aCallback);
+                }
+              }
               return;
             }
             this.chatboxForURL.delete(aURL);
@@ -374,9 +434,9 @@
           cb = document.createElementNS("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul", "chatbox");
           if (aMode == "minimized")
             cb.setAttribute("minimized", "true");
-          this.selectedChat = cb;
           this.insertBefore(cb, this.firstChild);
-          cb.init(aProvider, aURL, aCallback);
+          this.selectedChat = cb;
+          this.initChatBox(cb, aProvider, aURL, aCallback);
           this.chatboxForURL.set(aURL, Cu.getWeakReference(cb));
           this.resize();
         ]]></body>

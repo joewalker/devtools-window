@@ -1418,11 +1418,11 @@ WebGLContext::DrawArrays(GLenum mode, WebGLint first, WebGLsizei count)
     if (!mCurrentProgram)
         return;
 
-    int32_t maxAllowedCount = 0;
+    uint32_t maxAllowedCount = 0;
     if (!ValidateBuffers(&maxAllowedCount, "drawArrays"))
         return;
 
-    CheckedInt32 checked_firstPlusCount = CheckedInt32(first) + count;
+    CheckedUint32 checked_firstPlusCount = CheckedUint32(first) + count;
 
     if (!checked_firstPlusCount.isValid())
         return ErrorInvalidOperation("drawArrays: overflow in first+count");
@@ -1511,13 +1511,13 @@ WebGLContext::DrawElements(WebGLenum mode, WebGLsizei count, WebGLenum type,
     if (checked_neededByteCount.value() > mBoundElementArrayBuffer->ByteLength())
         return ErrorInvalidOperation("drawElements: bound element array buffer is too small for given count and offset");
 
-    int32_t maxAllowedCount = 0;
+    uint32_t maxAllowedCount = 0;
     if (!ValidateBuffers(&maxAllowedCount, "drawElements"))
-      return;
+        return;
 
-    int32_t maxAllowedIndex = NS_MAX(maxAllowedCount - 1, 0);
-
-    if (!mBoundElementArrayBuffer->Validate(type, maxAllowedIndex, first, count)) {
+    if (!maxAllowedCount ||
+        !mBoundElementArrayBuffer->Validate(type, maxAllowedCount - 1, first, count))
+    {
         return ErrorInvalidOperation(
             "DrawElements: bound vertex attribute buffers do not have sufficient "
             "size for given indices from the bound element array");
@@ -3156,9 +3156,8 @@ WebGLContext::ReadPixels(WebGLint x, WebGLint y, WebGLsizei width,
     WebGLsizei framebufferWidth = framebufferRect ? framebufferRect->Width() : 0;
     WebGLsizei framebufferHeight = framebufferRect ? framebufferRect->Height() : 0;
 
-    void* data = pixels->Data();
-    uint32_t dataByteLen = JS_GetTypedArrayByteLength(pixels->Obj(), NULL);
-    int dataType = JS_GetTypedArrayType(pixels->Obj(), NULL);
+    uint32_t dataByteLen = JS_GetTypedArrayByteLength(pixels->Obj());
+    int dataType = JS_GetTypedArrayType(pixels->Obj());
 
     uint32_t channels = 0;
 
@@ -3214,6 +3213,12 @@ WebGLContext::ReadPixels(WebGLint x, WebGLint y, WebGLsizei width,
 
     if (checked_neededByteLength.value() > dataByteLen)
         return ErrorInvalidOperation("readPixels: buffer too small");
+
+    void* data = pixels->Data();
+    if (!data) {
+        ErrorOutOfMemory("readPixels: buffer storage is null. Did we run out of memory?");
+        return rv.Throw(NS_ERROR_OUT_OF_MEMORY);
+    }
 
     // Check the format and type params to assure they are an acceptable pair (as per spec)
     switch (format) {
@@ -4862,7 +4867,7 @@ WebGLContext::TexImage2D_base(WebGLenum target, WebGLint level, WebGLenum intern
 }
 
 void
-WebGLContext::TexImage2D(JSContext* cx, WebGLenum target, WebGLint level,
+WebGLContext::TexImage2D(WebGLenum target, WebGLint level,
                          WebGLenum internalformat, WebGLsizei width,
                          WebGLsizei height, WebGLint border, WebGLenum format,
                          WebGLenum type, ArrayBufferView *pixels, ErrorResult& rv)
@@ -4873,12 +4878,12 @@ WebGLContext::TexImage2D(JSContext* cx, WebGLenum target, WebGLint level,
     return TexImage2D_base(target, level, internalformat, width, height, 0, border, format, type,
                            pixels ? pixels->Data() : 0,
                            pixels ? pixels->Length() : 0,
-                           pixels ? (int)JS_GetTypedArrayType(pixels->Obj(), cx) : -1,
+                           pixels ? (int)JS_GetTypedArrayType(pixels->Obj()) : -1,
                            WebGLTexelConversions::Auto, false);
 }
 
 void
-WebGLContext::TexImage2D(JSContext* cx, WebGLenum target, WebGLint level,
+WebGLContext::TexImage2D(WebGLenum target, WebGLint level,
                          WebGLenum internalformat, WebGLenum format,
                          WebGLenum type, ImageData* pixels, ErrorResult& rv)
 {
@@ -4890,7 +4895,7 @@ WebGLContext::TexImage2D(JSContext* cx, WebGLenum target, WebGLint level,
         return ErrorInvalidValue("texImage2D: null ImageData");
     }
     
-    Uint8ClampedArray arr(cx, pixels->GetDataObject());
+    Uint8ClampedArray arr(pixels->GetDataObject());
     return TexImage2D_base(target, level, internalformat, pixels->Width(),
                            pixels->Height(), 4*pixels->Width(), 0,
                            format, type, arr.Data(), arr.Length(), -1,
@@ -5011,7 +5016,7 @@ WebGLContext::TexSubImage2D_base(WebGLenum target, WebGLint level,
 }
 
 void
-WebGLContext::TexSubImage2D(JSContext* cx, WebGLenum target, WebGLint level,
+WebGLContext::TexSubImage2D(WebGLenum target, WebGLint level,
                             WebGLint xoffset, WebGLint yoffset,
                             WebGLsizei width, WebGLsizei height,
                             WebGLenum format, WebGLenum type,
@@ -5027,12 +5032,12 @@ WebGLContext::TexSubImage2D(JSContext* cx, WebGLenum target, WebGLint level,
     return TexSubImage2D_base(target, level, xoffset, yoffset,
                               width, height, 0, format, type,
                               pixels->Data(), pixels->Length(),
-                              JS_GetTypedArrayType(pixels->Obj(), cx),
+                              JS_GetTypedArrayType(pixels->Obj()),
                               WebGLTexelConversions::Auto, false);
 }
 
 void
-WebGLContext::TexSubImage2D(JSContext* cx, WebGLenum target, WebGLint level,
+WebGLContext::TexSubImage2D(WebGLenum target, WebGLint level,
                             WebGLint xoffset, WebGLint yoffset,
                             WebGLenum format, WebGLenum type, ImageData* pixels,
                             ErrorResult& rv)
@@ -5043,7 +5048,7 @@ WebGLContext::TexSubImage2D(JSContext* cx, WebGLenum target, WebGLint level,
     if (!pixels)
         return ErrorInvalidValue("texSubImage2D: pixels must not be null!");
 
-    Uint8ClampedArray arr(cx, pixels->GetDataObject());
+    Uint8ClampedArray arr(pixels->GetDataObject());
     return TexSubImage2D_base(target, level, xoffset, yoffset,
                               pixels->Width(), pixels->Height(),
                               4*pixels->Width(), format, type,

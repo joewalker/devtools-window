@@ -12,8 +12,10 @@ function test()
   let sheet = null;
 
   waitForExplicitFinish();
-  gBrowser.selectedBrowser.addEventListener("load", function () {
-    gBrowser.selectedBrowser.removeEventListener("load", arguments.callee, true);
+
+  gBrowser.selectedTab = gBrowser.addTab();
+  gBrowser.selectedBrowser.addEventListener("load", function onLoad() {
+    gBrowser.selectedBrowser.removeEventListener("load", onLoad, true);
     run();
   }, true);
   content.location = TESTCASE_URI;
@@ -30,6 +32,7 @@ function test()
 
   function checkSourceEditor(aChrome, aEditor)
   {
+    aChrome.removeChromeListener(this);
     if (!aEditor.sourceEditor) {
       aEditor.addActionListener({
         onAttach: function (aEditor) {
@@ -50,12 +53,6 @@ function test()
     is(caretPosition.line, LINE - 1, "caret row is correct"); // index based
     is(caretPosition.col, COL - 1, "caret column is correct");
     is(aEditor.styleSheet, sheet, "loaded stylesheet matches document stylesheet");
-    finishUp();
-  }
-
-  function finishUp()
-  {
-    editor = sheet = null;
     finish();
   }
 }

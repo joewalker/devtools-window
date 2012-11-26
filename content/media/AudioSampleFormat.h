@@ -13,7 +13,7 @@ namespace mozilla {
 /**
  * Audio formats supported in MediaStreams and media elements.
  *
- * Only one of these is supported by nsAudioStream, and that is determined
+ * Only one of these is supported by AudioStream, and that is determined
  * at compile time (roughly, FLOAT32 on desktops, S16 on mobile). Media decoders
  * produce that format only; queued AudioData always uses that format.
  */
@@ -23,7 +23,7 @@ enum AudioSampleFormat
   AUDIO_FORMAT_S16,
   // Signed 32-bit float samples
   AUDIO_FORMAT_FLOAT32,
-  // The format used for output by nsAudioStream.
+  // The format used for output by AudioStream.
 #ifdef MOZ_SAMPLE_TYPE_S16
   AUDIO_OUTPUT_FORMAT = AUDIO_FORMAT_S16
 #else
@@ -130,6 +130,25 @@ ConvertAudioSamplesWithScale(const int16_t* aFrom, int16_t* aTo, int aCount, flo
   }
 }
 
+// In place audio sample scaling.
+inline void
+ScaleAudioSamples(float* aBuffer, int aCount, float aScale)
+{
+  for (int32_t i = 0; i < aCount; ++i) {
+    aBuffer[i] *= aScale;
+  }
 }
+
+
+inline void
+ScaleAudioSamples(short* aBuffer, int aCount, float aScale)
+{
+  int32_t volume = int32_t(1 << 16) * aScale;
+  for (int32_t i = 0; i < aCount; ++i) {
+    aBuffer[i] = short((int32_t(aBuffer[i]) * volume) >> 16);
+  }
+}
+
+} // namespace mozilla
 
 #endif /* MOZILLA_AUDIOSAMPLEFORMAT_H_ */

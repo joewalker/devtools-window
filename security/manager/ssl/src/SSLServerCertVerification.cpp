@@ -102,6 +102,7 @@
 #include "nsNSSCleaner.h"
 #include "nsRecentBadCerts.h"
 #include "nsNSSIOLayer.h"
+#include "nsNSSShutDown.h"
 
 #include "mozilla/Assertions.h"
 #include "nsIThreadPool.h"
@@ -293,7 +294,14 @@ CertErrorRunnable::CheckCertOverrides()
   nsCOMPtr<nsIStrictTransportSecurityService> stss
     = do_GetService(NS_STSSERVICE_CONTRACTID, &nsrv);
   if (NS_SUCCEEDED(nsrv)) {
+    nsCOMPtr<nsISSLSocketControl> sslSocketControl = do_QueryInterface(
+      NS_ISUPPORTS_CAST(nsITransportSecurityInfo*, mInfoObject));
+    uint32_t flags = 0;
+    if (sslSocketControl) {
+      sslSocketControl->GetProviderFlags(&flags);
+    }
     nsrv = stss->IsStsHost(mInfoObject->GetHostName(),
+                           flags,
                            &strictTransportSecurityEnabled);
   }
   if (NS_FAILED(nsrv)) {
@@ -1210,6 +1218,50 @@ AuthCertificateHook(void *arg, PRFileDesc *fd, PRBool checkSig, PRBool isServer)
 
   PR_SetError(error, 0);
   return SECFailure;
+}
+
+class InitializeIdentityInfo : public nsRunnable
+                             , public nsNSSShutDownObject
+{
+private:
+  NS_IMETHOD Run()
+  {
+    nsNSSShutDownPreventionLock nssShutdownPrevention;
+    if (isAlreadyShutDown())
+      return NS_OK;
+
+    nsresult rv;
+    nsCOMPtr<nsINSSComponent> inss = do_GetService(PSM_COMPONENT_CONTRACTID, &rv);
+    if (NS_SUCCEEDED(rv))
+      inss->EnsureIdentityInfoLoaded();
+    return NS_OK;
+  }
+
+  virtual void virtualDestroyNSSReference()
+  {
+  }
+
+  ~InitializeIdentityInfo()
+  {
+    nsNSSShutDownPreventionLock nssShutdownPrevention;
+    if (!isAlreadyShutDown())
+      shutdown(calledFromObject);
+  }
+};
+
+void EnsureServerVerificationInitialized()
+{
+  // Should only be called from socket transport thread due to the static
+  // variable and the reference to gCertVerificationThreadPool
+
+  static bool triggeredCertVerifierInit = false;
+  if (triggeredCertVerifierInit)
+    return;
+  triggeredCertVerifierInit = true;
+
+  RefPtr<InitializeIdentityInfo> initJob = new InitializeIdentityInfo();
+  if (gCertVerificationThreadPool)
+    gCertVerificationThreadPool->Dispatch(initJob, NS_DISPATCH_NORMAL);
 }
 
 SSLServerCertVerificationResult::SSLServerCertVerificationResult(

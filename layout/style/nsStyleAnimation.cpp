@@ -2217,10 +2217,6 @@ BuildStyleRule(nsCSSProperty aProperty,
   nsCOMPtr<nsIURI> baseURI = aTargetElement->GetBaseURI();
   nsCSSParser parser(doc->CSSLoader());
 
-  if (aUseSVGMode) {
-    parser.SetSVGMode(true);
-  }
-
   nsCSSProperty propertyToCheck = nsCSSProps::IsShorthand(aProperty) ?
     nsCSSProps::SubpropertyEntryFor(aProperty)[0] : aProperty;
 
@@ -2229,7 +2225,8 @@ BuildStyleRule(nsCSSProperty aProperty,
   if (NS_FAILED(parser.ParseProperty(aProperty, aSpecifiedValue,
                                      doc->GetDocumentURI(), baseURI,
                                      aTargetElement->NodePrincipal(),
-                                     declaration, &changed, false)) ||
+                                     declaration, &changed, false,
+                                     aUseSVGMode)) ||
       // check whether property parsed without CSS parsing errors
       !declaration->HasNonImportantValueFor(propertyToCheck)) {
     NS_WARNING("failure in BuildStyleRule");
@@ -2341,12 +2338,9 @@ nsStyleAnimation::ComputeValue(nsCSSProperty aProperty,
 
 bool
 nsStyleAnimation::UncomputeValue(nsCSSProperty aProperty,
-                                 nsPresContext* aPresContext,
                                  const Value& aComputedValue,
                                  nsCSSValue& aSpecifiedValue)
 {
-  NS_ABORT_IF_FALSE(aPresContext, "null pres context");
-
   switch (aComputedValue.GetUnit()) {
     case eUnit_Normal:
       aSpecifiedValue.SetNormalValue();
@@ -2433,11 +2427,9 @@ nsStyleAnimation::UncomputeValue(nsCSSProperty aProperty,
 
 bool
 nsStyleAnimation::UncomputeValue(nsCSSProperty aProperty,
-                                 nsPresContext* aPresContext,
                                  const Value& aComputedValue,
                                  nsAString& aSpecifiedValue)
 {
-  NS_ABORT_IF_FALSE(aPresContext, "null pres context");
   aSpecifiedValue.Truncate(); // Clear outparam, if it's not already empty
 
   if (aComputedValue.GetUnit() == eUnit_UnparsedString) {
@@ -2445,8 +2437,7 @@ nsStyleAnimation::UncomputeValue(nsCSSProperty aProperty,
     return true;
   }
   nsCSSValue val;
-  if (!nsStyleAnimation::UncomputeValue(aProperty, aPresContext,
-                                        aComputedValue, val)) {
+  if (!nsStyleAnimation::UncomputeValue(aProperty, aComputedValue, val)) {
     return false;
   }
 

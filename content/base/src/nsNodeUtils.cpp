@@ -14,7 +14,6 @@
 #include "nsIDOMUserDataHandler.h"
 #include "nsEventListenerManager.h"
 #include "nsIXPConnect.h"
-#include "nsGenericElement.h"
 #include "pldhash.h"
 #include "nsIDOMAttr.h"
 #include "nsCOMArray.h"
@@ -436,9 +435,7 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
     nodeInfo = newNodeInfo;
   }
 
-  nsGenericElement *elem = aNode->IsElement() ?
-                           static_cast<nsGenericElement*>(aNode) :
-                           nullptr;
+  Element *elem = aNode->IsElement() ? aNode->AsElement() : nullptr;
 
   nsCOMPtr<nsINode> clone;
   if (aClone) {
@@ -530,10 +527,7 @@ nsNodeUtils::CloneAndAdopt(nsINode *aNode, bool aClone, bool aDeep,
     if (aCx && wrapper) {
       nsIXPConnect *xpc = nsContentUtils::XPConnect();
       if (xpc) {
-        nsCOMPtr<nsIXPConnectJSObjectHolder> oldWrapper;
-        rv = xpc->ReparentWrappedNativeIfFound(aCx, wrapper, aNewScope, aNode,
-                                               getter_AddRefs(oldWrapper));
-
+        rv = xpc->ReparentWrappedNativeIfFound(aCx, wrapper, aNewScope, aNode);
         if (NS_FAILED(rv)) {
           aNode->mNodeInfo.swap(nodeInfo);
 

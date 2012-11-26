@@ -20,8 +20,10 @@
 #include "mozilla/Attributes.h"
 #include "TrackUnionStream.h"
 #include "ImageContainer.h"
+#include "AudioChannelCommon.h"
 
 using namespace mozilla::layers;
+using namespace mozilla::dom;
 
 namespace mozilla {
 
@@ -831,6 +833,7 @@ MediaStreamGraphImpl::UpdateCurrentTime()
     if (stream->mFinished && !stream->mNotifiedFinished &&
         stream->mBufferStartTime + stream->GetBufferEnd() <= nextCurrentTime) {
       stream->mNotifiedFinished = true;
+      stream->mLastPlayedVideoFrame.SetNull();
       for (uint32_t j = 0; j < stream->mListeners.Length(); ++j) {
         MediaStreamListener* l = stream->mListeners[j];
         l->NotifyFinished(this);
@@ -1150,7 +1153,7 @@ MediaStreamGraphImpl::CreateOrDestroyAudioStreams(GraphTime aAudioOutputStartTim
           continue;
         }
 
-        // XXX allocating a nsAudioStream could be slow so we're going to have to do
+        // XXX allocating a AudioStream could be slow so we're going to have to do
         // something here ... preallocation, async allocation, multiplexing onto a single
         // stream ...
         AudioSegment* audio = tracks->Get<AudioSegment>();
@@ -1158,9 +1161,9 @@ MediaStreamGraphImpl::CreateOrDestroyAudioStreams(GraphTime aAudioOutputStartTim
           aStream->mAudioOutputStreams.AppendElement();
         audioOutputStream->mAudioPlaybackStartTime = aAudioOutputStartTime;
         audioOutputStream->mBlockedAudioTime = 0;
-        audioOutputStream->mStream = nsAudioStream::AllocateStream();
+        audioOutputStream->mStream = AudioStream::AllocateStream();
         audioOutputStream->mStream->Init(audio->GetChannels(),
-                                         tracks->GetRate());
+                                         tracks->GetRate(), AUDIO_CHANNEL_NORMAL);
         audioOutputStream->mTrackID = tracks->GetID();
       }
     }
@@ -1294,7 +1297,9 @@ MediaStreamGraphImpl::PlayVideo(MediaStream* aStream)
       NS_NewRunnableMethod(output, &VideoFrameContainer::Invalidate);
     NS_DispatchToMainThread(event, NS_DISPATCH_NORMAL);
   }
-  aStream->mLastPlayedVideoFrame = *frame;
+  if (!aStream->mNotifiedFinished) {
+    aStream->mLastPlayedVideoFrame = *frame;
+  }
 }
 
 void

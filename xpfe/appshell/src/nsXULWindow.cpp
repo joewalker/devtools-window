@@ -95,6 +95,7 @@ nsXULWindow::nsXULWindow(uint32_t aChromeFlags)
     mIgnoreXULPosition(false),
     mChromeFlagsFrozen(false),
     mIgnoreXULSizeMode(false),
+    mDestroying(false),
     mContextFlags(0),
     mPersistentAttributesDirty(0),
     mPersistentAttributesMask(0),
@@ -408,6 +409,13 @@ NS_IMETHODIMP nsXULWindow::Destroy()
 {
   if (!mWindow)
      return NS_OK;
+
+  // Ensure we don't reenter this code
+  if (mDestroying)
+    return NS_OK;
+
+  mozilla::AutoRestore<bool> guard(mDestroying);
+  mDestroying = true;
 
   nsCOMPtr<nsIAppShellService> appShell(do_GetService(NS_APPSHELLSERVICE_CONTRACTID));
   NS_ASSERTION(appShell, "Couldn't get appShell... xpcom shutdown?");
@@ -967,9 +975,17 @@ void nsXULWindow::OnChromeLoaded()
       // (if LoadSizeFromXUL set the size, mIntrinsicallySized will be false)
       nsCOMPtr<nsIContentViewer> cv;
       mDocShell->GetContentViewer(getter_AddRefs(cv));
-      nsCOMPtr<nsIMarkupDocumentViewer> markupViewer(do_QueryInterface(cv));
-      if (markupViewer)
-        markupViewer->SizeToContent();
+      nsCOMPtr<nsIMarkupDocumentViewer> markupViewer = do_QueryInterface(cv);
+      if (markupViewer) {
+        nsCOMPtr<nsIDocShellTreeItem> docShellAsItem = do_QueryInterface(mDocShell);
+        nsCOMPtr<nsIDocShellTreeOwner> treeOwner;
+        docShellAsItem->GetTreeOwner(getter_AddRefs(treeOwner));
+        if (treeOwner) {
+          int32_t width, height;
+          markupViewer->GetContentSize(&width, &height);
+          treeOwner->SizeShellTo(docShellAsItem, width, height);
+        }
+      }
     }
 
     bool positionSet = !mIgnoreXULPosition;
@@ -1387,7 +1403,7 @@ void nsXULWindow::SyncAttributesToWidget()
   bool isAccelerated;
   rv = windowElement->HasAttribute(NS_LITERAL_STRING("accelerated"), &isAccelerated);
   if (NS_SUCCEEDED(rv)) {
-    mWindow->SetAcceleratedRendering(isAccelerated);
+    mWindow->SetLayersAcceleration(isAccelerated);
   }
 
   // "windowtype" attribute

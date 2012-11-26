@@ -29,6 +29,7 @@ PRLogModuleInfo *gOmxDecoderLog;
 #endif
 
 using namespace MPAPI;
+using namespace mozilla;
 
 namespace mozilla {
 namespace layers {
@@ -63,7 +64,7 @@ VideoGraphicBuffer::Unlock()
 namespace android {
 
 MediaStreamSource::MediaStreamSource(MediaResource *aResource,
-                                     nsBuiltinDecoder *aDecoder) :
+                                     AbstractMediaDecoder *aDecoder) :
   mDecoder(aDecoder), mResource(aResource)
 {
 }
@@ -88,6 +89,11 @@ ssize_t MediaStreamSource::readAt(off64_t offset, void *data, size_t size)
         NS_FAILED(mResource->Read(ptr, todo, &bytesRead))) {
       return ERROR_IO;
     }
+
+    if (bytesRead == 0) {
+      return size - todo;
+    }
+
     offset += bytesRead;
     todo -= bytesRead;
     ptr += bytesRead;
@@ -111,7 +117,7 @@ status_t MediaStreamSource::getSize(off64_t *size)
 using namespace android;
 
 OmxDecoder::OmxDecoder(MediaResource *aResource,
-                       nsBuiltinDecoder *aDecoder) :
+                       AbstractMediaDecoder *aDecoder) :
   mResource(aResource),
   mDecoder(aDecoder),
   mVideoWidth(0),
@@ -178,7 +184,7 @@ bool OmxDecoder::Init() {
     return false;
   }
 
-  mResource->SetReadMode(nsMediaCacheStream::MODE_METADATA);
+  mResource->SetReadMode(MediaCacheStream::MODE_METADATA);
 
   sp<MediaExtractor> extractor = MediaExtractor::Create(dataSource);
   if (extractor == nullptr) {
@@ -215,7 +221,7 @@ bool OmxDecoder::Init() {
     return false;
   }
 
-  mResource->SetReadMode(nsMediaCacheStream::MODE_PLAYBACK);
+  mResource->SetReadMode(MediaCacheStream::MODE_PLAYBACK);
 
   int64_t totalDurationUs = 0;
 
@@ -563,6 +569,11 @@ bool OmxDecoder::ReadAudio(AudioFrame *aFrame, int64_t aSeekTimeUs)
       return false;
     } else {
       return ReadAudio(aFrame, aSeekTimeUs);
+    }
+  }
+  else if (err == ERROR_END_OF_STREAM) {
+    if (aFrame->mSize == 0) {
+      return false;
     }
   }
 

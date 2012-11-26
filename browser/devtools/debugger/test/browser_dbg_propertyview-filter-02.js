@@ -24,6 +24,8 @@ function test()
     gDebugger = gPane.panelWin;
     gDebuggee = aDebuggee;
 
+    gDebugger.DebuggerController.StackFrames.autoScopeExpand = true;
+    gDebugger.DebuggerView.Variables.delayedSearch = false;
     testSearchbox();
     prepareVariables(testVariablesFiltering);
   });
@@ -68,6 +70,11 @@ function testVariablesFiltering()
       "The local scope 'this.window.document' should be expanded");
     is(locationItem.expanded, true,
       "The local scope 'this.window.document.location' should be expanded");
+
+    locationItem.toggle();
+    locationItem.toggle();
+    documentItem.toggle();
+    documentItem.toggle();
 
     is(innerScope.querySelectorAll(".variable:not([non-match])").length, 1,
       "There should be 1 variable displayed in the inner scope");
@@ -149,6 +156,19 @@ function testVariablesFiltering()
       "The local scope 'this.window.document.location' should not be expanded");
 
     write("htmldocument");
+
+    is(thisItem.expanded, true,
+      "The local scope 'this' should be expanded");
+    is(windowItem.expanded, true,
+      "The local scope 'this.window' should be expanded");
+    is(documentItem.expanded, true,
+      "The local scope 'this.window.document' should be expanded");
+    is(locationItem.expanded, false,
+      "The local scope 'this.window.document.location' should not be expanded");
+
+    documentItem.toggle();
+    documentItem.toggle();
+    locationItem.toggle();
 
     is(innerScope.querySelectorAll(".variable:not([non-match])").length, 1,
       "There should be 1 variable displayed in the inner scope");
@@ -267,6 +287,22 @@ function prepareVariables(aCallback)
 
       is(innerScopeItem.expanded, true,
         "The innerScope expanded getter should return true");
+      is(mathScopeItem.expanded, true,
+        "The mathScope expanded getter should return true");
+      is(testScopeItem.expanded, true,
+        "The testScope expanded getter should return true");
+      is(loadScopeItem.expanded, true,
+        "The loadScope expanded getter should return true");
+      is(globalScopeItem.expanded, true,
+        "The globalScope expanded getter should return true");
+
+      mathScopeItem.collapse();
+      testScopeItem.collapse();
+      loadScopeItem.collapse();
+      globalScopeItem.collapse();
+
+      is(innerScopeItem.expanded, true,
+        "The innerScope expanded getter should return true");
       is(mathScopeItem.expanded, false,
         "The mathScope expanded getter should return false");
       is(testScopeItem.expanded, false,
@@ -276,10 +312,10 @@ function prepareVariables(aCallback)
       is(globalScopeItem.expanded, false,
         "The globalScope expanded getter should return false");
 
-      EventUtils.sendMouseEvent({ type: "mousedown" }, mathScope.querySelector(".arrow"), gDebuggee);
-      EventUtils.sendMouseEvent({ type: "mousedown" }, testScope.querySelector(".arrow"), gDebuggee);
-      EventUtils.sendMouseEvent({ type: "mousedown" }, loadScope.querySelector(".arrow"), gDebuggee);
-      EventUtils.sendMouseEvent({ type: "mousedown" }, globalScope.querySelector(".arrow"), gDebuggee);
+      EventUtils.sendMouseEvent({ type: "mousedown" }, mathScope.querySelector(".arrow"), gDebugger);
+      EventUtils.sendMouseEvent({ type: "mousedown" }, testScope.querySelector(".arrow"), gDebugger);
+      EventUtils.sendMouseEvent({ type: "mousedown" }, loadScope.querySelector(".arrow"), gDebugger);
+      EventUtils.sendMouseEvent({ type: "mousedown" }, globalScope.querySelector(".arrow"), gDebugger);
 
       is(innerScopeItem.expanded, true,
         "The innerScope expanded getter should return true");
@@ -343,7 +379,7 @@ function prepareVariables(aCallback)
                   executeSoon(function() {
                     EventUtils.sendMouseEvent({ type: "mousedown" },
                       locationItem.target.querySelector(".arrow"),
-                      gDebuggee.window);
+                      gDebugger);
 
                     is(locationItem.expanded, true,
                       "The local scope 'this.window.document.location' should be expanded now");
@@ -354,7 +390,7 @@ function prepareVariables(aCallback)
               executeSoon(function() {
                 EventUtils.sendMouseEvent({ type: "mousedown" },
                   documentItem.target.querySelector(".arrow"),
-                  gDebuggee.window);
+                  gDebugger);
 
                 is(documentItem.expanded, true,
                   "The local scope 'this.window.document' should be expanded now");
@@ -365,7 +401,7 @@ function prepareVariables(aCallback)
           executeSoon(function() {
             EventUtils.sendMouseEvent({ type: "mousedown" },
               windowItem.target.querySelector(".arrow"),
-              gDebuggee.window);
+              gDebugger);
 
             is(windowItem.expanded, true,
               "The local scope 'this.window' should be expanded now");
@@ -376,7 +412,7 @@ function prepareVariables(aCallback)
       executeSoon(function() {
         EventUtils.sendMouseEvent({ type: "mousedown" },
           thisItem.target.querySelector(".arrow"),
-          gDebuggee.window);
+          gDebugger);
 
         is(thisItem.expanded, true,
           "The local scope 'this' should be expanded now");

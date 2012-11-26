@@ -7,7 +7,7 @@
 %undef WINSTRIPE_AERO
 
 @media (-moz-windows-default-theme) {
-  #downloadsPanel[hasdownloads] > #downloadsHistory {
+  #downloadsPanel[hasdownloads] #downloadsHistory {
     background-color: #f1f5fb;
   }
 
@@ -41,4 +41,8 @@
     text-shadow: 0 0 1px rgba(0,0,0,.7),
                  0 1px 1.5px rgba(0,0,0,.5);
   }
+}
+
+#downloads-indicator-counter {
+  margin-bottom: -1px;
 }

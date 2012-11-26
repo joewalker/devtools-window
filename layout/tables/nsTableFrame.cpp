@@ -1165,7 +1165,7 @@ nsTableFrame::DisplayGenericTablePart(nsDisplayListBuilder* aBuilder,
     // handling events.
     // XXX how to handle collapsed borders?
     if (aBuilder->IsForEventDelivery()) {
-      nsresult rv = nsDisplayBackground::AppendBackgroundItemsToTop(aBuilder, aFrame,
+      nsresult rv = nsDisplayBackgroundImage::AppendBackgroundItemsToTop(aBuilder, aFrame,
                                                                     lists->BorderBackground());
       NS_ENSURE_SUCCESS(rv, rv);
     }
@@ -1243,7 +1243,7 @@ nsTableFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
       // in its own display item, so do that to take advantage of
       // opacity and visibility optimizations
       if (deflate == nsMargin(0, 0, 0, 0)) {
-        nsDisplayBackground* bg;
+        nsDisplayBackgroundImage* bg;
         nsresult rv = DisplayBackgroundUnconditional(aBuilder, aLists, false, &bg);
         NS_ENSURE_SUCCESS(rv, rv);
       }
@@ -1543,8 +1543,9 @@ nsTableFrame::AncestorsHaveStyleHeight(const nsHTMLReflowState& aParentReflowSta
         (nsGkAtoms::tableRowFrame      == frameType) ||
         (nsGkAtoms::tableRowGroupFrame == frameType)) {
       const nsStyleCoord &height = rs->mStylePosition->mHeight;
-      // calc() treated like 'auto' on internal table elements
-      if (height.GetUnit() != eStyleUnit_Auto && !height.IsCalcUnit()) {
+      // calc() with percentages treated like 'auto' on internal table elements
+      if (height.GetUnit() != eStyleUnit_Auto &&
+          (!height.IsCalcUnit() || !height.HasPercent())) {
         return true;
       }
     }

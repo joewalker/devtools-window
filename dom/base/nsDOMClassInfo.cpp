@@ -130,7 +130,6 @@
 #include "nsIPluginHost.h"
 
 #include "nsIDOMHTMLOptionElement.h"
-#include "nsGenericElement.h"
 
 // Event related includes
 #include "nsEventListenerManager.h"
@@ -285,6 +284,7 @@
 #include "nsIDOMCSSSupportsRule.h"
 #include "nsIDOMMozCSSKeyframeRule.h"
 #include "nsIDOMMozCSSKeyframesRule.h"
+#include "nsIDOMCSSPageRule.h"
 #include "nsIDOMCSSPrimitiveValue.h"
 #include "nsIDOMCSSStyleRule.h"
 #include "nsIDOMCSSStyleSheet.h"
@@ -757,7 +757,8 @@ static nsDOMClassInfoData sClassInfoData[] = {
                            WINDOW_SCRIPTABLE_FLAGS)
 
   NS_DEFINE_CLASSINFO_DATA(Location, nsLocationSH,
-                           (DOM_DEFAULT_SCRIPTABLE_FLAGS &
+                           ((DOM_DEFAULT_SCRIPTABLE_FLAGS |
+                             nsIXPCScriptable::WANT_ADDPROPERTY) &
                             ~nsIXPCScriptable::ALLOW_PROP_MODS_TO_PROTOTYPE))
 
   NS_DEFINE_CLASSINFO_DATA(Navigator, nsNavigatorSH,
@@ -1614,6 +1615,9 @@ static nsDOMClassInfoData sClassInfoData[] = {
   NS_DEFINE_CLASSINFO_DATA(MozCSSKeyframeRule, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
   NS_DEFINE_CLASSINFO_DATA(MozCSSKeyframesRule, nsDOMGenericSH,
+                           DOM_DEFAULT_SCRIPTABLE_FLAGS)
+
+  NS_DEFINE_CLASSINFO_DATA(CSSPageRule, nsDOMGenericSH,
                            DOM_DEFAULT_SCRIPTABLE_FLAGS)
 
   NS_DEFINE_CLASSINFO_DATA(MediaQueryList, nsDOMGenericSH,
@@ -4325,6 +4329,10 @@ nsDOMClassInfo::Init()
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMMozCSSKeyframesRule)
   DOM_CLASSINFO_MAP_END
 
+  DOM_CLASSINFO_MAP_BEGIN(CSSPageRule, nsIDOMCSSPageRule)
+    DOM_CLASSINFO_MAP_ENTRY(nsIDOMCSSPageRule)
+  DOM_CLASSINFO_MAP_END
+
   DOM_CLASSINFO_MAP_BEGIN(MediaQueryList, nsIDOMMediaQueryList)
     DOM_CLASSINFO_MAP_ENTRY(nsIDOMMediaQueryList)
   DOM_CLASSINFO_MAP_END
@@ -6629,8 +6637,13 @@ ResolvePrototype(nsIXPConnect *aXPConnect, nsGlobalWindow *aWin, JSContext *cx,
       }
     } else {
       JSAutoCompartment ac(cx, winobj);
-      dot_prototype = ::JS_NewObject(cx, &sDOMConstructorProtoClass, proto,
-                                     winobj);
+      if (!proto) {
+        proto = JS_GetObjectPrototype(cx, winobj);
+      }
+      dot_prototype = ::JS_NewObjectWithUniqueType(cx,
+                                                   &sDOMConstructorProtoClass,
+                                                   proto,
+                                                   winobj);
       NS_ENSURE_TRUE(dot_prototype, NS_ERROR_OUT_OF_MEMORY);
     }
   }
@@ -7603,6 +7616,20 @@ nsLocationSH::PreCreate(nsISupports *nativeObj, JSContext *cx,
   return *parentObj ? NS_OK : NS_ERROR_FAILURE;
 }
 
+NS_IMETHODIMP
+nsLocationSH::AddProperty(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
+                          JSObject *obj, jsid id, jsval *vp, bool *_retval)
+{
+  // Shadowing protection. This will go away when nsLocation moves to the new
+  // bindings.
+  if (wrapper->HasNativeMember(id)) {
+    JS_ReportError(cx, "Permission denied to shadow native property");
+    return NS_ERROR_FAILURE;
+  }
+
+  return NS_OK;
+}
+
 // DOM Navigator helper
 
 NS_IMETHODIMP
@@ -8105,38 +8132,6 @@ IDBEventTargetSH::PreCreate(nsISupports *aNativeObj, JSContext *aCx,
 
 // Element helper
 
-static bool
-GetBindingURL(Element *aElement, nsIDocument *aDocument,
-              mozilla::css::URLValue **aResult)
-{
-  // If we have a frame the frame has already loaded the binding.  And
-  // otherwise, don't do anything else here unless we're dealing with
-  // XUL or an HTML element that may have a plugin-related overlay
-  // (i.e. object, embed, or applet).
-  bool isXULorPluginElement = (aElement->IsXUL() ||
-                               aElement->IsHTML(nsGkAtoms::object) ||
-                               aElement->IsHTML(nsGkAtoms::embed) ||
-                               aElement->IsHTML(nsGkAtoms::applet));
-  nsIPresShell *shell = aDocument->GetShell();
-  if (!shell || aElement->GetPrimaryFrame() || !isXULorPluginElement) {
-    *aResult = nullptr;
-
-    return true;
-  }
-
-  // Get the computed -moz-binding directly from the style context
-  nsPresContext *pctx = shell->GetPresContext();
-  NS_ENSURE_TRUE(pctx, false);
-
-  nsRefPtr<nsStyleContext> sc = pctx->StyleSet()->ResolveStyleFor(aElement,
-                                                                  nullptr);
-  NS_ENSURE_TRUE(sc, false);
-
-  *aResult = sc->GetStyleDisplay()->mBinding;
-
-  return true;
-}
-
 NS_IMETHODIMP
 nsElementSH::PreCreate(nsISupports *nativeObj, JSContext *cx,
                        JSObject *globalObj, JSObject **parentObj)
@@ -8172,7 +8167,7 @@ nsElementSH::PreCreate(nsISupports *nativeObj, JSContext *cx,
   }
 
   mozilla::css::URLValue *bindingURL;
-  bool ok = GetBindingURL(element, doc, &bindingURL);
+  bool ok = element->GetBindingURL(doc, &bindingURL);
   NS_ENSURE_TRUE(ok, NS_ERROR_FAILURE);
 
   // Only allow slim wrappers if there's no binding.
@@ -8237,7 +8232,7 @@ nsElementSH::PostCreate(nsIXPConnectWrappedNative *wrapper, JSContext *cx,
   // Make sure the style context goes away _before_ we load the binding
   // since that can destroy the relevant presshell.
   mozilla::css::URLValue *bindingURL;
-  bool ok = GetBindingURL(element, doc, &bindingURL);
+  bool ok = element->GetBindingURL(doc, &bindingURL);
   NS_ENSURE_TRUE(ok, NS_ERROR_FAILURE);
 
   if (!bindingURL) {
@@ -8547,7 +8542,7 @@ nsNamedNodeMapSH::GetNamedItem(nsISupports *aNative, const nsAString& aName,
   nsDOMAttributeMap* map = nsDOMAttributeMap::FromSupports(aNative);
 
   nsINode *attr;
-  *aCache = attr = map->GetNamedItem(aName, aResult);
+  *aCache = attr = map->GetNamedItem(aName);
   return attr;
 }
 

@@ -95,7 +95,10 @@ class GlobalObject : public JSObject
     static const unsigned GENERATOR_PROTO         = ELEMENT_ITERATOR_PROTO + 1;
     static const unsigned MAP_ITERATOR_PROTO      = GENERATOR_PROTO + 1;
     static const unsigned SET_ITERATOR_PROTO      = MAP_ITERATOR_PROTO + 1;
-    static const unsigned REGEXP_STATICS          = SET_ITERATOR_PROTO + 1;
+    static const unsigned COLLATOR_PROTO          = SET_ITERATOR_PROTO + 1;
+    static const unsigned NUMBER_FORMAT_PROTO     = COLLATOR_PROTO + 1;
+    static const unsigned DATE_TIME_FORMAT_PROTO  = NUMBER_FORMAT_PROTO + 1;
+    static const unsigned REGEXP_STATICS          = DATE_TIME_FORMAT_PROTO + 1;
     static const unsigned FUNCTION_NS             = REGEXP_STATICS + 1;
     static const unsigned RUNTIME_CODEGEN_ENABLED = FUNCTION_NS + 1;
     static const unsigned DEBUGGERS               = RUNTIME_CODEGEN_ENABLED + 1;
@@ -310,11 +313,27 @@ class GlobalObject : public JSObject
         return &self->getPrototype(key).toObject();
     }
 
+    JSObject *getOrCreateIntlObject(JSContext *cx) {
+        return getOrCreateObject(cx, JSProto_Intl, initIntlObject);
+    }
+
+    JSObject *getOrCreateCollatorPrototype(JSContext *cx) {
+        return getOrCreateObject(cx, COLLATOR_PROTO, initCollatorProto);
+    }
+
+    JSObject *getOrCreateNumberFormatPrototype(JSContext *cx) {
+        return getOrCreateObject(cx, NUMBER_FORMAT_PROTO, initNumberFormatProto);
+    }
+
+    JSObject *getOrCreateDateTimeFormatPrototype(JSContext *cx) {
+        return getOrCreateObject(cx, DATE_TIME_FORMAT_PROTO, initDateTimeFormatProto);
+    }
+
     JSObject *getIteratorPrototype() {
         return &getPrototype(JSProto_Iterator).toObject();
     }
 
-    JSObject *getIntrinsicsHolder() {
+    JSObject *intrinsicsHolder() {
         JS_ASSERT(!getSlotRef(INTRINSICS).isUndefined());
         return &getSlotRef(INTRINSICS).toObject();
     }
@@ -373,11 +392,10 @@ class GlobalObject : public JSObject
         RootedId id(cx, NameToId(name));
         if (HasDataProperty(cx, holder, id, value.address()))
             return true;
-        bool ok = cx->runtime->cloneSelfHostedValueById(cx, id, holder, value);
-        if (!ok)
+        Rooted<PropertyName*> rootedName(cx, name);
+        if (!cx->runtime->cloneSelfHostedValue(cx, rootedName, value))
             return false;
-
-        ok = JS_DefinePropertyById(cx, holder, id, value, NULL, NULL, 0);
+        mozilla::DebugOnly<bool> ok = JS_DefinePropertyById(cx, holder, id, value, NULL, NULL, 0);
         JS_ASSERT(ok);
         return true;
     }
@@ -422,6 +440,12 @@ class GlobalObject : public JSObject
     // Implemented in builtin/MapObject.cpp.
     static bool initMapIteratorProto(JSContext *cx, Handle<GlobalObject*> global);
     static bool initSetIteratorProto(JSContext *cx, Handle<GlobalObject*> global);
+
+    // Implemented in Intl.cpp.
+    static bool initIntlObject(JSContext *cx, Handle<GlobalObject*> global);
+    static bool initCollatorProto(JSContext *cx, Handle<GlobalObject*> global);
+    static bool initNumberFormatProto(JSContext *cx, Handle<GlobalObject*> global);
+    static bool initDateTimeFormatProto(JSContext *cx, Handle<GlobalObject*> global);
 
     static bool initStandardClasses(JSContext *cx, Handle<GlobalObject*> global);
 

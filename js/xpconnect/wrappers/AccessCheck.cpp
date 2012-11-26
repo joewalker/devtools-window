@@ -80,32 +80,6 @@ AccessCheck::wrapperSubsumes(JSObject *wrapper)
 }
 
 bool
-AccessCheck::isLocationObjectSameOrigin(JSContext *cx, JSObject *wrapper)
-{
-    // The caller must ensure that the given wrapper wraps a Location object.
-    MOZ_ASSERT(WrapperFactory::IsLocationObject(js::UnwrapObject(wrapper)));
-
-    // Location objects are parented to the outer window for which they
-    // were created. This gives us an easy way to determine whether our
-    // object is same origin with the current inner window:
-
-    // Grab the outer window...
-    JSObject *obj = js::GetObjectParent(js::UnwrapObject(wrapper));
-    if (!js::GetObjectClass(obj)->ext.innerObject) {
-        // ...which might be wrapped in a security wrapper.
-        obj = js::UnwrapObject(obj);
-        MOZ_ASSERT(js::GetObjectClass(obj)->ext.innerObject);
-    }
-
-    // Now innerize it to find the *current* inner window for our outer.
-    obj = JS_ObjectToInnerObject(cx, obj);
-
-    // Which lets us compare the current compartment against the old one.
-    return obj && subsumes(js::GetObjectCompartment(wrapper),
-                           js::GetObjectCompartment(obj));
-}
-
-bool
 AccessCheck::isChrome(JSCompartment *compartment)
 {
     nsIScriptSecurityManager *ssm = XPCWrapper::GetSecurityManager();
@@ -231,11 +205,6 @@ AccessCheck::isCrossOriginAccessPermitted(JSContext *cx, JSObject *wrapper, jsid
 
     JSObject *obj = Wrapper::wrappedObject(wrapper);
 
-    // PUNCTURE Is always denied for cross-origin access.
-    if (act == Wrapper::PUNCTURE) {
-        return false;
-    }
-
     const char *name;
     js::Class *clasp = js::GetObjectClass(obj);
     NS_ASSERTION(Jsvalify(clasp) != &XrayUtils::HolderClass, "shouldn't have a holder here");
@@ -304,9 +273,7 @@ AccessCheck::isScriptAccessOnly(JSContext *cx, JSObject *wrapper)
             return true; // script-only
     }
 
-    // Allow non-script access to same-origin location objects and any other
-    // objects.
-    return WrapperFactory::IsLocationObject(obj) && !isLocationObjectSameOrigin(cx, wrapper);
+    return false;
 }
 
 void
@@ -345,9 +312,6 @@ ExposedPropertiesOnly::check(JSContext *cx, JSObject *wrapper, jsid id, Wrapper:
     if (act == Wrapper::CALL)
         return true;
 
-    if (act == Wrapper::PUNCTURE)
-        return false;
-
     jsid exposedPropsId = GetRTIdByIndex(cx, XPCJSRuntime::IDX_EXPOSEDPROPS);
 
     // We need to enter the wrappee's compartment to look at __exposedProps__,
@@ -362,7 +326,7 @@ ExposedPropertiesOnly::check(JSContext *cx, JSObject *wrapper, jsid id, Wrapper:
 
     // Always permit access to "length" and indexed properties of arrays.
     if ((JS_IsArrayObject(cx, wrappedObject) ||
-         JS_IsTypedArrayObject(wrappedObject, cx)) &&
+         JS_IsTypedArrayObject(wrappedObject)) &&
         ((JSID_IS_INT(id) && JSID_TO_INT(id) >= 0) ||
          (JSID_IS_STRING(id) && JS_FlatStringEqualsAscii(JSID_TO_FLAT_STRING(id), "length")))) {
         return true; // Allow

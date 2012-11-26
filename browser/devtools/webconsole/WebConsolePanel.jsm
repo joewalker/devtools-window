@@ -38,7 +38,7 @@ this.WebConsoleDefinition = {
   url: "chrome://browser/content/devtools/webconsole.xul",
   label: l10n.getStr("ToolboxWebconsole.label"),
   isTargetSupported: function(target) {
-    return !target.isRemote && !target.isChrome;
+    return true;
   },
   build: function(iframeWindow, toolbox) {
     return new WebConsolePanel(iframeWindow, toolbox);
@@ -53,10 +53,10 @@ function WebConsolePanel(iframeWindow, toolbox) {
   this._toolbox = toolbox;
   new EventEmitter(this);
 
-  let tab = this._toolbox.target.tab;
+  let tab = this._toolbox._getHostTab();
   let parentDoc = iframeWindow.document.defaultView.parent.document;
   let iframe = parentDoc.getElementById("toolbox-panel-iframe-webconsole");
-  this.hud = HUDService.activateHUDForContext(tab, iframe);
+  this.hud = HUDService.activateHUDForContext(tab, iframe, toolbox.target);
 
   let hudId = this.hud.hudId;
   let onOpen = function _onWebConsoleOpen(aSubject)

@@ -108,6 +108,7 @@ const DownloadsPanel = {
                                                function DP_I_callback() {
       DownloadsViewController.initialize();
       DownloadsCommon.data.addView(DownloadsView);
+      DownloadsPanel._attachEventListeners();
       aCallback();
     });
   },
@@ -130,6 +131,7 @@ const DownloadsPanel = {
 
     DownloadsViewController.terminate();
     DownloadsCommon.data.removeView(DownloadsView);
+    this._unattachEventListeners();
 
     this._state = this.kStateUninitialized;
   },
@@ -275,6 +277,67 @@ const DownloadsPanel = {
   //// Internal functions
 
   /**
+   * Attach event listeners to a panel element. These listeners should be
+   * removed in _unattachEventListeners. This is called automatically after the
+   * panel has successfully loaded.
+   */
+  _attachEventListeners: function DP__attachEventListeners()
+  {
+    this.panel.addEventListener("keydown", this._onKeyDown.bind(this), false);
+  },
+
+  /**
+   * Unattach event listeners that were added in _attachEventListeners. This
+   * is called automatically on panel termination.
+   */
+  _unattachEventListeners: function DP__unattachEventListeners()
+  {
+    this.panel.removeEventListener("keydown", this._onKeyDown.bind(this),
+                                   false);
+  },
+
+  /**
+   * Keydown listener that listens for the accel-V "paste" event. Initiates a
+   * file download if the pasted item can be resolved to a URI.
+   */
+  _onKeyDown: function DP__onKeyDown(aEvent)
+  {
+    let pasting = aEvent.keyCode == Ci.nsIDOMKeyEvent.DOM_VK_V &&
+#ifdef XP_MACOSX
+                  aEvent.metaKey;
+#else
+                  aEvent.ctrlKey;
+#endif
+
+    if (!pasting) {
+      return;
+    }
+
+    let trans = Cc["@mozilla.org/widget/transferable;1"]
+                  .createInstance(Ci.nsITransferable);
+    trans.init(null);
+    let flavors = ["text/x-moz-url", "text/unicode"];
+    flavors.forEach(trans.addDataFlavor);
+    Services.clipboard.getData(trans, Services.clipboard.kGlobalClipboard);
+    // Getting the data or creating the nsIURI might fail
+    try {
+      let data = {};
+      trans.getAnyTransferData({}, data, {});
+      let [url, name] = data.value
+                            .QueryInterface(Ci.nsISupportsString)
+                            .data
+                            .split("\n");
+      if (!url) {
+        return;
+      }
+
+      let uri = Services.io.newURI(url, null, null);
+      saveURL(uri.spec, name || uri.spec, null, true, true,
+              undefined, document);
+    } catch (ex) {}
+  },
+
+  /**
    * Move focus to the main element in the downloads panel, unless another
    * element in the panel is already focused.
    */
@@ -290,7 +353,11 @@ const DownloadsPanel = {
       element = element.parentNode;
     }
     if (!element) {
-      DownloadsView.richListBox.focus();
+      if (DownloadsView.richListBox.itemCount > 0) {
+        DownloadsView.richListBox.focus();
+      } else {
+        DownloadsView.downloadsHistory.focus();
+      }
     }
   },
 
@@ -473,11 +540,10 @@ const DownloadsView = {
       DownloadsPanel.panel.removeAttribute("hasdownloads");
     }
 
-    let s = DownloadsCommon.strings;
-    this.downloadsHistory.label = (hiddenCount > 0)
-                                  ? s.showMoreDownloads(hiddenCount)
-                                  : s.showAllDownloads;
-    this.downloadsHistory.accessKey = s.showDownloadsAccessKey;
+    // If we've got some hidden downloads, we should show the summary just
+    // below the list.
+    this.downloadsHistory.collapsed = hiddenCount > 0;
+    DownloadsSummary.visible = this.downloadsHistory.collapsed;
   },
 
   /**
@@ -716,6 +782,12 @@ const DownloadsView = {
       case KeyEvent.DOM_VK_ENTER:
       case KeyEvent.DOM_VK_RETURN:
         goDoCommand("downloadsCmd_doDefault");
+        break;
+      case KeyEvent.DOM_VK_DOWN:
+        // Are we focused on the last element in the list?
+        if (this.richListBox.currentIndex == (this.richListBox.itemCount - 1)) {
+          DownloadsFooter.focus();
+        }
         break;
     }
   },
@@ -1340,5 +1412,241 @@ DownloadsViewItemController.prototype = {
     let protocolSvc = Cc["@mozilla.org/uriloader/external-protocol-service;1"]
                       .getService(Ci.nsIExternalProtocolService);
     protocolSvc.loadUrl(makeFileURI(aFile));
+  }
+};
+
+
+////////////////////////////////////////////////////////////////////////////////
+//// DownloadsSummary
+
+/**
+ * Manages the summary at the bottom of the downloads panel list if the number
+ * of items in the list exceeds the panels limit.
+ */
+const DownloadsSummary = {
+
+  /**
+   * Sets the collapsed state of the summary, and automatically subscribes or
+   * unsubscribes from the DownloadsCommon DownloadsSummaryData singleton.
+   *
+   * @param aVisible
+   *        True if the summary should be shown.
+   */
+  set visible(aVisible)
+  {
+    if (aVisible == this._visible || !this._summaryNode) {
+      return this._visible;
+    }
+    if (aVisible) {
+      DownloadsCommon.getSummary(DownloadsView.kItemCountLimit)
+                     .addView(this);
+    } else {
+      DownloadsCommon.getSummary(DownloadsView.kItemCountLimit)
+                     .removeView(this);
+    }
+    this._summaryNode.collapsed = !aVisible;
+    return this._visible = aVisible;
+  },
+
+  /**
+   * Returns the collapsed state of the downloads summary.
+   */
+  get visible()
+  {
+    return this._visible;
+  },
+
+  _visible: false,
+
+  /**
+   * Sets whether or not we show the progress bar.
+   *
+   * @param aShowingProgress
+   *        True if we should show the progress bar.
+   */
+  set showingProgress(aShowingProgress)
+  {
+    if (aShowingProgress) {
+      this._summaryNode.setAttribute("inprogress", "true");
+    } else {
+      this._summaryNode.removeAttribute("inprogress");
+    }
+  },
+
+  /**
+   * Sets the amount of progress that is visible in the progress bar.
+   *
+   * @param aValue
+   *        A value between 0 and 100 to represent the progress of the
+   *        summarized downloads.
+   */
+  set percentComplete(aValue)
+  {
+    if (this._progressNode) {
+      this._progressNode.setAttribute("value", aValue);
+    }
+    return aValue;
+  },
+
+  /**
+   * Sets the description for the download summary.
+   *
+   * @param aValue
+   *        A string representing the description of the summarized
+   *        downloads.
+   */
+  set description(aValue)
+  {
+    if (this._descriptionNode) {
+      this._descriptionNode.setAttribute("value", aValue);
+      this._descriptionNode.setAttribute("tooltiptext", aValue);
+    }
+    return aValue;
+  },
+
+  /**
+   * Sets the details for the download summary, such as the time remaining,
+   * the amount of bytes transferred, etc.
+   *
+   * @param aValue
+   *        A string representing the details of the summarized
+   *        downloads.
+   */
+  set details(aValue)
+  {
+    if (this._detailsNode) {
+      this._detailsNode.setAttribute("value", aValue);
+      this._detailsNode.setAttribute("tooltiptext", aValue);
+    }
+    return aValue;
+  },
+
+  /**
+   * Focuses the root element of the summary.
+   */
+  focus: function()
+  {
+    if (this._summaryNode) {
+      this._summaryNode.focus();
+    }
+  },
+
+  /**
+   * Respond to keypress events on the Downloads Summary node.
+   *
+   * @param aEvent
+   *        The keypress event being handled.
+   */
+  onKeyPress: function DS_onKeyPress(aEvent)
+  {
+    if (aEvent.charCode == " ".charCodeAt(0) ||
+        aEvent.keyCode == KeyEvent.DOM_VK_ENTER ||
+        aEvent.keyCode == KeyEvent.DOM_VK_RETURN) {
+      DownloadsPanel.showDownloadsHistory();
+    }
+  },
+
+  /**
+   * Respond to click events on the Downloads Summary node.
+   *
+   * @param aEvent
+   *        The click event being handled.
+   */
+  onClick: function DS_onClick(aEvent)
+  {
+    DownloadsPanel.showDownloadsHistory();
+  },
+
+  /**
+   * Element corresponding to the root of the downloads summary.
+   */
+  get _summaryNode()
+  {
+    let node = document.getElementById("downloadsSummary");
+    if (!node) {
+      return null;
+    }
+    delete this._summaryNode;
+    return this._summaryNode = node;
+  },
+
+  /**
+   * Element corresponding to the progress bar in the downloads summary.
+   */
+  get _progressNode()
+  {
+    let node = document.getElementById("downloadsSummaryProgress");
+    if (!node) {
+      return null;
+    }
+    delete this._progressNode;
+    return this._progressNode = node;
+  },
+
+  /**
+   * Element corresponding to the main description of the downloads
+   * summary.
+   */
+  get _descriptionNode()
+  {
+    let node = document.getElementById("downloadsSummaryDescription");
+    if (!node) {
+      return null;
+    }
+    delete this._descriptionNode;
+    return this._descriptionNode = node;
+  },
+
+  /**
+   * Element corresponding to the secondary description of the downloads
+   * summary.
+   */
+  get _detailsNode()
+  {
+    let node = document.getElementById("downloadsSummaryDetails");
+    if (!node) {
+      return null;
+    }
+    delete this._detailsNode;
+    return this._detailsNode = node;
+  }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+//// DownloadsFooter
+
+/**
+ * Manages events sent to to the footer vbox, which contains both the
+ * DownloadsSummary as well as the "Show All Downloads" button.
+ */
+const DownloadsFooter = {
+
+  /**
+   * Focuses the appropriate element within the footer. If the summary
+   * is visible, focus it. If not, focus the "Show All Downloads"
+   * button.
+   */
+  focus: function DF_focus()
+  {
+    if (DownloadsSummary.visible) {
+      DownloadsSummary.focus();
+    } else {
+      DownloadsView.downloadsHistory.focus();
+    }
+  },
+
+  /**
+   * Handles keypress events on the footer element.
+   */
+  onKeyPress: function DF_onKeyPress(aEvent)
+  {
+    // If the up key is pressed, and the downloads list has at least 1 element
+    // in it, focus the last element in the list.
+    if (aEvent.keyCode == KeyEvent.DOM_VK_UP &&
+        DownloadsView.richListBox.itemCount > 0) {
+      DownloadsView.richListBox.focus();
+      DownloadsView.richListBox.selectedIndex =
+        (DownloadsView.richListBox.itemCount - 1);
+    }
   }
 };

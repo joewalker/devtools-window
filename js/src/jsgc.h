@@ -545,10 +545,6 @@ GCDebugSlice(JSRuntime *rt, bool limit, int64_t objCount);
 extern void
 PrepareForDebugGC(JSRuntime *rt);
 
-} /* namespace js */
-
-namespace js {
-
 void
 InitTracer(JSTracer *trc, JSRuntime *rt, JSTraceCallback callback);
 
@@ -1168,34 +1164,25 @@ MaybeVerifyBarriers(JSContext *cx, bool always = false)
 
 #endif
 
+/*
+ * Instances of this class set the |JSRuntime::suppressGC| flag for the duration
+ * that they are live. Use of this class is highly discouraged. Please carefully
+ * read the comment in jscntxt.h above |suppressGC| and take all appropriate
+ * precautions before instantiating this class.
+ */
+class AutoSuppressGC
+{
+    int32_t &suppressGC_;
+
+  public:
+    AutoSuppressGC(JSContext *cx);
+    ~AutoSuppressGC();
+};
+
 } /* namespace gc */
 
 void
 PurgeJITCaches(JSCompartment *c);
-
-/*
- * This auto class should be used around any code that does brain
- * transplants. Brain transplants can cause problems because they operate on all
- * compartments, whether live or dead. A brain transplant can cause a formerly
- * dead object to be "reanimated" by causing a read or write barrier to be
- * invoked on it during the transplant.
- *
- * To work around this issue, we observe when mark bits are set on objects in
- * dead compartments. If this happens during a brain transplant, we do a full,
- * non-incremental GC at the end of the brain transplant. This will clean up any
- * objects that were improperly marked.
- */
-struct AutoTransplantGC
-{
-    AutoTransplantGC(JSContext *cx);
-    ~AutoTransplantGC();
-
-  private:
-    JSRuntime *runtime;
-    unsigned markCount;
-    bool inIncremental;
-    bool inTransplant;
-};
 
 } /* namespace js */
 

@@ -9,6 +9,9 @@ let DevTools = temp.DevTools;
 Cu.import("resource:///modules/devtools/Toolbox.jsm", temp);
 let Toolbox = temp.Toolbox;
 
+Cu.import("resource:///modules/devtools/Target.jsm", temp);
+let TargetFactory = temp.TargetFactory;
+
 let toolbox;
 
 function test()
@@ -26,10 +29,10 @@ function test()
 
 function openToolbox(callback)
 {
-  let tab = gBrowser.selectedTab;
-  gDevTools.toggleToolboxForTab(tab);
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+  gDevTools.toggleToolboxForTarget(target);
 
-  toolbox = gDevTools.getToolboxForTarget(tab);
+  toolbox = gDevTools.getToolboxForTarget(target);
   toolbox.once("ready", callback);
 }
 

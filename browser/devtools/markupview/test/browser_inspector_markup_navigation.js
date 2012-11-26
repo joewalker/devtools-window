@@ -73,7 +73,8 @@ function test() {
   content.location = "http://mochi.test:8888/browser/browser/devtools/markupview/test/browser_inspector_markup_navigation.html";
 
   function setupTest() {
-    let toolbox = gDevTools.openToolboxForTab(gBrowser.selectedTab, "inspector");
+    var target = TargetFactory.forTab(gBrowser.selectedTab);
+    let toolbox = gDevTools.openToolboxForTab(target, "inspector");
     toolbox.once("inspector-selected", function BIMNT_selected(id, aInspector) {
       inspector = aInspector;
       startNavigation();

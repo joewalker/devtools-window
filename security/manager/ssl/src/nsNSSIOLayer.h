@@ -13,13 +13,15 @@
 #include "nsNSSCertificate.h"
 #include "nsDataHashtable.h"
 #include "nsTHashtable.h"
+#include "nsISocketTransport.h"
+#include "mozilla/TimeStamp.h"
 
 class nsNSSSocketInfo : public mozilla::psm::TransportSecurityInfo,
                         public nsISSLSocketControl,
                         public nsIClientAuthUserDecision
 {
 public:
-  nsNSSSocketInfo();
+  nsNSSSocketInfo(uint32_t providerFlags);
   
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSISSLSOCKETCONTROL
@@ -50,7 +52,7 @@ public:
                 const nsNSSShutDownPreventionLock & proofOfLock);
   
   void SetNegotiatedNPN(const char *value, uint32_t length);
-  void SetHandshakeCompleted() { mHandshakeCompleted = true; }
+  void SetHandshakeCompleted();
 
   bool GetJoined() { return mJoined; }
   void SetSentClientCert() { mSentClientCert = true; }
@@ -72,7 +74,7 @@ public:
   {
     return mCertVerificationState == waiting_for_cert_verification;
   }
-  
+
   bool IsSSL3Enabled() const { return mSSL3Enabled; }
   void SetSSL3Enabled(bool enabled) { mSSL3Enabled = enabled; }
   bool IsTLSEnabled() const { return mTLSEnabled; }
@@ -100,6 +102,9 @@ private:
   bool      mHandshakeCompleted;
   bool      mJoined;
   bool      mSentClientCert;
+
+  uint32_t mProviderFlags;
+  mozilla::TimeStamp mSocketCreationTimestamp;
 };
 
 class nsSSLIOLayerHelpers
@@ -146,7 +151,7 @@ nsresult nsSSLIOLayerNewSocket(int32_t family,
                                PRFileDesc **fd,
                                nsISupports **securityInfo,
                                bool forSTARTTLS,
-                               bool anonymousLoad);
+                               uint32_t flags);
 
 nsresult nsSSLIOLayerAddToSocket(int32_t family,
                                  const char *host,
@@ -156,7 +161,7 @@ nsresult nsSSLIOLayerAddToSocket(int32_t family,
                                  PRFileDesc *fd,
                                  nsISupports **securityInfo,
                                  bool forSTARTTLS,
-                                 bool anonymousLoad);
+                                 uint32_t flags);
 
 nsresult nsSSLIOLayerFreeTLSIntolerantSites();
 nsresult displayUnknownCertErrorAlert(nsNSSSocketInfo *infoObject, int error);

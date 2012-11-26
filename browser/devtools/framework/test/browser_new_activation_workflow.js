@@ -47,7 +47,8 @@ function testToggle() {
     toolbox.once("styleeditor-ready", checkStyleEditorLoaded);
   }.bind(this));
 
-  gDevTools.toggleToolboxForTab(gBrowser.selectedTab);
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+  gDevTools.toggleToolboxForTarget(target);
 }
 
 function checkStyleEditorLoaded() {

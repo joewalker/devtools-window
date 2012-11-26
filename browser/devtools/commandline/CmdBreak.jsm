@@ -7,11 +7,16 @@ const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 this.EXPORTED_SYMBOLS = [ ];
 
 Cu.import("resource:///modules/devtools/gcli.jsm");
-Cu.import("resource:///modules/devtools/gDevTools.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "HUDService",
                                   "resource:///modules/HUDService.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "TargetFactory",
+                                  "resource:///modules/devtools/Target.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
+                                  "resource:///modules/devtools/gDevTools.jsm");
 
 /**
  * 'break' command
@@ -31,9 +36,10 @@ gcli.addCommand({
   description: gcli.lookup("breaklistDesc"),
   returnType: "html",
   exec: function(args, context) {
-    let win = HUDService.currentContext();
+    let gBrowser = context.environment.chromeDocument.defaultView.gBrowser;
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    let dbg = gDevTools.getPanelForTarget("jsdebugger", target);
 
-    let dbg = gDevTools.getPanelForTarget("jsdebugger", win.gBrowser.selectedTab);
     if (!dbg) {
       return gcli.lookup("breakaddDebuggerStopped");
     }
@@ -79,8 +85,10 @@ gcli.addCommand({
       type: {
         name: "selection",
         data: function() {
-          let win = HUDService.currentContext();
-          let dbg = gDevTools.getPanelForTarget("jsdebugger", win.gBrowser.selectedTab);
+          let gBrowser = HUDService.currentContext().gBrowser;
+          let target = TargetFactory.forTab(gBrowser.selectedTab);
+          let dbg = gDevTools.getPanelForTarget("jsdebugger", target);
+
           let files = [];
           if (dbg) {
             let sourcesView = dbg.panelWin.DebuggerView.Sources;
@@ -102,8 +110,11 @@ gcli.addCommand({
   returnType: "html",
   exec: function(args, context) {
     args.type = "line";
-    let win = HUDService.currentContext();
-    let dbg = gDevTools.getPanelForTarget("jsdebugger", win.gBrowser.selectedTab);
+
+    let gBrowser = context.environment.chromeDocument.defaultView.gBrowser;
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    let dbg = gDevTools.getPanelForTarget("jsdebugger", target);
+
     if (!dbg) {
       return gcli.lookup("breakaddDebuggerStopped");
     }
@@ -134,8 +145,10 @@ gcli.addCommand({
         name: "number",
         min: 0,
         max: function() {
-          let win = HUDService.currentContext();
-          let dbg = gDevTools.getPanelForTarget("jsdebugger", win.gBrowser.selectedTab);
+          let gBrowser = context.environment.chromeDocument.defaultView.gBrowser;
+          let target = TargetFactory.forTab(gBrowser.selectedTab);
+          let dbg = gDevTools.getPanelForTarget("jsdebugger", target);
+
           if (!dbg) {
             return gcli.lookup("breakaddDebuggerStopped");
           }
@@ -147,8 +160,10 @@ gcli.addCommand({
   ],
   returnType: "html",
   exec: function(args, context) {
-    let win = HUDService.currentContext();
-    let dbg = gDevTools.getPanelForTarget("jsdebugger", win.gBrowser.selectedTab);
+    let gBrowser = context.environment.chromeDocument.defaultView.gBrowser;
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    let dbg = gDevTools.getPanelForTarget("jsdebugger", target);
+
     if (!dbg) {
       return gcli.lookup("breakaddDebuggerStopped");
     }

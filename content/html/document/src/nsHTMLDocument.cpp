@@ -172,7 +172,7 @@ RemoveFromAgentSheets(nsCOMArray<nsIStyleSheet> &aAgentSheets, const nsAString& 
 }
 
 nsresult
-NS_NewHTMLDocument(nsIDocument** aInstancePtrResult)
+NS_NewHTMLDocument(nsIDocument** aInstancePtrResult, bool aLoadedAsData)
 {
   nsHTMLDocument* doc = new nsHTMLDocument();
   NS_ENSURE_TRUE(doc, NS_ERROR_OUT_OF_MEMORY);
@@ -185,6 +185,7 @@ NS_NewHTMLDocument(nsIDocument** aInstancePtrResult)
   }
 
   *aInstancePtrResult = doc;
+  doc->SetLoadedAsData(aLoadedAsData);
 
   return rv;
 }
@@ -208,30 +209,29 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(nsHTMLDocument)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsHTMLDocument, nsDocument)
   NS_ASSERTION(!nsCCUncollectableMarker::InGeneration(cb, tmp->GetMarkedCCGeneration()),
                "Shouldn't traverse nsHTMLDocument!");
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mImages)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mApplets)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mEmbeds)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mLinks)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mAnchors)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mScripts)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR_AMBIGUOUS(mForms, nsIDOMNodeList)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR_AMBIGUOUS(mFormControls,
-                                                       nsIDOMNodeList)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mWyciwygChannel)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mMidasCommandManager)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mImages)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mApplets)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mEmbeds)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mLinks)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAnchors)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mScripts)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mForms)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFormControls)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWyciwygChannel)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMidasCommandManager)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsHTMLDocument, nsDocument)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mImages)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mApplets)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mEmbeds)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mLinks)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mAnchors)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mScripts)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mForms)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mFormControls)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mWyciwygChannel)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mMidasCommandManager)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mImages)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mApplets)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mEmbeds)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mLinks)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mAnchors)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mScripts)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mForms)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mFormControls)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mWyciwygChannel)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mMidasCommandManager)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_ADDREF_INHERITED(nsHTMLDocument, nsDocument)
@@ -1516,11 +1516,9 @@ nsHTMLDocument::Open(const nsAString& aContentTypeOrUrl,
     nsCOMPtr<nsIScriptGlobalObject> newScope(do_QueryReferent(mScopeObject));
     if (oldScope && newScope != oldScope) {
       nsIXPConnect *xpc = nsContentUtils::XPConnect();
-      nsCOMPtr<nsIXPConnectJSObjectHolder> ignored;
       rv = xpc->ReparentWrappedNativeIfFound(cx, oldScope->GetGlobalJSObject(),
                                              newScope->GetGlobalJSObject(),
-                                             static_cast<nsINode*>(this),
-                                             getter_AddRefs(ignored));
+                                             static_cast<nsINode*>(this));
       NS_ENSURE_SUCCESS(rv, rv);
       rv = xpc->RescueOrphansInScope(cx, oldScope->GetGlobalJSObject());
       NS_ENSURE_SUCCESS(rv, rv);

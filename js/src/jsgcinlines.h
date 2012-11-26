@@ -26,8 +26,8 @@ struct Shape;
 
 /*
  * This auto class should be used around any code that might cause a mark bit to
- * be set on an object in a dead compartment. See AutoTransplantGC for more
- * details.
+ * be set on an object in a dead compartment. See AutoMaybeTouchDeadCompartments
+ * for more details.
  */
 struct AutoMarkInDeadCompartment
 {
@@ -35,7 +35,7 @@ struct AutoMarkInDeadCompartment
       : compartment(comp),
         scheduled(comp->scheduledForDestruction)
     {
-        if (comp->rt->gcInTransplant && comp->scheduledForDestruction) {
+        if (comp->rt->gcManipulatingDeadCompartments && comp->scheduledForDestruction) {
             comp->rt->gcObjectsMarkedInDeadCompartments++;
             comp->scheduledForDestruction = false;
         }
@@ -64,12 +64,12 @@ GetGCThingTraceKind(const void *thing)
 /* Capacity for slotsToThingKind */
 const size_t SLOTS_TO_THING_KIND_LIMIT = 17;
 
+extern AllocKind slotsToThingKind[];
+
 /* Get the best kind to use when making an object with the given slot count. */
 static inline AllocKind
 GetGCObjectKind(size_t numSlots)
 {
-    extern AllocKind slotsToThingKind[];
-
     AutoAssertNoGC nogc;
     if (numSlots >= SLOTS_TO_THING_KIND_LIMIT)
         return FINALIZE_OBJECT16;
@@ -465,7 +465,9 @@ NewGCThing(JSContext *cx, js::gc::AllocKind kind, size_t thingSize)
     AssertCanGC();
     JS_ASSERT(thingSize == js::gc::Arena::thingSize(kind));
     JS_ASSERT_IF(cx->compartment == cx->runtime->atomsCompartment,
-                 kind == js::gc::FINALIZE_STRING || kind == js::gc::FINALIZE_SHORT_STRING);
+                 kind == FINALIZE_STRING ||
+                 kind == FINALIZE_SHORT_STRING ||
+                 kind == FINALIZE_IONCODE);
     JS_ASSERT(!cx->runtime->isHeapBusy());
     JS_ASSERT(!cx->runtime->noGCOrAllocationCheck);
 

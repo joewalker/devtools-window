@@ -1,6 +1,10 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+let tempScope = {};
+Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
+let TargetFactory = tempScope.TargetFactory;
+
 function test() {
   let notificationBox, inspector;
   let alertActive1_called = false;
@@ -19,7 +23,8 @@ function test() {
 
     inspector.markDirty();
 
-    let toolbox = gDevTools.getToolboxForTarget(gBrowser.selectedTab);
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    let toolbox = gDevTools.getToolboxForTarget(target);
     notificationBox = toolbox.getNotificationBox();
     notificationBox.addEventListener("AlertActive", alertActive1, false);
 
@@ -53,7 +58,8 @@ function test() {
     ok(para, "found the paragraph element, second time");
     is(para.textContent, "init", "paragraph content is correct");
 
-    let inspector = gDevTools.getPanelForTarget("inspector", gBrowser.selectedTab);
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    let inspector = gDevTools.getPanelForTarget("inspector", target);
     ok(inspector, "Inspector still alive");
 
     notificationBox.addEventListener("AlertActive", alertActive2, false);

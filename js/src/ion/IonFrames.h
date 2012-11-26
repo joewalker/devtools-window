@@ -72,7 +72,7 @@ ScriptFromCalleeToken(CalleeToken token)
       case CalleeToken_Script:
         return CalleeTokenToScript(token);
       case CalleeToken_Function:
-        return CalleeTokenToFunction(token)->script().get(nogc);
+        return CalleeTokenToFunction(token)->nonLazyScript().get(nogc);
     }
     JS_NOT_REACHED("invalid callee token tag");
     return NULL;
@@ -220,8 +220,9 @@ class FrameSizeClass
         return FrameSizeClass(class_);
     }
 
-    // These two functions are implemented in specific CodeGenerator-* files.
+    // These functions are implemented in specific CodeGenerator-* files.
     static FrameSizeClass FromDepth(uint32 frameDepth);
+    static FrameSizeClass ClassLimit();
     uint32 frameSize() const;
 
     uint32 classId() const {

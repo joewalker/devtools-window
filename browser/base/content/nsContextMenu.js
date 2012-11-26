@@ -413,14 +413,16 @@ nsContextMenu.prototype = {
 
   inspectNode: function CM_inspectNode() {
     let gBrowser = this.browser.ownerDocument.defaultView.gBrowser;
-    let tab = gBrowser.selectedTab;
-    let inspector = gDevTools.getPanelForTarget("inspector", tab);
+    let imported = {};
+    Cu.import("resource:///modules/devtools/Target.jsm", imported);
+    var target = imported.TargetFactory.forTab(gBrowser.selectedTab);
+    let inspector = gDevTools.getPanelForTarget("inspector", target);
     if (inspector && inspector.isReady) {
       inspector.selection.setNode(this.target);
     } else {
-      let toolbox = gDevTools.openToolboxForTab(tab, "inspector");
+      let toolbox = gDevTools.openToolboxForTab(target, "inspector");
       toolbox.once("inspector-ready", function(event, panel) {
-        let inspector = gDevTools.getPanelForTarget("inspector", tab);
+        let inspector = gDevTools.getPanelForTarget("inspector", target);
         inspector.selection.setNode(this.target, "browser-context-menu");
       }.bind(this));
     }

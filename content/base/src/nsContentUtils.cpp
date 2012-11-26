@@ -45,6 +45,7 @@
 #include "nsIParser.h"
 #include "nsIFragmentContentSink.h"
 #include "nsIContentSink.h"
+#include "nsContentList.h"
 #include "nsIHTMLDocument.h"
 #include "nsIDOMHTMLFormElement.h"
 #include "nsIDOMHTMLElement.h"
@@ -54,7 +55,7 @@
 #include "imgINotificationObserver.h"
 #include "imgIRequest.h"
 #include "imgIContainer.h"
-#include "imgILoader.h"
+#include "imgLoader.h"
 #include "nsDocShellCID.h"
 #include "nsIImageLoadingContent.h"
 #include "nsIInterfaceRequestor.h"
@@ -67,10 +68,6 @@
 #include "nsCRT.h"
 #include "nsIDOMEvent.h"
 #include "nsIDOMEventTarget.h"
-#ifdef MOZ_XTF
-#include "nsIXTFService.h"
-static NS_DEFINE_CID(kXTFServiceCID, NS_XTFSERVICE_CID);
-#endif
 #include "nsIMIMEService.h"
 #include "nsLWBrkCIID.h"
 #include "nsILineBreaker.h"
@@ -171,6 +168,8 @@ static NS_DEFINE_CID(kXTFServiceCID, NS_XTFSERVICE_CID);
 #include "nsIDOMScriptObjectFactory.h"
 #include "nsSandboxFlags.h"
 #include "nsSVGFeatures.h"
+#include "MediaDecoder.h"
+#include "DecoderTraits.h"
 
 #include "nsWrapperCacheInlines.h"
 
@@ -178,6 +177,8 @@ extern "C" int MOZ_XMLTranslateEntity(const char* ptr, const char* end,
                                       const char** next, PRUnichar* result);
 extern "C" int MOZ_XMLCheckQName(const char* ptr, const char* end,
                                  int ns_aware, const char** colon);
+
+class imgLoader;
 
 using namespace mozilla::dom;
 using namespace mozilla::layers;
@@ -193,11 +194,8 @@ nsIThreadJSContextStack *nsContentUtils::sThreadJSContextStack;
 nsIParserService *nsContentUtils::sParserService = nullptr;
 nsINameSpaceManager *nsContentUtils::sNameSpaceManager;
 nsIIOService *nsContentUtils::sIOService;
-#ifdef MOZ_XTF
-nsIXTFService *nsContentUtils::sXTFService = nullptr;
-#endif
-imgILoader *nsContentUtils::sImgLoader;
-imgILoader *nsContentUtils::sPrivateImgLoader;
+imgLoader *nsContentUtils::sImgLoader;
+imgLoader *nsContentUtils::sPrivateImgLoader;
 imgICache *nsContentUtils::sImgCache;
 imgICache *nsContentUtils::sPrivateImgCache;
 nsIConsoleService *nsContentUtils::sConsoleService;
@@ -418,7 +416,7 @@ nsContentUtils::Init()
                                "dom.event.handling-user-input-time-limit",
                                1000);
 
-  nsGenericElement::InitCCCallbacks();
+  Element::InitCCCallbacks();
 
   sInitialized = true;
 
@@ -520,15 +518,14 @@ nsContentUtils::InitImgLoader()
   sImgLoaderInitialized = true;
 
   // Ignore failure and just don't load images
-  nsresult rv = CallCreateInstance("@mozilla.org/image/loader;1", &sImgLoader);
-  NS_ABORT_IF_FALSE(NS_SUCCEEDED(rv), "Creation should have succeeded");
-  rv = CallCreateInstance("@mozilla.org/image/loader;1", &sPrivateImgLoader);
-  NS_ABORT_IF_FALSE(NS_SUCCEEDED(rv), "Creation should have succeeded");
+  sImgLoader = imgLoader::Create();
+  NS_ABORT_IF_FALSE(sImgLoader, "Creation should have succeeded");
 
-  rv = CallQueryInterface(sImgLoader, &sImgCache);
-  NS_ABORT_IF_FALSE(NS_SUCCEEDED(rv), "imgICache and imgILoader should be paired");
-  rv = CallQueryInterface(sPrivateImgLoader, &sPrivateImgCache);
-  NS_ABORT_IF_FALSE(NS_SUCCEEDED(rv), "imgICache and imgILoader should be paired");
+  sPrivateImgLoader = imgLoader::Create();
+  NS_ABORT_IF_FALSE(sPrivateImgLoader, "Creation should have succeeded");
+
+  NS_ADDREF(sImgCache = sImgLoader);
+  NS_ADDREF(sPrivateImgCache = sPrivateImgLoader);
 
   sPrivateImgCache->RespectPrivacyNotifications();
 }
@@ -952,21 +949,6 @@ nsContentUtils::ParseSandboxAttributeToFlags(const nsAString& aSandboxAttrValue)
 
   return out;
 }
-
-#ifdef MOZ_XTF
-nsIXTFService*
-nsContentUtils::GetXTFService()
-{
-  if (!sXTFService) {
-    nsresult rv = CallGetService(kXTFServiceCID, &sXTFService);
-    if (NS_FAILED(rv)) {
-      sXTFService = nullptr;
-    }
-  }
-
-  return sXTFService;
-}
-#endif
 
 #ifdef IBMBIDI
 nsIBidiKeyboard*
@@ -1471,9 +1453,6 @@ nsContentUtils::Shutdown()
   NS_IF_RELEASE(sIOService);
   NS_IF_RELEASE(sLineBreaker);
   NS_IF_RELEASE(sWordBreaker);
-#ifdef MOZ_XTF
-  NS_IF_RELEASE(sXTFService);
-#endif
   NS_IF_RELEASE(sImgLoader);
   NS_IF_RELEASE(sPrivateImgLoader);
   NS_IF_RELEASE(sImgCache);
@@ -2170,20 +2149,11 @@ static inline bool IsAutocompleteOff(const nsIContent* aElement)
 /*static*/ nsresult
 nsContentUtils::GenerateStateKey(nsIContent* aContent,
                                  const nsIDocument* aDocument,
-                                 nsIStatefulFrame::SpecialStateID aID,
                                  nsACString& aKey)
 {
   aKey.Truncate();
 
   uint32_t partID = aDocument ? aDocument->GetPartID() : 0;
-
-  // SpecialStateID case - e.g. scrollbars around the content window
-  // The key in this case is a special state id
-  if (nsIStatefulFrame::eNoID != aID) {
-    KeyAppendInt(partID, aKey);  // first append a partID
-    KeyAppendInt(aID, aKey);
-    return NS_OK;
-  }
 
   // We must have content if we're not using a special state id
   NS_ENSURE_TRUE(aContent, NS_ERROR_FAILURE);
@@ -2200,9 +2170,6 @@ nsContentUtils::GenerateStateKey(nsIContent* aContent,
   nsCOMPtr<nsIHTMLDocument> htmlDocument(do_QueryInterface(aContent->GetCurrentDoc()));
 
   KeyAppendInt(partID, aKey);  // first append a partID
-  // Make sure we can't possibly collide with an nsIStatefulFrame
-  // special id of some sort
-  KeyAppendInt(nsIStatefulFrame::eNoID, aKey);
   bool generatedUniqueKey = false;
 
   if (htmlDocument) {
@@ -2654,7 +2621,7 @@ nsContentUtils::CanLoadImage(nsIURI* aURI, nsISupports* aContext,
   return NS_FAILED(rv) ? false : NS_CP_ACCEPTED(decision);
 }
 
-imgILoader*
+imgLoader*
 nsContentUtils::GetImgLoaderForDocument(nsIDocument* aDoc)
 {
   if (!sImgLoaderInitialized)
@@ -2678,7 +2645,7 @@ nsContentUtils::GetImgLoaderForDocument(nsIDocument* aDoc)
 }
 
 // static
-imgILoader*
+imgLoader*
 nsContentUtils::GetImgLoaderForChannel(nsIChannel* aChannel)
 {
   if (!sImgLoaderInitialized)
@@ -2719,7 +2686,7 @@ nsContentUtils::LoadImage(nsIURI* aURI, nsIDocument* aLoadingDocument,
   NS_PRECONDITION(aLoadingPrincipal, "Must have a principal");
   NS_PRECONDITION(aRequest, "Null out param");
 
-  imgILoader* imgLoader = GetImgLoaderForDocument(aLoadingDocument);
+  imgLoader* imgLoader = GetImgLoaderForDocument(aLoadingDocument);
   if (!imgLoader) {
     // nothing we can do here
     return NS_OK;
@@ -3957,9 +3924,8 @@ nsContentUtils::TraverseListenerManager(nsINode *aNode,
                (PL_DHashTableOperate(&sEventListenerManagersHash, aNode,
                                         PL_DHASH_LOOKUP));
   if (PL_DHASH_ENTRY_IS_BUSY(entry)) {
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NATIVE_PTR(entry->mListenerManager,
-                                                 nsEventListenerManager,
-                                  "[via hash] mListenerManager")
+    CycleCollectionNoteChild(cb, entry->mListenerManager.get(),
+                             "[via hash] mListenerManager");
   }
 }
 
@@ -6186,8 +6152,8 @@ nsContentUtils::CreateArrayBuffer(JSContext *aCx, const nsACString& aData,
   }
 
   if (dataLen > 0) {
-    NS_ASSERTION(JS_IsArrayBufferObject(*aResult, aCx), "What happened?");
-    memcpy(JS_GetArrayBufferData(*aResult, aCx), aData.BeginReading(), dataLen);
+    NS_ASSERTION(JS_IsArrayBufferObject(*aResult), "What happened?");
+    memcpy(JS_GetArrayBufferData(*aResult), aData.BeginReading(), dataLen);
   }
 
   return NS_OK;
@@ -6297,8 +6263,6 @@ nsContentUtils::AllocClassMatchingInfo(nsINode* aRootNode,
     eIgnoreCase : eCaseMatters;
   return info;
 }
-
-// static
 
 #ifdef DEBUG
 class DebugWrapperTraversalCallback : public nsCycleCollectionTraversalCallback
@@ -6628,7 +6592,7 @@ nsContentUtils::FindInternalContentViewer(const char* aType,
 
 #ifdef MOZ_MEDIA
 #ifdef MOZ_OGG
-  if (nsHTMLMediaElement::IsOggType(nsDependentCString(aType))) {
+  if (DecoderTraits::IsOggType(nsDependentCString(aType))) {
     docFactory = do_GetService("@mozilla.org/content/document-loader-factory;1");
     if (docFactory && aLoaderType) {
       *aLoaderType = TYPE_CONTENT;
@@ -6638,7 +6602,7 @@ nsContentUtils::FindInternalContentViewer(const char* aType,
 #endif
 
 #ifdef MOZ_WEBM
-  if (nsHTMLMediaElement::IsWebMType(nsDependentCString(aType))) {
+  if (DecoderTraits::IsWebMType(nsDependentCString(aType))) {
     docFactory = do_GetService("@mozilla.org/content/document-loader-factory;1");
     if (docFactory && aLoaderType) {
       *aLoaderType = TYPE_CONTENT;
@@ -6648,7 +6612,7 @@ nsContentUtils::FindInternalContentViewer(const char* aType,
 #endif
 
 #ifdef MOZ_GSTREAMER
-  if (nsHTMLMediaElement::IsGStreamerSupportedType(nsDependentCString(aType))) {
+  if (DecoderTraits::IsGStreamerSupportedType(nsDependentCString(aType))) {
     docFactory = do_GetService("@mozilla.org/content/document-loader-factory;1");
     if (docFactory && aLoaderType) {
       *aLoaderType = TYPE_CONTENT;
@@ -6658,8 +6622,8 @@ nsContentUtils::FindInternalContentViewer(const char* aType,
 #endif
 
 #ifdef MOZ_MEDIA_PLUGINS
-  if (nsMediaDecoder::IsMediaPluginsEnabled() &&
-      nsHTMLMediaElement::IsMediaPluginsType(nsDependentCString(aType))) {
+  if (mozilla::MediaDecoder::IsMediaPluginsEnabled() &&
+      DecoderTraits::IsMediaPluginsType(nsDependentCString(aType))) {
     docFactory = do_GetService("@mozilla.org/content/document-loader-factory;1");
     if (docFactory && aLoaderType) {
       *aLoaderType = TYPE_CONTENT;

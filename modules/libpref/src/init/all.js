@@ -188,7 +188,7 @@ pref("media.webaudio.enabled", false);
 pref("media.autoplay.enabled", true);
 
 // The default number of decoded video frames that are enqueued in
-// nsBuiltinDecoderReader's mVideoQueue.
+// MediaDecoderReader's mVideoQueue.
 pref("media.video-queue.default-size", 10);
 
 #ifdef XP_MACOSX
@@ -1265,7 +1265,7 @@ pref("intl.menuitems.insertseparatorbeforeaccesskeys","chrome://global/locale/in
 pref("intl.charsetmenu.browser.static",     "chrome://global/locale/intl.properties");
 pref("intl.charsetmenu.browser.more1",      "ISO-8859-1, ISO-8859-15, IBM850, macintosh, windows-1252, ISO-8859-14, ISO-8859-7, x-mac-greek, windows-1253, x-mac-icelandic, ISO-8859-10, ISO-8859-3");
 pref("intl.charsetmenu.browser.more2",      "ISO-8859-4, ISO-8859-13, windows-1257, IBM852, ISO-8859-2, x-mac-ce, windows-1250, x-mac-croatian, IBM855, ISO-8859-5, ISO-IR-111, KOI8-R, x-mac-cyrillic, windows-1251, IBM866, KOI8-U, x-mac-ukrainian, ISO-8859-16, x-mac-romanian");
-pref("intl.charsetmenu.browser.more3",      "GB2312, gbk, gb18030, HZ-GB-2312, ISO-2022-CN, Big5, Big5-HKSCS, x-euc-tw, EUC-JP, ISO-2022-JP, Shift_JIS, EUC-KR, x-windows-949, x-johab, ISO-2022-KR");
+pref("intl.charsetmenu.browser.more3",      "GB2312, gbk, gb18030, HZ-GB-2312, ISO-2022-CN, Big5, Big5-HKSCS, x-euc-tw, EUC-JP, ISO-2022-JP, Shift_JIS, EUC-KR, x-johab, ISO-2022-KR");
 pref("intl.charsetmenu.browser.more4",      "armscii-8, TIS-620, ISO-8859-11, windows-874, IBM857, ISO-8859-9, x-mac-turkish, windows-1254, x-viet-tcvn5712, VISCII, x-viet-vps, windows-1258, x-mac-devanagari, x-mac-gujarati, x-mac-gurmukhi");
 pref("intl.charsetmenu.browser.more5",      "ISO-8859-6, windows-1256, ISO-8859-8-I, windows-1255, ISO-8859-8, IBM862");
 pref("intl.charsetmenu.browser.unicode",    "UTF-8, UTF-16LE, UTF-16BE");
@@ -1784,6 +1784,17 @@ pref("font.size.inflation.emPerLine", 0);
  * used.
  */
 pref("font.size.inflation.minTwips", 0);
+/*
+ * In products with multi-mode pan-and-zoom and non-pan-and-zoom UIs,
+ * this pref forces font inflation to always be enabled in all modes.
+ * That is, any heuristics used to detect pan-and-zoom
+ * vs. non-pan-and-zoom modes are disabled and all content is treated
+ * as pan-and-zoom mode wrt font inflation.
+ *
+ * This pref has no effect if font inflation is not enabled through
+ * either of the prefs above.  It has no meaning in single-mode UIs.
+ */
+pref("font.size.inflation.forceEnabled", false);
 /*
  * Since the goal of font size inflation is to avoid having to
  * repeatedly scroll side to side to read a block of text, and there are
@@ -3027,10 +3038,10 @@ pref("font.name.monospace.he", "Droid Sans Mono");
 pref("font.name-list.sans-serif.he", "Droid Sans Hebrew, Droid Sans");
 
 pref("font.name.serif.ja", "Droid Serif");
-pref("font.name.sans-serif.ja", "Droid Sans Japanese");
+pref("font.name.sans-serif.ja", "Droid Sans");
 pref("font.name.monospace.ja", "MotoyaLMaru");
-pref("font.name-list.sans-serif.ja", "MotoyaLMaru, MotoyaLCedar, Droid Sans Japanese");
-pref("font.name-list.monospace.ja", "MotoyaLMaru, MotoyaLCedar");
+pref("font.name-list.sans-serif.ja", "Roboto, Droid Sans, MotoyaLMaru, MotoyaLCedar, Droid Sans Japanese");
+pref("font.name-list.monospace.ja", "MotoyaLMaru, MotoyaLCedar, Droid Sans Mono");
 
 pref("font.name.serif.ko", "Droid Serif");
 pref("font.name.sans-serif.ko", "Droid Sans");
@@ -3614,7 +3625,7 @@ pref("image.mem.decodeondraw", true);
 pref("image.mem.min_discard_timeout_ms", 10000);
 
 // Chunk size for calls to the image decoders
-pref("image.mem.decode_bytes_at_a_time", 4096);
+pref("image.mem.decode_bytes_at_a_time", 16384);
 
 // The longest time we can spend in an iteration of an async decode
 pref("image.mem.max_ms_before_yield", 5);
@@ -3666,6 +3677,9 @@ pref("layers.offmainthreadcomposition.animate-opacity", false);
 pref("layers.offmainthreadcomposition.animate-transform", false);
 pref("layers.offmainthreadcomposition.log-animations", false);
 
+// Whether to (try) to use a Composer2D if available on this platform.
+pref("layers.composer2d.enabled", false);
+
 #ifdef MOZ_X11
 #ifdef MOZ_WIDGET_GTK2
 pref("gfx.xrender.enabled",true);
@@ -3686,6 +3700,9 @@ pref("gfx.direct2d.force-enabled", false);
 pref("layers.prefer-opengl", false);
 pref("layers.prefer-d3d9", false);
 #endif
+
+// Force all possible layers to be always active layers
+pref("layers.force-active", false);
 
 // Enable/Disable the geolocation API for content
 pref("geo.enabled", true);
@@ -3809,6 +3826,9 @@ pref("memory.low_memory_notification_interval_ms", 10000);
 // likely leak)?  This should be longer than it usually takes for an eligible
 // window to be collected via the GC/CC.
 pref("memory.ghost_window_timeout_seconds", 60);
+
+// Disable freeing dirty pages when minimizing memory.
+pref("memory.free_dirty_pages", false);
 
 pref("social.enabled", false);
 

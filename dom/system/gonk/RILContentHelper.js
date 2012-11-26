@@ -25,7 +25,13 @@ var RIL = {};
 Cu.import("resource://gre/modules/ril_consts.js", RIL);
 
 // set to true to in ril_consts.js to see debug messages
-const DEBUG = RIL.DEBUG_CONTENT_HELPER;
+var DEBUG = RIL.DEBUG_CONTENT_HELPER;
+
+// Read debug setting from pref
+try {
+  let debugPref = Services.prefs.getBoolPref("ril.debugging.enabled");
+  DEBUG = RIL.DEBUG_CONTENT_HELPER || debugPref;
+} catch (e) {};
 
 const RILCONTENTHELPER_CID =
   Components.ID("{472816e1-1fd6-4405-996c-806f9ea68174}");
@@ -54,7 +60,7 @@ const RIL_IPC_MSG_NAMES = [
   "RIL:SelectNetworkAuto",
   "RIL:CallStateChanged",
   "RIL:VoicemailNotification",
-  "RIL:VoicemailNumberChanged",
+  "RIL:VoicemailInfoChanged",
   "RIL:CallError",
   "RIL:CardLockResult",
   "RIL:USSDReceived",
@@ -117,7 +123,13 @@ MobileICCInfo.prototype = {
   mcc: 0,
   mnc: 0,
   spn: null,
-  msisdn: null,
+  msisdn: null
+};
+
+function MobileVoicemailInfo() {}
+MobileVoicemailInfo.prototype = {
+  number: null,
+  displayName: null
 };
 
 function MobileConnectionInfo() {}
@@ -235,6 +247,7 @@ function RILContentHelper() {
   this.iccInfo = new MobileICCInfo();
   this.voiceConnectionInfo = new MobileConnectionInfo();
   this.dataConnectionInfo = new MobileConnectionInfo();
+  this.voicemailInfo = new MobileVoicemailInfo();
 
   this.initRequests();
   this.initMessageListener(RIL_IPC_MSG_NAMES);
@@ -251,6 +264,7 @@ function RILContentHelper() {
   this.updateICCInfo(rilContext.icc, this.iccInfo);
   this.updateConnectionInfo(rilContext.voice, this.voiceConnectionInfo);
   this.updateConnectionInfo(rilContext.data, this.dataConnectionInfo);
+  this.updateVoicemailInfo(rilContext.voicemail, this.voicemailInfo);
 }
 
 RILContentHelper.prototype = {
@@ -264,6 +278,12 @@ RILContentHelper.prototype = {
                                     classDescription: "RILContentHelper",
                                     interfaces: [Ci.nsIMobileConnectionProvider,
                                                  Ci.nsIRILContentHelper]}),
+
+  updateVoicemailInfo: function updateVoicemailInfo(srcInfo, destInfo) {
+    for (let key in srcInfo) {
+      destInfo[key] = srcInfo[key];
+    }
+  },
 
   updateICCInfo: function updateICCInfo(srcInfo, destInfo) {
     for (let key in srcInfo) {
@@ -547,8 +567,12 @@ RILContentHelper.prototype = {
   _enumerateTelephonyCallbacks: null,
 
   voicemailStatus: null,
-  voicemailNumber: null,
-  voicemailDisplayName: null,
+  get voicemailNumber() {
+    return this.voicemailInfo.number;
+  },
+  get voicemailDisplayName() {
+    return this.voicemailInfo.displayName;
+  },
 
   registerCallback: function registerCallback(callbackType, callback) {
     let callbacks = this[callbackType];
@@ -791,9 +815,8 @@ RILContentHelper.prototype = {
       case "RIL:VoicemailNotification":
         this.handleVoicemailNotification(msg.json);
         break;
-      case "RIL:VoicemailNumberChanged":
-        this.voicemailNumber = msg.json.number;
-        this.voicemailDisplayName = msg.json.alphaId;
+      case "RIL:VoicemailInfoChanged":
+        this.updateVoicemailInfo(msg.json, this.voicemailInfo);
         break;
       case "RIL:CardLockResult":
         if (msg.json.success) {

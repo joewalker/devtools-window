@@ -1,104 +1,97 @@
 /* Any copyright is dedicated to the Public Domain.
  * http://creativecommons.org/publicdomain/zero/1.0/ */
 
+let toolbox;
+
 function test() {
-  // FIXME: Test failures
-  // See http://pastebin.mozilla.org/1942863
-  // TEST-UNEXPECTED-FAIL | chrome://mochitests/content/browser/browser/devtools/framework/test/browser_toolbox_select_event.js | leaked until shutdown [nsGlobalWindow #30 about:blank]
-  // TEST-UNEXPECTED-FAIL | chrome://mochitests/content/browser/browser/devtools/framework/test/browser_toolbox_select_event.js | leaked until shutdown [nsGlobalWindow #29 about:blank]
-  return;
+  addTab("about:blank", function() {
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    toolbox = gDevTools.openToolbox(target, "bottom", "webconsole");
+    toolbox.once("ready", testSelect);
+  });
+}
 
-  const Cu = Components.utils;
-  let toolbox;
+let called = {
+  inspector: false,
+  webconsole: false,
+  styleeditor: false,
+  //jsdebugger: false,
+}
 
-  let tempScope = {};
-  Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
-  let TargetFactory = tempScope.TargetFactory;
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
+function testSelect() {
+  info("Toolbox fired a `ready` event");
 
-  let called = {
-    inspector: false,
-    webconsole: false,
-    styleeditor: false,
-    jsdebugger: false,
+  toolbox.on("select", selectCB);
+
+  toolbox.selectTool("inspector");
+  toolbox.selectTool("webconsole");
+  toolbox.selectTool("styleeditor");
+  //toolbox.selectTool("jsdebugger");
+}
+
+function selectCB(event, id) {
+  called[id] = true;
+  info("toolbox-select event from " + id);
+
+  for (let tool in called) {
+    if (!called[tool]) {
+      return;
+    }
   }
 
-  addTab("about:blank", function(aBrowser, aTab) {
-    toolbox = gDevTools.openToolbox(target, "bottom", "webconsole");
-    toolbox.once("ready", function() {
-      info("Toolbox fired a `ready` event");
+  ok(true, "All the tools fired a 'select event'");
+  toolbox.off("select", selectCB);
 
-      toolbox.on("select", function selectCB(event, id) {
-        info("`select` event form " + id);
-        called[id] = true;
-        for (let tool in called) {
-          if (!called[tool]) {
-            return;
-          }
-          ok(true, "All the tools fired a 'select event'");
-          toolbox.off("select", selectCB);
-          reselect();
-        }
-      });
+  reselect();
+}
 
-      function reselect() {
-        for (let tool in called) {
-          called[tool] = false;
-        }
+function reselect() {
+  for (let tool in called) {
+    called[tool] = false;
+  }
 
-        toolbox.once("inspector-selected", function() {
-          called["inspector"] = true;
-          for (let tool in called) {
-            if (!called[tool]) {
-              return;
-            }
-            ok(true, "All the tools fired a '{id}-selected event'");
-            finishUp();
-          }
-        });
-
-        toolbox.once("webconsole-selected", function() {
-          called["webconsole"] = true;
-          for (let tool in called) {
-            if (!called[tool]) {
-              return;
-            }
-            ok(true, "All the tools fired a '{id}-selected event'");
-            finishUp();
-          }
-        });
-
-        toolbox.once("jsdebugger-selected", function() {
-          called["jsdebugger"] = true;
-          for (let tool in called) {
-            if (!called[tool]) {
-              return;
-            }
-            ok(true, "All the tools fired a '{id}-selected event'");
-            finishUp();
-          }
-        });
-
-        toolbox.once("styleeditor-selected", function() {
-          called["styleeditor"] = true;
-        });
-
-        toolbox.selectTool("inspector");
-        toolbox.selectTool("webconsole");
-        toolbox.selectTool("styleeditor");
-        toolbox.selectTool("jsdebugger");
-      }
-
-      toolbox.selectTool("inspector");
-      toolbox.selectTool("webconsole");
-      toolbox.selectTool("styleeditor");
-      toolbox.selectTool("jsdebugger");
-    });
+  toolbox.once("inspector-selected", function() {
+    tidyUpIfAllCalled("inspector");
   });
 
+  toolbox.once("webconsole-selected", function() {
+    tidyUpIfAllCalled("webconsole");
+  });
 
-  function finishUp() {
-    gBrowser.removeCurrentTab();
-    finish();
+  /*
+  toolbox.once("jsdebugger-selected", function() {
+    tidyUpIfAllCalled("jsdebugger");
+  });
+  */
+
+  toolbox.once("styleeditor-selected", function() {
+    tidyUpIfAllCalled("styleeditor");
+  });
+
+  toolbox.selectTool("inspector");
+  toolbox.selectTool("webconsole");
+  toolbox.selectTool("styleeditor");
+  //toolbox.selectTool("jsdebugger");
+}
+
+function tidyUpIfAllCalled(id) {
+  called[id] = true;
+  info("select event from " + id);
+
+  for (let tool in called) {
+    if (!called[tool]) {
+      return;
+    }
   }
+
+  ok(true, "All the tools fired a {id}-selected event");
+  tidyUp();
+}
+
+function tidyUp() {
+  toolbox.destroy();
+  gBrowser.removeCurrentTab();
+
+  toolbox = null;
+  finish();
 }

@@ -138,15 +138,15 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsDOMEvent)
         break;
     }
   }
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mPresContext);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mExplicitOriginalTarget);
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mPresContext);
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mExplicitOriginalTarget);
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsDOMEvent)
   if (tmp->mEventIsInternal) {
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mEvent->target)
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mEvent->currentTarget)
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mEvent->originalTarget)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mEvent->target)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mEvent->currentTarget)
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mEvent->originalTarget)
     switch (tmp->mEvent->eventStructType) {
       case NS_MOUSE_EVENT:
       case NS_MOUSE_SCROLL_EVENT:
@@ -173,8 +173,8 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsDOMEvent)
         break;
     }
   }
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NATIVE_MEMBER(mPresContext.get(), nsPresContext)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mExplicitOriginalTarget)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPresContext)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mExplicitOriginalTarget)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 // nsIDOMEventInterface
@@ -704,15 +704,6 @@ nsDOMEvent::DuplicatePrivateData()
       newEvent = newFocusEvent;
       break;
     }
-
-    case NS_POPUP_EVENT:
-    {
-      newEvent = new nsInputEvent(false, msg, nullptr);
-      NS_ENSURE_TRUE(newEvent, NS_ERROR_OUT_OF_MEMORY);
-      isInputEvent = true;
-      newEvent->eventStructType = NS_POPUP_EVENT;
-      break;
-    }
     case NS_COMMAND_EVENT:
     {
       newEvent = new nsCommandEvent(false, mEvent->userType,
@@ -1020,6 +1011,8 @@ nsDOMEvent::GetEventPopupControlState(nsEvent *aEvent)
       }
     }
     break;
+  default:
+    break;
   }
 
   return abuse;
@@ -1060,7 +1053,6 @@ nsDOMEvent::GetScreenCoords(nsPresContext* aPresContext,
 
   if (!aEvent || 
        (aEvent->eventStructType != NS_MOUSE_EVENT &&
-        aEvent->eventStructType != NS_POPUP_EVENT &&
         aEvent->eventStructType != NS_MOUSE_SCROLL_EVENT &&
         aEvent->eventStructType != NS_WHEEL_EVENT &&
         aEvent->eventStructType != NS_TOUCH_EVENT &&
@@ -1119,7 +1111,6 @@ nsDOMEvent::GetClientCoords(nsPresContext* aPresContext,
 
   if (!aEvent ||
       (aEvent->eventStructType != NS_MOUSE_EVENT &&
-       aEvent->eventStructType != NS_POPUP_EVENT &&
        aEvent->eventStructType != NS_MOUSE_SCROLL_EVENT &&
        aEvent->eventStructType != NS_WHEEL_EVENT &&
        aEvent->eventStructType != NS_TOUCH_EVENT &&

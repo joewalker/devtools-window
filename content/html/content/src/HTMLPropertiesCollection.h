@@ -19,8 +19,9 @@
 #include "nsINodeList.h"
 #include "nsIHTMLCollection.h"
 #include "nsHashKeys.h"
-#include "nsGenericHTMLElement.h"
+#include "nsRefPtrHashtable.h"
 
+class nsGenericHTMLElement;
 class nsXPCClassInfo;
 class nsIDocument;
 class nsINode;
@@ -30,6 +31,7 @@ namespace dom {
 
 class HTMLPropertiesCollection;
 class PropertyNodeList;
+class Element;
 
 class PropertyStringList : public nsDOMStringList
 {
@@ -56,10 +58,11 @@ public:
   HTMLPropertiesCollection(nsGenericHTMLElement* aRoot);
   virtual ~HTMLPropertiesCollection();
 
+  using nsWrapperCache::GetWrapper;
   virtual JSObject* WrapObject(JSContext *cx, JSObject *scope,
                                bool *triedToWrap);
 
-  virtual nsGenericElement* GetElementAt(uint32_t aIndex);
+  virtual Element* GetElementAt(uint32_t aIndex);
 
   NS_IMETHOD NamedItem(const nsAString& aName, nsIDOMNode** aResult);
   void SetDocument(nsIDocument* aDocument);

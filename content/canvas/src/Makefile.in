@@ -19,6 +19,7 @@ LIBXUL_LIBRARY  = 1
 EXPORTS_NAMESPACES = mozilla/dom
 
 EXPORTS_mozilla/dom = \
+	CanvasUtils.h \
 	CanvasRenderingContext2D.h \
   ImageData.h \
   $(NULL)
@@ -54,6 +55,7 @@ CPPSRCS += \
 	WebGLExtensionTextureFilterAnisotropic.cpp \
 	WebGLExtensionTextureFloat.cpp \
 	WebGLFramebuffer.cpp \
+	WebGLObjectModel.cpp \
 	WebGLProgram.cpp \
 	WebGLRenderbuffer.cpp \
 	WebGLShader.cpp \

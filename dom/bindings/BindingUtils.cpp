@@ -319,6 +319,22 @@ CreateInterfaceObject(JSContext* cx, JSObject* global,
   return constructor;
 }
 
+bool
+DefineWebIDLBindingPropertiesOnXPCProto(JSContext* cx, JSObject* proto, const NativeProperties* properties)
+{
+  if (properties->methods &&
+      !DefinePrefable(cx, proto, properties->methods)) {
+    return false;
+  }
+
+  if (properties->attributes &&
+      !DefinePrefable(cx, proto, properties->attributes)) {
+    return false;
+  }
+
+  return true;
+}
+
 static JSObject*
 CreateInterfacePrototypeObject(JSContext* cx, JSObject* global,
                                JSObject* parentProto, JSClass* protoClass,
@@ -522,9 +538,11 @@ QueryInterface(JSContext* cx, unsigned argc, JS::Value* vp)
   // Get the object. It might be a security wrapper, in which case we do a checked
   // unwrap.
   JSObject* origObj = JSVAL_TO_OBJECT(thisv);
-  JSObject* obj = js::UnwrapObjectChecked(cx, origObj);
-  if (!obj)
+  JSObject* obj = js::UnwrapObjectChecked(origObj);
+  if (!obj) {
+      JS_ReportError(cx, "Permission denied to access object");
       return false;
+  }
 
   nsISupports* native;
   if (!UnwrapDOMObjectToISupports(obj, native)) {

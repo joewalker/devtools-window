@@ -806,14 +806,14 @@ FilterView.prototype = {
     // If this is a global search, schedule it for when the user stops typing,
     // or hide the corresponding pane otherwise.
     if (isGlobal) {
-      DebuggerView.GlobalSearch.scheduleSearch();
+      DebuggerView.GlobalSearch.scheduleSearch(token);
       return;
     }
 
     // If this is a variable search, defer the action to the corresponding
     // variables view instance.
     if (isVariable) {
-      DebuggerView.Variables.performSearch(token);
+      DebuggerView.Variables.scheduleSearch(token);
       return;
     }
 
@@ -828,12 +828,17 @@ FilterView.prototype = {
    */
   _onKeyPress: function DVF__onScriptsKeyPress(e) {
     let [file, line, token, isGlobal, isVariable] = this.searchboxInfo;
-    let action;
+    let isDifferentToken, isReturnKey, action;
 
+    if (this._prevSearchedToken != token) {
+      isDifferentToken = true;
+    }
     switch (e.keyCode) {
-      case e.DOM_VK_DOWN:
       case e.DOM_VK_RETURN:
       case e.DOM_VK_ENTER:
+        isReturnKey = true;
+        // fall through
+      case e.DOM_VK_DOWN:
         action = 0;
         break;
       case e.DOM_VK_UP:
@@ -859,17 +864,22 @@ FilterView.prototype = {
 
     // Perform a global search based on the specified operator.
     if (isGlobal) {
-      if (DebuggerView.GlobalSearch.hidden) {
-        DebuggerView.GlobalSearch.scheduleSearch();
+      if (isReturnKey && isDifferentToken) {
+        DebuggerView.GlobalSearch.performSearch(token);
       } else {
         DebuggerView.GlobalSearch[["focusNextMatch", "focusPrevMatch"][action]]();
       }
+      this._prevSearchedToken = token;
       return;
     }
 
     // Perform a variable search based on the specified operator.
     if (isVariable) {
-      DebuggerView.Variables.expandFirstSearchResults();
+      if (isReturnKey && isDifferentToken) {
+        DebuggerView.Variables.performSearch(token);
+        DebuggerView.Variables.expandFirstSearchResults();
+      }
+      this._prevSearchedToken = token;
       return;
     }
 
@@ -898,7 +908,6 @@ FilterView.prototype = {
   _doSearch: function DVF__doSearch(aOperator = "") {
     this._searchbox.focus();
     this._searchbox.value = aOperator;
-    DebuggerView.GlobalSearch.clearView();
   },
 
   /**
@@ -937,6 +946,7 @@ FilterView.prototype = {
    * Called when the variable search filter key sequence was pressed.
    */
   _doVariableSearch: function DVF__doVariableSearch() {
+    DebuggerView.Variables.performSearch("");
     this._doSearch(SEARCH_VARIABLE_FLAG);
     this._searchboxPanel.hidePopup();
   },

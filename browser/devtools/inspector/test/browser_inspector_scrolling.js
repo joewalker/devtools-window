@@ -54,7 +54,8 @@ function performScrollingTest()
     is(iframe.contentDocument.body.scrollTop, 50, "inspected iframe scrolled");
 
     inspector = div = iframe = doc = null;
-    gDevTools.closeToolbox(gBrowser.selectedTab);
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    gDevTools.closeToolbox(target);
     gBrowser.removeCurrentTab();
     finish();
   }, false);

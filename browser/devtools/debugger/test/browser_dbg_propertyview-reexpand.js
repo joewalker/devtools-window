@@ -35,7 +35,9 @@ function addBreakpoint()
   }, function() {
     // Wait for the resume...
     gDebugger.gClient.addOneTimeListener("resumed", function() {
+      gDebugger.DebuggerController.StackFrames.autoScopeExpand = true;
       gDebugger.DebuggerView.Variables.nonEnumVisible = false;
+      gDebugger.DebuggerView.Variables.commitHierarchyIgnoredItems = Object.create(null);
       testVariablesExpand();
     });
   });
@@ -75,6 +77,44 @@ function testVariablesExpand()
 
       is(innerScope.querySelector(".arrow").hasAttribute("open"), true,
         "The innerScope arrow should initially be expanded");
+      is(mathScope.querySelector(".arrow").hasAttribute("open"), true,
+        "The mathScope arrow should initially be expanded");
+      is(testScope.querySelector(".arrow").hasAttribute("open"), true,
+        "The testScope arrow should initially be expanded");
+      is(loadScope.querySelector(".arrow").hasAttribute("open"), true,
+        "The loadScope arrow should initially be expanded");
+      is(globalScope.querySelector(".arrow").hasAttribute("open"), true,
+        "The globalScope arrow should initially be expanded");
+
+      is(innerScope.querySelector(".details").hasAttribute("open"), true,
+        "The innerScope enumerables should initially be expanded");
+      is(mathScope.querySelector(".details").hasAttribute("open"), true,
+        "The mathScope enumerables should initially be expanded");
+      is(testScope.querySelector(".details").hasAttribute("open"), true,
+        "The testScope enumerables should initially be expanded");
+      is(loadScope.querySelector(".details").hasAttribute("open"), true,
+        "The loadScope enumerables should initially be expanded");
+      is(globalScope.querySelector(".details").hasAttribute("open"), true,
+        "The globalScope enumerables should initially be expanded");
+
+      is(innerScopeItem.expanded, true,
+        "The innerScope expanded getter should return true");
+      is(mathScopeItem.expanded, true,
+        "The mathScope expanded getter should return true");
+      is(testScopeItem.expanded, true,
+        "The testScope expanded getter should return true");
+      is(loadScopeItem.expanded, true,
+        "The loadScope expanded getter should return true");
+      is(globalScopeItem.expanded, true,
+        "The globalScope expanded getter should return true");
+
+      mathScopeItem.collapse();
+      testScopeItem.collapse();
+      loadScopeItem.collapse();
+      globalScopeItem.collapse();
+
+      is(innerScope.querySelector(".arrow").hasAttribute("open"), true,
+        "The innerScope arrow should initially be expanded");
       is(mathScope.querySelector(".arrow").hasAttribute("open"), false,
         "The mathScope arrow should initially not be expanded");
       is(testScope.querySelector(".arrow").hasAttribute("open"), false,
@@ -107,10 +147,10 @@ function testVariablesExpand()
         "The globalScope expanded getter should return false");
 
 
-      EventUtils.sendMouseEvent({ type: "mousedown" }, mathScope.querySelector(".arrow"), gDebuggee);
-      EventUtils.sendMouseEvent({ type: "mousedown" }, testScope.querySelector(".arrow"), gDebuggee);
-      EventUtils.sendMouseEvent({ type: "mousedown" }, loadScope.querySelector(".arrow"), gDebuggee);
-      EventUtils.sendMouseEvent({ type: "mousedown" }, globalScope.querySelector(".arrow"), gDebuggee);
+      EventUtils.sendMouseEvent({ type: "mousedown" }, mathScope.querySelector(".arrow"), gDebugger);
+      EventUtils.sendMouseEvent({ type: "mousedown" }, testScope.querySelector(".arrow"), gDebugger);
+      EventUtils.sendMouseEvent({ type: "mousedown" }, loadScope.querySelector(".arrow"), gDebugger);
+      EventUtils.sendMouseEvent({ type: "mousedown" }, globalScope.querySelector(".arrow"), gDebugger);
 
 
       is(innerScope.querySelector(".arrow").hasAttribute("open"), true,
@@ -287,7 +327,7 @@ function testVariablesExpand()
                       executeSoon(function() {
                         EventUtils.sendMouseEvent({ type: "mousedown" },
                           gDebugger.document.querySelector("#step-in"),
-                          gDebugger.window);
+                          gDebugger);
                       });
                     }}, 0);
                   }, false);
@@ -295,7 +335,7 @@ function testVariablesExpand()
                   executeSoon(function() {
                     EventUtils.sendMouseEvent({ type: "mousedown" },
                       locationItem.target.querySelector(".arrow"),
-                      gDebuggee.window);
+                      gDebugger);
 
                     is(locationItem.expanded, true,
                       "The local scope 'this.window.document.location' should be expanded now");
@@ -306,7 +346,7 @@ function testVariablesExpand()
               executeSoon(function() {
                 EventUtils.sendMouseEvent({ type: "mousedown" },
                   documentItem.target.querySelector(".arrow"),
-                  gDebuggee.window);
+                  gDebugger);
 
                 is(documentItem.expanded, true,
                   "The local scope 'this.window.document' should be expanded now");
@@ -317,7 +357,7 @@ function testVariablesExpand()
           executeSoon(function() {
             EventUtils.sendMouseEvent({ type: "mousedown" },
               windowItem.target.querySelector(".arrow"),
-              gDebuggee.window);
+              gDebugger);
 
             is(windowItem.expanded, true,
               "The local scope 'this.window' should be expanded now");
@@ -328,7 +368,7 @@ function testVariablesExpand()
       executeSoon(function() {
         EventUtils.sendMouseEvent({ type: "mousedown" },
           thisItem.target.querySelector(".arrow"),
-          gDebuggee.window);
+          gDebugger);
 
         is(thisItem.expanded, true,
           "The local scope 'this' should be expanded now");

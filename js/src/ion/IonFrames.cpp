@@ -441,7 +441,7 @@ MarkIonJSFrame(JSTracer *trc, const IonFrameIterator &frame)
         // is now NULL or recompiled). Manually trace it here.
         IonScript::Trace(trc, ionScript);
     } else if (CalleeTokenIsFunction(layout->calleeToken())) {
-        ionScript = CalleeTokenToFunction(layout->calleeToken())->script()->ion;
+        ionScript = CalleeTokenToFunction(layout->calleeToken())->nonLazyScript()->ion;
     } else {
         ionScript = CalleeTokenToScript(layout->calleeToken())->ion;
     }
@@ -638,11 +638,8 @@ MarkIonActivation(JSTracer *trc, const IonActivationIterator &activations)
             JS_NOT_REACHED("invalid");
             break;
           case IonFrame_Rectifier:
-          case IonFrame_Bailed_Rectifier: {
-            IonCompartment *ionCompartment = activations.activation()->compartment()->ionCompartment();
-            MarkIonCodeRoot(trc, ionCompartment->getArgumentsRectifierAddr(), "Arguments Rectifier");
+          case IonFrame_Bailed_Rectifier:
             break;
-          }
           case IonFrame_Osr:
             // The callee token will be marked by the callee JS frame;
             // otherwise, it does not need to be marked, since the frame is
@@ -929,7 +926,7 @@ InlineFrameIterator::findNextFrame()
         si_.nextFrame();
 
         callee_ = funval.toObject().toFunction();
-        script_ = callee_->script().get(nogc);
+        script_ = callee_->nonLazyScript().get(nogc);
         pc_ = script_->code + si_.pcOffset();
     }
 
@@ -1177,7 +1174,7 @@ InlineFrameIterator::dump() const
             else {
                 if (i - 2 == callee()->nargs && numActualArgs() > callee()->nargs) {
                     DumpOp d(callee()->nargs);
-                    forEachCanonicalActualArg(d, d.i_, numActualArgs());
+                    forEachCanonicalActualArg(d, d.i_, numActualArgs() - d.i_);
                 }
 
                 fprintf(stderr, "  slot %d: ", i - 2 - callee()->nargs);

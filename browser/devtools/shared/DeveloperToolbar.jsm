@@ -75,9 +75,12 @@ this.CommandUtils = {
         button.setAttribute("disabled", "true");
       }
       else {
-        button.setAttribute("icon", "command.icon");
-        button.setAttribute("tooltip", "command.manual");
-        button.setAttribute("label", buttonSpec.typed.substring(0, 1).toUpperCase());
+        if (command.buttonId != null) {
+          button.id = command.buttonId;
+        }
+        if (command.buttonClass != null) {
+          button.className = command.buttonClass;
+        }
 
         button.addEventListener("click", function() {
           requisition.update(buttonSpec.typed);

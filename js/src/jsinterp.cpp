@@ -307,7 +307,7 @@ js::RunScript(JSContext *cx, HandleScript script, StackFrame *fp)
             if (status == ion::IonExec_Bailout)
                 return Interpret(cx, fp, JSINTERP_REJOIN);
 
-            return status != ion::IonExec_Error;
+            return !IsErrorStatus(status);
         }
     }
 #endif
@@ -368,6 +368,10 @@ js::InvokeKernel(JSContext *cx, CallArgs args, MaybeConstruct construct)
     if (fun->isNative())
         return CallJSNative(cx, fun->native(), args);
 
+    RootedScript script(cx, fun->getOrCreateScript(cx));
+    if (!script)
+        return false;
+
     if (!TypeMonitorCall(cx, args, construct))
         return false;
 
@@ -377,7 +381,6 @@ js::InvokeKernel(JSContext *cx, CallArgs args, MaybeConstruct construct)
         return false;
 
     /* Run function until JSOP_STOP, JSOP_RETURN or error. */
-    RootedScript script(cx, fun->script());
     JSBool ok = RunScript(cx, script, ifg.fp());
 
     /* Propagate the return value out. */
@@ -1404,6 +1407,10 @@ BEGIN_CASE(JSOP_LOOPENTRY)
                 DO_OP();
             }
 
+            // We failed to call into Ion at all, so treat as an error.
+            if (maybeOsr == ion::IonExec_Aborted)
+                goto error;
+
             interpReturnOK = (maybeOsr == ion::IonExec_Ok);
 
             if (entryFrame != regs.fp())
@@ -2339,7 +2346,9 @@ BEGIN_CASE(JSOP_FUNCALL)
 
     InitialFrameFlags initial = construct ? INITIAL_CONSTRUCT : INITIAL_NONE;
     bool newType = cx->typeInferenceEnabled() && UseNewType(cx, script, regs.pc);
-    RawScript funScript = fun->script().unsafeGet();
+    RawScript funScript = fun->getOrCreateScript(cx).unsafeGet();
+    if (!funScript)
+        goto error;
     if (!cx->stack.pushInlineFrame(cx, regs, args, *fun, funScript, initial))
         goto error;
 
@@ -2361,7 +2370,7 @@ BEGIN_CASE(JSOP_FUNCALL)
                 op = JSOp(*regs.pc);
                 DO_OP();
             }
-            interpReturnOK = (exec == ion::IonExec_Error) ? false : true;
+            interpReturnOK = !IsErrorStatus(exec);
             goto jit_return;
         }
     }

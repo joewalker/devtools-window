@@ -2665,7 +2665,7 @@ frontend::EmitFunctionScript(JSContext *cx, BytecodeEmitter *bce, ParseNode *bod
     /* Initialize fun->script() so that the debugger has a valid fun->script(). */
     RootedFunction fun(cx, bce->script->function());
     JS_ASSERT(fun->isInterpreted());
-    JS_ASSERT(!fun->script().unsafeGet());
+    JS_ASSERT(!fun->hasScript());
     fun->setScript(bce->script);
     if (!JSFunction::setTypeForScriptedFunction(cx, fun, singleton))
         return false;
@@ -4835,7 +4835,7 @@ EmitFunc(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
     AssertCanGC();
     RootedFunction fun(cx, pn->pn_funbox->function());
     JS_ASSERT(fun->isInterpreted());
-    if (fun->script().unsafeGet()) {
+    if (fun->hasScript()) {
         /*
          * This second pass is needed to emit JSOP_NOP with a source note
          * for the already-emitted function definition prolog opcode. See
@@ -5382,10 +5382,14 @@ EmitCallOrNew(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn, ptrdiff_t top)
             ParseNode *receiver = pn2->pn_next;
             if (!EmitTree(cx, bce, receiver))
                 return false;
+            if (Emit1(cx, bce, JSOP_NOTEARG) < 0)
+                return false;
             bool oldEmittingForInit = bce->emittingForInit;
             bce->emittingForInit = false;
             for (ParseNode *argpn = receiver->pn_next; argpn != funNode; argpn = argpn->pn_next) {
                 if (!EmitTree(cx, bce, argpn))
+                    return false;
+                if (Emit1(cx, bce, JSOP_NOTEARG) < 0)
                     return false;
             }
             bce->emittingForInit = oldEmittingForInit;

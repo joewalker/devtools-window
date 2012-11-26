@@ -103,7 +103,6 @@ using namespace mozilla::dom;
 #define XML_HTTP_REQUEST_LOADING          (1 << 3) // 3 LOADING
 #define XML_HTTP_REQUEST_DONE             (1 << 4) // 4 DONE
 #define XML_HTTP_REQUEST_SENT             (1 << 5) // Internal, OPENED in IE and external view
-#define XML_HTTP_REQUEST_STOPPED          (1 << 6) // Internal, LOADING in IE and external view
 // The above states are mutually exclusive, change with ChangeState() only.
 // The states below can be combined.
 #define XML_HTTP_REQUEST_ABORTED        (1 << 7)  // Internal
@@ -128,8 +127,7 @@ using namespace mozilla::dom;
    XML_HTTP_REQUEST_HEADERS_RECEIVED |      \
    XML_HTTP_REQUEST_LOADING |               \
    XML_HTTP_REQUEST_DONE |                  \
-   XML_HTTP_REQUEST_SENT |                  \
-   XML_HTTP_REQUEST_STOPPED)
+   XML_HTTP_REQUEST_SENT)
 
 #define NS_BADCERTHANDLER_CONTRACTID \
   "@mozilla.org/content/xmlhttprequest-bad-cert-handler;1"
@@ -420,8 +418,7 @@ nsXMLHttpRequest::~nsXMLHttpRequest()
 {
   mState |= XML_HTTP_REQUEST_DELETED;
 
-  if (mState & (XML_HTTP_REQUEST_STOPPED |
-                XML_HTTP_REQUEST_SENT |
+  if (mState & (XML_HTTP_REQUEST_SENT |
                 XML_HTTP_REQUEST_LOADING)) {
     Abort();
   }
@@ -596,37 +593,36 @@ NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsXMLHttpRequest,
                                                   nsXHREventTarget)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mContext)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mChannel)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mReadRequest)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mResponseXML)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mCORSPreflightChannel)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mContext)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mChannel)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mReadRequest)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mResponseXML)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCORSPreflightChannel)
 
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mXMLParserStreamListener)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mXMLParserStreamListener)
 
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mChannelEventSink)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mProgressEventSink)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mChannelEventSink)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mProgressEventSink)
 
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR_AMBIGUOUS(mUpload,
-                                                       nsIXMLHttpRequestUpload)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mUpload)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsXMLHttpRequest,
                                                 nsXHREventTarget)
   tmp->mResultArrayBuffer = nullptr;
   tmp->mResultJSON = JSVAL_VOID;
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mContext)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mChannel)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mReadRequest)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mResponseXML)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mCORSPreflightChannel)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mContext)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mChannel)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mReadRequest)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mResponseXML)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mCORSPreflightChannel)
 
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mXMLParserStreamListener)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mXMLParserStreamListener)
 
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mChannelEventSink)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mProgressEventSink)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mChannelEventSink)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mProgressEventSink)
 
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mUpload)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mUpload)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN_INHERITED(nsXMLHttpRequest,
@@ -1771,8 +1767,7 @@ nsXMLHttpRequest::Open(const nsACString& method, const nsACString& url,
   if (mState & (XML_HTTP_REQUEST_OPENED |
                 XML_HTTP_REQUEST_HEADERS_RECEIVED |
                 XML_HTTP_REQUEST_LOADING |
-                XML_HTTP_REQUEST_SENT |
-                XML_HTTP_REQUEST_STOPPED)) {
+                XML_HTTP_REQUEST_SENT)) {
     // IE aborts as well
     Abort();
 
@@ -2651,26 +2646,12 @@ GetRequestBody(nsIVariant* aBody, nsIInputStream** aResult, uint64_t* aContentLe
 
     // ArrayBuffer?
     jsval realVal;
-    nsCxPusher pusher;
-    Maybe<JSAutoCompartment> ac;
-
-    // If there's a context on the stack, we can just use it. Otherwise, we need
-    // to use the safe js context (and push it into the stack, so that it's
-    // visible to cx-less functions that we might call here).
-    JSContext* cx = nsContentUtils::GetCurrentJSContext();
-    if (!cx) {
-      cx = nsContentUtils::GetSafeJSContext();
-      if (!pusher.Push(cx)) {
-        return NS_ERROR_FAILURE;
-      }
-    }
 
     nsresult rv = aBody->GetAsJSVal(&realVal);
     if (NS_SUCCEEDED(rv) && !JSVAL_IS_PRIMITIVE(realVal)) {
       JSObject *obj = JSVAL_TO_OBJECT(realVal);
-      ac.construct(cx, obj);
-      if (JS_IsArrayBufferObject(obj, cx)) {
-          ArrayBuffer buf(cx, obj);
+      if (JS_IsArrayBufferObject(obj)) {
+          ArrayBuffer buf(obj);
           return GetRequestBody(&buf, aResult, aContentLength, aContentType, aCharset);
       }
     }
@@ -3361,7 +3342,7 @@ nsXMLHttpRequest::ReadyState()
   if (mState & XML_HTTP_REQUEST_HEADERS_RECEIVED) {
     return HEADERS_RECEIVED;
   }
-  if (mState & (XML_HTTP_REQUEST_LOADING | XML_HTTP_REQUEST_STOPPED)) {
+  if (mState & XML_HTTP_REQUEST_LOADING) {
     return LOADING;
   }
   MOZ_ASSERT(mState & XML_HTTP_REQUEST_DONE);
@@ -3520,7 +3501,8 @@ nsXMLHttpRequest::ChangeState(uint32_t aState, bool aBroadcast)
     mProgressNotifier->Cancel();
   }
 
-  if ((aState & XML_HTTP_REQUEST_LOADSTATES) && // Broadcast load states only
+  if ((aState & XML_HTTP_REQUEST_LOADSTATES) &&  // Broadcast load states only
+      aState != XML_HTTP_REQUEST_SENT && // And not internal ones
       aBroadcast &&
       (mState & XML_HTTP_REQUEST_ASYNC ||
        aState & XML_HTTP_REQUEST_OPENED ||
@@ -3565,11 +3547,11 @@ private:
 NS_IMPL_CYCLE_COLLECTION_CLASS(AsyncVerifyRedirectCallbackForwarder)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(AsyncVerifyRedirectCallbackForwarder)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR_AMBIGUOUS(mXHR, nsIXMLHttpRequest)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mXHR)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(AsyncVerifyRedirectCallbackForwarder)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mXHR)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mXHR)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(AsyncVerifyRedirectCallbackForwarder)
@@ -4085,13 +4067,13 @@ NS_IMPL_CYCLE_COLLECTING_ADDREF(nsXMLHttpProgressEvent)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsXMLHttpProgressEvent)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXMLHttpProgressEvent)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mInner);
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mWindow);
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mInner);
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mWindow);
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXMLHttpProgressEvent)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mInner)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mWindow);
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mInner)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWindow);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMETHODIMP nsXMLHttpProgressEvent::GetInput(nsIDOMLSInput * *aInput)
@@ -4152,11 +4134,11 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXMLHttpRequestXPCOMifier)
 if (tmp->mXHR) {
   tmp->mXHR->mXPCOMifier = nullptr;
 }
-NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mXHR)
+NS_IMPL_CYCLE_COLLECTION_UNLINK(mXHR)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXMLHttpRequestXPCOMifier)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR_AMBIGUOUS(mXHR, nsIXMLHttpRequest)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mXHR)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMETHODIMP

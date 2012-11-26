@@ -36,6 +36,7 @@
 #include "nsPrintfCString.h"
 #include "nsDOMClassInfoID.h"
 #include "mozilla/dom/CSSStyleDeclarationBinding.h"
+#include "StyleRule.h"
 
 namespace css = mozilla::css;
 
@@ -605,7 +606,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(GroupRule)
     NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mRules[i]");
     cb.NoteXPCOMChild(rules[i]->GetExistingDOMRule());
   }
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mRuleCollection)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRuleCollection)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 /* virtual */ void
@@ -1724,7 +1725,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsCSSFontFaceRule)
   // Unlink the wrapper for our declaraton.  This just expands out
   // NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER which we can't use
   // directly because the wrapper is on the declaration, not on us.
-  nsContentUtils::ReleaseWrapper(s, &tmp->mDecl);
+  nsContentUtils::ReleaseWrapper(static_cast<nsISupports*>(p), &tmp->mDecl);
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsCSSFontFaceRule)
@@ -1990,7 +1991,14 @@ nsCSSKeyframeRule::MapRuleInfoInto(nsRuleData* aRuleData)
 void
 nsCSSKeyframeRule::List(FILE* out, int32_t aIndent) const
 {
-  // FIXME: WRITE ME
+  for (int32_t index = aIndent; --index >= 0; ) fputs("  ", out);
+
+  nsAutoString tmp;
+  DoGetKeyText(tmp);
+  fputs(NS_ConvertUTF16toUTF8(tmp).get(), out);
+  fputs(" ", out);
+  mDeclaration->List(out, aIndent);
+  fputs("\n", out);
 }
 #endif
 
@@ -2010,7 +2018,7 @@ nsCSSKeyframeRule::GetType(uint16_t* aType)
 NS_IMETHODIMP
 nsCSSKeyframeRule::GetCssText(nsAString& aCssText)
 {
-  nsCSSKeyframeRule::GetKeyText(aCssText);
+  DoGetKeyText(aCssText);
   aCssText.AppendLiteral(" { ");
   nsAutoString tmp;
   mDeclaration->ToString(tmp);
@@ -2041,6 +2049,13 @@ nsCSSKeyframeRule::GetParentRule(nsIDOMCSSRule** aParentRule)
 NS_IMETHODIMP
 nsCSSKeyframeRule::GetKeyText(nsAString& aKeyText)
 {
+  DoGetKeyText(aKeyText);
+  return NS_OK;
+}
+
+void
+nsCSSKeyframeRule::DoGetKeyText(nsAString& aKeyText) const
+{
   aKeyText.Truncate();
   uint32_t i = 0, i_end = mKeys.Length();
   NS_ABORT_IF_FALSE(i_end != 0, "must have some keys");
@@ -2052,7 +2067,6 @@ nsCSSKeyframeRule::GetKeyText(nsAString& aKeyText)
     }
     aKeyText.AppendLiteral(", ");
   }
-  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -2156,7 +2170,10 @@ NS_INTERFACE_MAP_END_INHERITING(GroupRule)
 void
 nsCSSKeyframesRule::List(FILE* out, int32_t aIndent) const
 {
-  // FIXME: WRITE ME
+  for (int32_t indent = aIndent; --indent >= 0; ) fputs("  ", out);
+
+  fprintf(out, "@keyframes %s", NS_ConvertUTF16toUTF8(mName).get());
+  GroupRule::List(out, aIndent);
 }
 #endif
 
@@ -2326,6 +2343,216 @@ nsCSSKeyframesRule::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
   return n;
 }
 
+// -------------------------------------------
+// nsCSSPageStyleDeclaration
+//
+
+nsCSSPageStyleDeclaration::nsCSSPageStyleDeclaration(nsCSSPageRule* aRule)
+  : mRule(aRule)
+{
+}
+
+nsCSSPageStyleDeclaration::~nsCSSPageStyleDeclaration()
+{
+  NS_ASSERTION(!mRule, "DropReference not called.");
+}
+
+NS_IMPL_CYCLE_COLLECTING_ADDREF(nsCSSPageStyleDeclaration)
+NS_IMPL_CYCLE_COLLECTING_RELEASE(nsCSSPageStyleDeclaration)
+
+NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_0(nsCSSPageStyleDeclaration)
+
+NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsCSSPageStyleDeclaration)
+  NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
+NS_INTERFACE_MAP_END_INHERITING(nsDOMCSSDeclaration)
+
+css::Declaration*
+nsCSSPageStyleDeclaration::GetCSSDeclaration(bool aAllocate)
+{
+  if (mRule) {
+    return mRule->Declaration();
+  } else {
+    return nullptr;
+  }
+}
+
+void
+nsCSSPageStyleDeclaration::GetCSSParsingEnvironment(CSSParsingEnvironment& aCSSParseEnv)
+{
+  GetCSSParsingEnvironmentForRule(mRule, aCSSParseEnv);
+}
+
+NS_IMETHODIMP
+nsCSSPageStyleDeclaration::GetParentRule(nsIDOMCSSRule** aParent)
+{
+  NS_ENSURE_ARG_POINTER(aParent);
+
+  NS_IF_ADDREF(*aParent = mRule);
+  return NS_OK;
+}
+
+nsresult
+nsCSSPageStyleDeclaration::SetCSSDeclaration(css::Declaration* aDecl)
+{
+  NS_ABORT_IF_FALSE(aDecl, "must be non-null");
+  mRule->ChangeDeclaration(aDecl);
+  return NS_OK;
+}
+
+nsIDocument*
+nsCSSPageStyleDeclaration::DocToUpdate()
+{
+  return nullptr;
+}
+
+nsINode*
+nsCSSPageStyleDeclaration::GetParentObject()
+{
+  return mRule ? mRule->GetDocument() : nullptr;
+}
+
+// -------------------------------------------
+// nsCSSPageRule
+//
+
+nsCSSPageRule::nsCSSPageRule(const nsCSSPageRule& aCopy)
+  // copy everything except our reference count and mDOMDeclaration
+  : Rule(aCopy)
+  , mDeclaration(new css::Declaration(*aCopy.mDeclaration))
+{
+}
+
+nsCSSPageRule::~nsCSSPageRule()
+{
+  if (mDOMDeclaration) {
+    mDOMDeclaration->DropReference();
+  }
+}
+
+/* virtual */ already_AddRefed<css::Rule>
+nsCSSPageRule::Clone() const
+{
+  nsRefPtr<css::Rule> clone = new nsCSSPageRule(*this);
+  return clone.forget();
+}
+
+NS_IMPL_ADDREF(nsCSSPageRule)
+NS_IMPL_RELEASE(nsCSSPageRule)
+
+DOMCI_DATA(CSSPageRule, nsCSSPageRule)
+
+// QueryInterface implementation for nsCSSPageRule
+NS_INTERFACE_MAP_BEGIN(nsCSSPageRule)
+  NS_INTERFACE_MAP_ENTRY(nsIStyleRule)
+  NS_INTERFACE_MAP_ENTRY(nsIDOMCSSPageRule)
+  NS_INTERFACE_MAP_ENTRY(nsIDOMCSSRule)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIStyleRule)
+  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(CSSPageRule)
+NS_INTERFACE_MAP_END
+
+IMPL_STYLE_RULE_INHERIT_GET_DOM_RULE_WEAK(nsCSSPageRule, Rule)
+
+#ifdef DEBUG
+void
+nsCSSPageRule::List(FILE* out, int32_t aIndent) const
+{
+  for (int32_t indent = aIndent; --indent >= 0; ) fputs("  ", out);
+
+  fputs("@page ", out);
+  mDeclaration->List(out, aIndent);
+  fputs("\n", out);
+}
+#endif
+
+/* virtual */ int32_t
+nsCSSPageRule::GetType() const
+{
+  return Rule::PAGE_RULE;
+}
+
+NS_IMETHODIMP
+nsCSSPageRule::GetType(uint16_t* aType)
+{
+  *aType = nsIDOMCSSRule::PAGE_RULE;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsCSSPageRule::GetCssText(nsAString& aCssText)
+{
+  aCssText.AppendLiteral("@page { ");
+  nsAutoString tmp;
+  mDeclaration->ToString(tmp);
+  aCssText.Append(tmp);
+  aCssText.AppendLiteral(" }");
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsCSSPageRule::SetCssText(const nsAString& aCssText)
+{
+  // FIXME: implement???
+  return NS_ERROR_NOT_IMPLEMENTED;
+}
+
+NS_IMETHODIMP
+nsCSSPageRule::GetParentStyleSheet(nsIDOMCSSStyleSheet** aSheet)
+{
+  return Rule::GetParentStyleSheet(aSheet);
+}
+
+NS_IMETHODIMP
+nsCSSPageRule::GetParentRule(nsIDOMCSSRule** aParentRule)
+{
+  return Rule::GetParentRule(aParentRule);
+}
+
+css::ImportantRule*
+nsCSSPageRule::GetImportantRule()
+{
+  if (!mDeclaration->HasImportantData()) {
+    return nullptr;
+  }
+  if (!mImportantRule) {
+    mImportantRule = new css::ImportantRule(mDeclaration);
+  }
+  return mImportantRule;
+}
+
+/* virtual */ void
+nsCSSPageRule::MapRuleInfoInto(nsRuleData* aRuleData)
+{
+  mDeclaration->MapNormalRuleInfoInto(aRuleData);
+}
+
+NS_IMETHODIMP
+nsCSSPageRule::GetStyle(nsIDOMCSSStyleDeclaration** aStyle)
+{
+  if (!mDOMDeclaration) {
+    mDOMDeclaration = new nsCSSPageStyleDeclaration(this);
+  }
+  NS_ADDREF(*aStyle = mDOMDeclaration);
+  return NS_OK;
+}
+
+void
+nsCSSPageRule::ChangeDeclaration(css::Declaration* aDeclaration)
+{
+  mImportantRule = nullptr;
+  mDeclaration = aDeclaration;
+
+  nsCSSStyleSheet* sheet = GetStyleSheet();
+  if (sheet) {
+    sheet->SetModifiedByChildRule();
+  }
+}
+
+/* virtual */ size_t
+nsCSSPageRule::SizeOfIncludingThis(nsMallocSizeOfFun aMallocSizeOf) const
+{
+  return aMallocSizeOf(this);
+}
+
 namespace mozilla {
 
 CSSSupportsRule::CSSSupportsRule(bool aConditionMet,
@@ -2348,12 +2575,8 @@ CSSSupportsRule::List(FILE* out, int32_t aIndent) const
 {
   for (int32_t indent = aIndent; --indent >= 0; ) fputs("  ", out);
 
-  nsAutoString buffer;
-
   fputs("@supports ", out);
-
-  fputs(NS_LossyConvertUTF16toASCII(mCondition).get(), out);
-
+  fputs(NS_ConvertUTF16toUTF8(mCondition).get(), out);
   css::GroupRule::List(out, aIndent);
 }
 #endif

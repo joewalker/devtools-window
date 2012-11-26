@@ -11,10 +11,14 @@ this.EXPORTED_SYMBOLS = ["DebuggerDefinition"];
 
 const STRINGS_URI = "chrome://browser/locale/devtools/debugger.properties";
 
-Cu.import("resource://gre/modules/devtools/EventEmitter.jsm");
-Cu.import("resource://gre/modules/devtools/dbg-server.jsm");
-Cu.import('resource://gre/modules/XPCOMUtils.jsm');
-Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "Services",
+                                  "resource://gre/modules/Services.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "EventEmitter",
+                                  "resource:///modules/devtools/EventEmitter.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "DebuggerServer",
+                                  "resource://gre/modules/devtools/dbg-server.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
                                   "resource:///modules/devtools/gDevTools.jsm");
 XPCOMUtils.defineLazyGetter(this, "_strings",
@@ -36,7 +40,7 @@ this.DebuggerDefinition = {
   label: l10n("ToolboxDebugger.label"),
 
   isTargetSupported: function(target) {
-    return !target.isRemote;
+    return true;
   },
 
   build: function(iframeWindow, toolbox) {
@@ -49,8 +53,17 @@ function DebuggerPanel(iframeWindow, toolbox) {
   this._toolbox = toolbox;
   this._controller = iframeWindow.DebuggerController;
   this._view = iframeWindow.DebuggerView;
+  this._controller._target = this.target;
   this._bkp = this._controller.Breakpoints;
   this.panelWin = iframeWindow;
+
+  this._ensureOnlyOneRunningDebugger();
+  if (!this.target.isRemote) {
+    if (!DebuggerServer.initialized) {
+      DebuggerServer.init();
+      DebuggerServer.addBrowserActors();
+    }
+  }
 
   let onDebuggerLoaded = function () {
     iframeWindow.removeEventListener("Debugger:Loaded", onDebuggerLoaded, true);
@@ -68,20 +81,11 @@ function DebuggerPanel(iframeWindow, toolbox) {
     onDebuggerConnected, true);
 
   new EventEmitter(this);
-
-  this._ensureOnlyOneRunningDebugger();
-  if (!DebuggerServer.initialized) {
-    // Always allow connections from nsIPipe transports.
-    DebuggerServer.init(function() true);
-    DebuggerServer.addBrowserActors();
-  }
 }
 
 DebuggerPanel.prototype = {
   // DevToolPanel API
-  get target() {
-    return this._toolbox.target;
-  },
+  get target() this._toolbox.target,
 
   get isReady() this._isReady,
 
@@ -91,6 +95,12 @@ DebuggerPanel.prototype = {
   },
 
   destroy: function() {
+    delete this._toolbox;
+    delete this._target;
+    delete this._controller;
+    delete this._view;
+    delete this._bkp;
+    delete this.panelWin;
   },
 
   // DebuggerPanel API

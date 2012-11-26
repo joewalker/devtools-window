@@ -2030,6 +2030,31 @@ class LLoadElementV : public LInstructionHelper<BOX_PIECES, 2, 0>
     }
 };
 
+class LInArray : public LInstructionHelper<1, 3, 0>
+{
+  public:
+    LIR_HEADER(InArray);
+
+    LInArray(const LAllocation &elements, const LAllocation &index, const LAllocation &initLength) {
+        setOperand(0, elements);
+        setOperand(1, index);
+        setOperand(2, initLength);
+    }
+    const MInArray *mir() const {
+        return mir_->toInArray();
+    }
+    const LAllocation *elements() {
+        return getOperand(0);
+    }
+    const LAllocation *index() {
+        return getOperand(1);
+    }
+    const LAllocation *initLength() {
+        return getOperand(2);
+    }
+};
+
+
 // Load a value from a dense array's elements vector. Bail out if it's the hole value.
 class LLoadElementHole : public LInstructionHelper<BOX_PIECES, 3, 0>
 {
@@ -2516,6 +2541,17 @@ class LGetNameCache : public LInstructionHelper<BOX_PIECES, 1, 0>
     }
     const MGetNameCache *mir() const {
         return mir_->toGetNameCache();
+    }
+};
+
+class LCallGetIntrinsicValue : public LCallInstructionHelper<BOX_PIECES, 0, 0>
+{
+  public:
+    LIR_HEADER(CallGetIntrinsicValue);
+    BOX_OUTPUT_ACCESSORS();
+
+    const MCallGetIntrinsicValue *mir() const {
+        return mir_->toCallGetIntrinsicValue();
     }
 };
 
@@ -3105,6 +3141,41 @@ class LIn : public LCallInstructionHelper<1, BOX_PIECES+1, 0>
 
     static const size_t LHS = 0;
     static const size_t RHS = BOX_PIECES;
+};
+
+class LInstanceOfTypedO : public LInstructionHelper<1, 1, 0>
+{
+  public:
+    LIR_HEADER(InstanceOfTypedO);
+    LInstanceOfTypedO(const LAllocation &lhs) {
+        setOperand(0, lhs);
+    }
+
+    MInstanceOfTyped *mir() const {
+        return mir_->toInstanceOfTyped();
+    }
+
+    const LAllocation *lhs() {
+        return getOperand(0);
+    }
+};
+
+class LInstanceOfTypedV : public LInstructionHelper<1, BOX_PIECES, 0>
+{
+  public:
+    LIR_HEADER(InstanceOfTypedV);
+    LInstanceOfTypedV() {
+    }
+
+    MInstanceOfTyped *mir() const {
+        return mir_->toInstanceOfTyped();
+    }
+
+    const LAllocation *lhs() {
+        return getOperand(LHS);
+    }
+
+    static const size_t LHS = 0;
 };
 
 class LInstanceOfO : public LInstructionHelper<1, 2, 2>

@@ -27,6 +27,7 @@
 //----------------------------------------------------------------------
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 class nsHTMLBodyElement;
 
@@ -52,8 +53,8 @@ class nsHTMLBodyElement : public nsGenericHTMLElement,
                           public nsIDOMHTMLBodyElement
 {
 public:
-  using nsGenericElement::GetText;
-  using nsGenericElement::SetText;
+  using Element::GetText;
+  using Element::SetText;
 
   nsHTMLBodyElement(already_AddRefed<nsINodeInfo> aNodeInfo);
   virtual ~nsHTMLBodyElement();
@@ -65,10 +66,10 @@ public:
   NS_FORWARD_NSIDOMNODE_TO_NSINODE
 
   // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT(nsGenericHTMLElement::)
+  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
 
   // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT(nsGenericHTMLElement::)
+  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
 
   // nsIDOMHTMLBodyElement
   NS_DECL_NSIDOMHTMLBODYELEMENT
@@ -255,6 +256,8 @@ BodyRule::MapRuleInfoInto(nsRuleData* aData)
 /* virtual */ void
 BodyRule::List(FILE* out, int32_t aIndent) const
 {
+  for (int32_t index = aIndent; --index >= 0; ) fputs("  ", out);
+  fputs("[body rule] {}\n", out);
 }
 #endif
 
@@ -279,8 +282,8 @@ nsHTMLBodyElement::~nsHTMLBodyElement()
 }
 
 
-NS_IMPL_ADDREF_INHERITED(nsHTMLBodyElement, nsGenericElement) 
-NS_IMPL_RELEASE_INHERITED(nsHTMLBodyElement, nsGenericElement) 
+NS_IMPL_ADDREF_INHERITED(nsHTMLBodyElement, Element)
+NS_IMPL_RELEASE_INHERITED(nsHTMLBodyElement, Element)
 
 DOMCI_NODE_DATA(HTMLBodyElement, nsHTMLBodyElement)
 

@@ -427,32 +427,31 @@ TraverseKey(nsISupports* aKey, nsInsertionPointList* aData, void* aClosure)
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mInsertionPointTable key");
   cb.NoteXPCOMChild(aKey);
   if (aData) {
-    NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSTARRAY(*aData, nsXBLInsertionPoint,
-                                               "mInsertionPointTable value")
+    ImplCycleCollectionTraverse(cb, *aData, "mInsertionPointTable value");
   }
   return PL_DHASH_NEXT;
 }
 
 NS_IMPL_CYCLE_COLLECTION_NATIVE_CLASS(nsXBLBinding)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_NATIVE(nsXBLBinding)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXBLBinding)
   // XXX Probably can't unlink mPrototypeBinding->XBLDocumentInfo(), because
   //     mPrototypeBinding is weak.
   if (tmp->mContent) {
     nsXBLBinding::UninstallAnonymousContent(tmp->mContent->OwnerDoc(),
                                             tmp->mContent);
   }
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mContent)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mNextBinding)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mContent)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mNextBinding)
   delete tmp->mInsertionPointTable;
   tmp->mInsertionPointTable = nullptr;
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NATIVE_BEGIN(nsXBLBinding)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXBLBinding)
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb,
                                      "mPrototypeBinding->XBLDocumentInfo()");
   cb.NoteXPCOMChild(static_cast<nsIScriptGlobalObjectOwner*>(
                       tmp->mPrototypeBinding->XBLDocumentInfo()));
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mContent)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NATIVE_MEMBER(mNextBinding, nsXBLBinding)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mContent)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mNextBinding)
   if (tmp->mInsertionPointTable)
     tmp->mInsertionPointTable->EnumerateRead(TraverseKey, &cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END

@@ -52,7 +52,6 @@ function onNavigate() {
 
 function onClose() {
   ok(true, "close event received");
-  ok(!target.tab, "tab is null");
 
   target = null;
   finish();

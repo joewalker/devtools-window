@@ -62,9 +62,8 @@ XPCOMUtils.defineLazyGetter(window, "gFindBar", function() {
   return findbar;
 });
 
-__defineGetter__("gPrefService", function() {
-  delete this.gPrefService;
-  return this.gPrefService = Services.prefs;
+XPCOMUtils.defineLazyGetter(this, "gPrefService", function() {
+  return Services.prefs;
 });
 
 __defineGetter__("AddonManager", function() {
@@ -87,17 +86,14 @@ __defineSetter__("PluralForm", function (val) {
 });
 
 XPCOMUtils.defineLazyModuleGetter(this, "TelemetryStopwatch",
-                                  "resource://gre/modules/TelemetryStopwatch.jsm");
+  "resource://gre/modules/TelemetryStopwatch.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "AboutHomeUtils",
-                                  "resource:///modules/AboutHomeUtils.jsm");
+  "resource:///modules/AboutHomeUtils.jsm");
 
 #ifdef MOZ_SERVICES_SYNC
-XPCOMUtils.defineLazyGetter(this, "Weave", function() {
-  let tmp = {};
-  Cu.import("resource://services-sync/main.js", tmp);
-  return tmp.Weave;
-});
+XPCOMUtils.defineLazyModuleGetter(this, "Weave",
+  "resource://services-sync/main.js");
 #endif
 
 XPCOMUtils.defineLazyGetter(this, "PopupNotifications", function () {
@@ -118,21 +114,15 @@ XPCOMUtils.defineLazyGetter(this, "DeveloperToolbar", function() {
   return new tmp.DeveloperToolbar(window, document.getElementById("developer-toolbar"));
 });
 
-XPCOMUtils.defineLazyGetter(this, "Social", function() {
-  let tmp = {};
-  Cu.import("resource:///modules/Social.jsm", tmp);
-  return tmp.Social;
-});
+XPCOMUtils.defineLazyModuleGetter(this, "Social",
+  "resource:///modules/Social.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "PageThumbs",
   "resource:///modules/PageThumbs.jsm");
 
 #ifdef MOZ_SAFE_BROWSING
-XPCOMUtils.defineLazyGetter(this, "SafeBrowsing", function() {
-  let tmp = {};
-  Cu.import("resource://gre/modules/SafeBrowsing.jsm", tmp);
-  return tmp.SafeBrowsing;
-});
+XPCOMUtils.defineLazyModuleGetter(this, "SafeBrowsing",
+  "resource://gre/modules/SafeBrowsing.jsm");
 #endif
 
 XPCOMUtils.defineLazyModuleGetter(this, "gBrowserNewTabPreloader",
@@ -994,15 +984,11 @@ var gBrowserInit = {
 
     gBrowser.addEventListener("DOMUpdatePageReport", gPopupBlockerObserver, false);
 
-    gBrowser.addEventListener("PluginNotFound",     gPluginHandler, true);
-    gBrowser.addEventListener("PluginCrashed",      gPluginHandler, true);
-    gBrowser.addEventListener("PluginBlocklisted",  gPluginHandler, true);
-    gBrowser.addEventListener("PluginOutdated",     gPluginHandler, true);
-    gBrowser.addEventListener("PluginDisabled",     gPluginHandler, true);
-    gBrowser.addEventListener("PluginClickToPlay",  gPluginHandler, true);
-    gBrowser.addEventListener("PluginPlayPreview",  gPluginHandler, true);
-    gBrowser.addEventListener("PluginVulnerableUpdatable", gPluginHandler, true);
-    gBrowser.addEventListener("PluginVulnerableNoUpdate", gPluginHandler, true);
+    // Note that the XBL binding is untrusted
+    gBrowser.addEventListener("PluginBindingAttached", gPluginHandler, true, true);
+    gBrowser.addEventListener("PluginCrashed",         gPluginHandler, true);
+    gBrowser.addEventListener("PluginOutdated",        gPluginHandler, true);
+
     gBrowser.addEventListener("NewPluginInstalled", gPluginHandler.newPluginInstalled, true);
 #ifdef XP_MACOSX
     gBrowser.addEventListener("npapi-carbon-event-model-failure", gPluginHandler, true);
@@ -1423,10 +1409,12 @@ var gBrowserInit = {
     }
 
     // Enable Error Console?
-    let consoleEnabled = gPrefService.getBoolPref("devtools.errorconsole.enabled") ||
+    // Temporarily enabled. See bug 798925.
+    let consoleEnabled = true || gPrefService.getBoolPref("devtools.errorconsole.enabled") ||
                          gPrefService.getBoolPref("devtools.chrome.enabled");
     if (consoleEnabled) {
       let cmd = document.getElementById("Tools:ErrorConsole");
+      cmd.removeAttribute("disabled");
       cmd.removeAttribute("hidden");
     }
 
@@ -1497,9 +1485,8 @@ var gBrowserInit = {
     // In certain scenarios it's possible for unload to be fired before onload,
     // (e.g. if the window is being closed after browser.js loads but before the
     // load completes). In that case, there's nothing to do here.
-    if (!gStartupRan) {
+    if (!gStartupRan)
       return;
-    }
 
     gDevTools.forgetBrowserWindow(window);
 
@@ -3433,7 +3420,8 @@ function FillHistoryMenu(aParent) {
 }
 
 function addToUrlbarHistory(aUrlToAdd) {
-  if (aUrlToAdd &&
+  if (!PrivateBrowsingUtils.isWindowPrivate(window) &&
+      aUrlToAdd &&
       !aUrlToAdd.contains(" ") &&
       !/[\x00-\x1F]/.test(aUrlToAdd))
     PlacesUIUtils.markPageAsTyped(aUrlToAdd);
@@ -3484,15 +3472,18 @@ function OpenBrowserWindow(options)
   var wintype = document.documentElement.getAttribute('windowtype');
 
   var extraFeatures = "";
+  var forcePrivate = false;
 #ifdef MOZ_PER_WINDOW_PRIVATE_BROWSING
-  if (typeof options == "object" &&
-      "private" in options &&
-      options.private) {
+  forcePrivate = typeof options == "object" && "private" in options && options.private;
+#else
+  forcePrivate = gPrivateBrowsingUI.privateBrowsingEnabled;
+#endif
+
+  if (forcePrivate) {
     extraFeatures = ",private";
     // Force the new window to load about:privatebrowsing instead of the default home page
     defaultArgs = "about:privatebrowsing";
   }
-#endif
 
   // if and only if the current window is a browser window and it has a document with a character
   // set, then extract the current charset menu setting from the current document and use it to
@@ -5276,11 +5267,7 @@ function contentAreaClick(event, isPanelClick)
         return;
       }
 
-      let postData = {};
-      let url = getShortcutOrURI(href, postData);
-      if (!url)
-        return;
-      loadURI(url, null, postData.value, false);
+      loadURI(href, null, null, false);
       event.preventDefault();
       return;
     }
@@ -5310,7 +5297,8 @@ function contentAreaClick(event, isPanelClick)
   // pages loaded in frames are embed visits and lost with the session, while
   // visits across frames should be preserved.
   try {
-    PlacesUIUtils.markPageAsFollowedLink(href);
+    if (!PrivateBrowsingUtils.isWindowPrivate(window))
+      PlacesUIUtils.markPageAsFollowedLink(href);
   } catch (ex) { /* Skip invalid URIs. */ }
 }
 
@@ -5434,7 +5422,8 @@ function BrowserSetForcedCharacterSet(aCharset)
 {
   gBrowser.docShell.charset = aCharset;
   // Save the forced character-set
-  PlacesUtils.history.setCharsetForURI(gBrowser.currentURI, aCharset);
+  if (!PrivateBrowsingUtils.isWindowPrivate(window))
+    PlacesUtils.history.setCharsetForURI(getWebNavigation().currentURI, aCharset);
   BrowserCharsetReload();
 }
 
@@ -7404,6 +7393,9 @@ var TabContextMenu = {
 };
 
 XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
+                                  "resource:///modules/devtools/gDevTools.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "DevToolsXULCommands",
                                   "resource:///modules/devtools/gDevTools.jsm");
 
 XPCOMUtils.defineLazyGetter(this, "HUDConsoleUI", function () {

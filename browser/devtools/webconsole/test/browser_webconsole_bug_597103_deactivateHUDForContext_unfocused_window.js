@@ -44,18 +44,20 @@ function tab2Loaded(aEvent) {
 
   function openConsoles() {
     try {
-      gDevTools.openToolboxForTab(tab1, "webconsole");
+      let target1 = TargetFactory.forTab(tab1);
+      gDevTools.openToolboxForTab(target1, "webconsole");
     }
     catch (ex) {
-      ok(false, "gDevTools.openToolboxForTab(tab1) exception: " + ex);
+      ok(false, "gDevTools.openToolboxForTab(target1) exception: " + ex);
       noErrors = false;
     }
 
     try {
-      gDevTools.openToolboxForTab(tab2, "webconsole");
+      let target2 = TargetFactory.forTab(tab2);
+      gDevTools.openToolboxForTab(target2, "webconsole");
     }
     catch (ex) {
-      ok(false, "gDevTools.openToolboxForTab(tab2) exception: " + ex);
+      ok(false, "gDevTools.openToolboxForTab(target2) exception: " + ex);
       noErrors = false;
     }
   }
@@ -74,18 +76,20 @@ function tab2Loaded(aEvent) {
     Services.obs.addObserver(onWebConsoleClose, "web-console-destroyed", false);
 
     try {
-      gDevTools.closeToolbox(tab1);
+      let target1 = TargetFactory.forTab(tab1);
+      gDevTools.closeToolbox(target1);
     }
     catch (ex) {
-      ok(false, "gDevTools.closeToolbox(tab1) exception: " + ex);
+      ok(false, "gDevTools.closeToolbox(target1) exception: " + ex);
       noErrors = false;
     }
 
     try {
-      gDevTools.closeToolbox(tab2);
+      let target2 = TargetFactory.forTab(tab2);
+      gDevTools.closeToolbox(target2);
     }
     catch (ex) {
-      ok(false, "gDevTools.closeToolbox(tab2) exception: " + ex);
+      ok(false, "gDevTools.closeToolbox(target2) exception: " + ex);
       noErrors = false;
     }
   }

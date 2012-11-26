@@ -2711,7 +2711,7 @@ nsXPCComponents_Utils::LookupMethod(const JS::Value& object,
     // we don't have full access to the other compartment, in which case we throw.
     // Otherwise, enter the compartment.
     if (js::IsCrossCompartmentWrapper(obj)) {
-        obj = js::UnwrapOneChecked(cx, obj);
+        obj = js::UnwrapOneChecked(obj);
         if (!obj)
             return NS_ERROR_XPC_BAD_CONVERT_JS;
     }
@@ -3863,7 +3863,7 @@ xpc_EvalInSandbox(JSContext *cx, JSObject *sandbox, const nsAString& source,
 {
     JS_AbortIfWrongThread(JS_GetRuntime(cx));
 
-    sandbox = js::UnwrapObjectChecked(cx, sandbox);
+    sandbox = js::UnwrapObjectChecked(sandbox);
     if (!sandbox || js::GetObjectJSClass(sandbox) != &SandboxClass) {
         return NS_ERROR_INVALID_ARG;
     }
@@ -4321,6 +4321,21 @@ nsXPCComponents_Utils::RecomputeWrappers(const jsval &vobj, JSContext *cx)
         js::RecomputeWrappers(cx, js::SingleCompartment(c), js::AllCompartments()) &&
         js::RecomputeWrappers(cx, js::AllCompartments(), js::SingleCompartment(c));
 
+    return NS_OK;
+}
+
+/* jsval setWantXrays(jsval vscope); */
+NS_IMETHODIMP
+nsXPCComponents_Utils::SetWantXrays(const jsval &vscope, JSContext *cx)
+{
+    if (!vscope.isObject())
+        return NS_ERROR_INVALID_ARG;
+    JSObject *scopeObj = js::UnwrapObject(&vscope.toObject());
+    JSCompartment *compartment = js::GetObjectCompartment(scopeObj);
+    EnsureCompartmentPrivate(scopeObj)->wantXrays = true;
+    bool ok = js::RecomputeWrappers(cx, js::SingleCompartment(compartment),
+                                    js::AllCompartments());
+    NS_ENSURE_TRUE(ok, NS_ERROR_FAILURE);
     return NS_OK;
 }
 

@@ -12,6 +12,8 @@ Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 
+const targets = new WeakMap();
+
 /**
  * Functions for creating Targets
  */
@@ -23,7 +25,23 @@ this.TargetFactory = {
    * @return A target object
    */
   forTab: function TF_forTab(tab) {
-    return new TabTarget(tab);
+    let target = targets.get(tab);
+    if (target == null) {
+      target = new TabTarget(tab);
+      targets.set(tab, target);
+    }
+    return target;
+  },
+
+  /**
+   * Creating a target for a tab that is being closed is a problem because it
+   * allows a leak as a result of coming after the close event which normally
+   * clears things up. This function allows us to ask if there is a known
+   * target for a tab without creating a target
+   * @return true/false
+   */
+  isKnownTab: function TF_isKnownTab(tab) {
+    return targets.has(tab);
   },
 
   /**
@@ -33,17 +51,32 @@ this.TargetFactory = {
    * @return A target object
    */
   forWindow: function TF_forWindow(window) {
-    return new WindowTarget(window);
+    let target = targets.get(window);
+    if (target == null) {
+      target = new WindowTarget(window);
+      targets.set(window, target);
+    }
+    return target;
   },
 
   /**
    * Construct a Target for a remote global
-   * @param {FIXME} actor
-   *        The connection to a remote mozilla instance
+   * @param {Object} form
+   *        The serialized form of a debugging protocol actor.
+   * @param {DebuggerClient} client
+   *        The debuger client instance to communicate with the server.
+   * @param {boolean} chrome
+   *        A flag denoting that the debugging target is the remote process as a
+   *        whole and not a single tab.
    * @return A target object
    */
-  forRemote: function TF_forRemote(actor) {
-    return new RemoteTarget(actor);
+  forRemote: function TF_forRemote(form, client, chrome) {
+    let target = targets.get(form);
+    if (target == null) {
+      target = new RemoteTarget(form, client, chrome);
+      targets.set(form, target);
+    }
+    return target;
   },
 
   /**
@@ -142,6 +175,8 @@ function TabTarget(tab) {
 }
 
 TabTarget.prototype = {
+  _webProgressListener: null,
+
   supports: supports,
   get version() { return getVersion(); },
 
@@ -157,7 +192,7 @@ TabTarget.prototype = {
     return this._tab.linkedBrowser.contentDocument.location.href;
   },
 
-  get remote() {
+  get isRemote() {
     return false;
   },
 
@@ -165,7 +200,7 @@ TabTarget.prototype = {
    * Listen to the different tabs events.
    */
   _setupListeners: function TabTarget__setupListeners() {
-    this._webProgressListener.target = this;
+    this._webProgressListener = new TabWebProgressListener(this);
     this.tab.linkedBrowser.addProgressListener(this._webProgressListener);
     this.tab.addEventListener("TabClose", this);
     this.tab.parentNode.addEventListener("TabSelect", this);
@@ -189,36 +224,6 @@ TabTarget.prototype = {
     }
   },
 
-  /**
-   * Handle webProgress events.
-   */
-  _webProgressListener: {
-    QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener, Ci.nsISupportsWeakReference]),
-    onProgressChange: function() {},
-    onStateChange: function(aProgress, aRequest, aFlag, aStatus) {
-      let isStart = aFlag & Ci.nsIWebProgressListener.STATE_START;
-      let isDocument = aFlag & Ci.nsIWebProgressListener.STATE_IS_DOCUMENT;
-      let isNetwork = aFlag & Ci.nsIWebProgressListener.STATE_IS_NETWORK;
-      let isRequest = aFlag & Ci.nsIWebProgressListener.STATE_IS_REQUEST;
-
-      // Skip non-interesting states.
-      if (!isStart || !isDocument || !isRequest || !isNetwork) {
-        return;
-      }
-
-      if (this.target) {
-        this.target.emit("will-navigate", aRequest);
-      }
-    },
-    onSecurityChange: function() {},
-    onStatusChange: function() {},
-    onLocationChange: function(webProgress){
-      let window = webProgress.DOMWindow;
-      if (this.target) {
-        this.target.emit("navigate", window);
-      }
-    },
-  },
 
   /**
    * Target is not alive anymore.
@@ -229,11 +234,62 @@ TabTarget.prototype = {
     }
     this.tab.linkedBrowser.removeProgressListener(this._webProgressListener)
     this._webProgressListener.target = null;
+    this._webProgressListener = null;
     this.tab.removeEventListener("TabClose", this);
     this.tab.parentNode.removeEventListener("TabSelect", this);
-    this._tab = null;
     this._destroyed = true;
     this.emit("close");
+
+    targets.delete(this._tab);
+    this._tab = null;
+  },
+
+  toString: function() {
+    return 'TabTarget:' + this.tab;
+  },
+};
+
+
+/**
+ * WebProgressListener for TabTarget.
+ *
+ * @param object aTarget
+ *        The TabTarget instance to work with.
+ */
+function TabWebProgressListener(aTarget) {
+  this.target = aTarget;
+}
+
+TabWebProgressListener.prototype = {
+  target: null,
+
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsIWebProgressListener, Ci.nsISupportsWeakReference]),
+
+  onStateChange: function TWPL_onStateChange(progress, request, flag, status) {
+    let isStart = flag & Ci.nsIWebProgressListener.STATE_START;
+    let isDocument = flag & Ci.nsIWebProgressListener.STATE_IS_DOCUMENT;
+    let isNetwork = flag & Ci.nsIWebProgressListener.STATE_IS_NETWORK;
+    let isRequest = flag & Ci.nsIWebProgressListener.STATE_IS_REQUEST;
+
+    // Skip non-interesting states.
+    if (!isStart || !isDocument || !isRequest || !isNetwork) {
+      return;
+    }
+
+    if (this.target) {
+      this.target.emit("will-navigate", request);
+    }
+  },
+
+  onProgressChange: function() {},
+  onSecurityChange: function() {},
+  onStatusChange: function() {},
+
+  onLocationChange: function TwPL_onLocationChange(webProgress) {
+    let window = webProgress.DOMWindow;
+    if (this.target) {
+      this.target.emit("navigate", window);
+    }
   },
 };
 
@@ -263,36 +319,67 @@ WindowTarget.prototype = {
     return this._window.document.location.href;
   },
 
-  get remote() {
+  get isRemote() {
     return false;
+  },
+
+  toString: function() {
+    return 'WindowTarget:' + this.window;
   },
 };
 
 /**
  * A RemoteTarget represents a page living in a remote Firefox instance.
  */
-function RemoteTarget(actor) {
+function RemoteTarget(form, client, chrome) {
   new EventEmitter(this);
-  this._actor = actor;
+  this._client = client;
+  this._form = form;
+  this._chrome = chrome;
+
+  this.destroy = this.destroy.bind(this);
+  this.client.addListener("tabDetached", this.destroy);
+
+  this._onTabNavigated = function onRemoteTabNavigated() {
+    this.emit("navigate");
+  }.bind(this);
+  this.client.addListener("tabNavigated", this._onTabNavigated);
 }
 
 RemoteTarget.prototype = {
   supports: supports,
-  get version() { return getVersion(); },
+  get version() getVersion(),
 
-  get actor() {
-    return this._actor;
+  get isRemote() true,
+
+  get chrome() this._chrome,
+
+  get name() this._form._title,
+
+  get url() this._form._url,
+
+  get client() this._client,
+
+  get form() this._form,
+
+  /**
+   * Target is not alive anymore.
+   */
+  destroy: function RT_destroy() {
+    if (this._destroyed) {
+      return;
+    }
+    this.client.removeListener("tabNavigated", this._onTabNavigated);
+    this.client.removeListener("tabDetached", this.destroy);
+
+    this._client.close(function onClosed() {
+      this._client = null;
+      this._destroyed = true;
+      this.emit("close");
+    }.bind(this));
   },
 
-  get name() {
-    throw new Error("FIXME: implement");
-  },
-
-  get url() {
-    throw new Error("FIXME: implement");
-  },
-
-  get remote() {
-    return true;
+  toString: function() {
+    return 'RemoteTarget:' + this.form.actor;
   },
 };

@@ -32,7 +32,6 @@ UTIL_JAVA_FILES := \
   INISection.java \
   util/EventDispatcher.java \
   util/FloatUtils.java \
-  util/LruCache.java \
   $(NULL)
 
 FENNEC_JAVA_FILES = \
@@ -58,6 +57,7 @@ FENNEC_JAVA_FILES = \
   CameraImageResultHandler.java \
   CameraVideoResultHandler.java \
   CanvasDelegate.java \
+  CheckableLinearLayout.java \
   SyncPreference.java \
   db/BrowserDB.java \
   db/LocalBrowserDB.java \
@@ -365,6 +365,7 @@ RES_LAYOUT = \
   res/layout/notification_icon_text.xml \
   res/layout/notification_progress.xml \
   res/layout/notification_progress_text.xml \
+  res/layout/site_setting_item.xml \
   res/layout/site_setting_title.xml \
   res/layout/setup_screen.xml \
   res/layout/shared_ui_components.xml \
@@ -479,6 +480,7 @@ RES_DRAWABLE_BASE = \
   res/drawable/alert_app.png \
   res/drawable/alert_download.png \
   res/drawable/appwidget_bg.9.png \
+  res/drawable/awesomebar_row_favicon_bg.xml \
   res/drawable/awesomebar_tab_center.9.png \
   res/drawable/awesomebar_tab_left.9.png \
   res/drawable/awesomebar_tab_right.9.png \
@@ -1095,7 +1097,7 @@ android-tgts = \
 
 android-preqs = \
   Makefile.in \
-  $(call mkdir_deps,db,sync/repositories/android) \
+  $(call mkdir_deps,db,sync/repositories/android,background/announcements) \
   $(SERVICES_MANIFEST_FRAGMENTS) \
   WebAppManifestFragment.xml.in \
   WebAppsFragments.java \

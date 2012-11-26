@@ -203,13 +203,11 @@
                   <menupopup id="viewSidebarMenu">
                     <menuitem id="menu_bookmarksSidebar"
                               key="viewBookmarksSidebarKb"
-                              observes="viewBookmarksSidebar"
-                              accesskey="&bookmarksButton.accesskey;"/>
+                              observes="viewBookmarksSidebar"/>
                     <menuitem id="menu_historySidebar"
                               key="key_gotoHistory"
                               observes="viewHistorySidebar"
-                              label="&historyButton.label;"
-                              accesskey="&historySidebarCmd.accesskey;"/>
+                              label="&historyButton.label;"/>
                     <menuitem id="menu_socialSidebar"
                               type="checkbox"
                               autocheck="false"
@@ -507,27 +505,38 @@
                         accesskey="&addons.accesskey;"
                         key="key_openAddons"
                         command="Tools:Addons"/>
-              <menuitem id="menu_socialToggle"
-                        type="checkbox"
-                        autocheck="false"
-                        command="Social:Toggle"/>
-              <menu id="menu_socialAmbientMenu"
-                    class="show-only-for-keyboard">
-                <menupopup id="menu_socialAmbientMenuPopup">
+              <menu id="menu_socialAmbientMenu">
+                <menupopup id="menu_social-statusarea-popup">
+                  <menuitem class="social-statusarea-user menuitem-iconic" pack="start" align="center"
+                            observes="socialBroadcaster_userDetails"
+                            oncommand="SocialUI.showProfile(); document.getElementById('social-statusarea-popup').hidePopup();">
+                    <image class="social-statusarea-user-portrait"
+                           observes="socialBroadcaster_userDetails"/>
+                    <vbox>
+                      <label class="social-statusarea-loggedInStatus"
+                             observes="socialBroadcaster_userDetails"/>
+                    </vbox>
+                  </menuitem>
+#ifndef XP_WIN
+                  <menuseparator class="social-statusarea-separator"/>
+#endif
                   <menuseparator id="socialAmbientMenuSeparator"
                                  hidden="true"/>
-                  <menuitem id="social-toggle-sidebar-keyboardmenuitem"
+                  <menuitem class="social-toggle-sidebar-menuitem"
                             type="checkbox"
                             autocheck="false"
                             command="Social:ToggleSidebar"
                             label="&social.toggleSidebar.label;"
                             accesskey="&social.toggleSidebar.accesskey;"/>
-                  <menuitem id="social-toggle-notifications-keyboardmenuitem"
+                  <menuitem class="social-toggle-notifications-menuitem"
                             type="checkbox"
                             autocheck="false"
                             command="Social:ToggleNotifications"
                             label="&social.toggleNotifications.label;"
                             accesskey="&social.toggleNotifications.accesskey;"/>
+                  <menuseparator class="social-statusarea-separator"/>
+                  <menuitem class="social-toggle-menuitem" command="Social:Toggle"/>
+                  <menuitem class="social-remove-menuitem" command="Social:Remove"/>
                 </menupopup>
               </menu>
 #ifdef MOZ_SERVICES_SYNC
@@ -548,16 +557,34 @@
                     label="&webDeveloperMenu.label;"
                     accesskey="&webDeveloperMenu.accesskey;">
                 <menupopup id="menuWebDeveloperPopup">
-                  <menuitem id="menu_devToolbox" observes="devtoolsMenuBroadcaster_DevToolbox"/>
+                  <menuitem id="menu_devToolbox"
+                            observes="devtoolsMenuBroadcaster_DevToolbox"
+                            accesskey="&devToolbox.accesskey;"/>
                   <menuseparator id="menu_devtools_separator"/>
-                  <menuitem id="menu_devToolbar" observes="devtoolsMenuBroadcaster_DevToolbar" accesskey="&devToolbarMenu.accesskey;"/>
-                  <menuitem id="menu_remoteWebConsole" observes="devtoolsMenuBroadcaster_RemoteWebConsole"/>
-                  <menuitem id="menu_responsiveUI" observes="devtoolsMenuBroadcaster_ResponsiveUI" accesskey="&responsiveDesignTool.accesskey;"/>
-                  <menuitem id="menu_scratchpad" observes="devtoolsMenuBroadcaster_Scratchpad" accesskey="&scratchpad.accesskey;"/>
-                  <menuitem id="menu_pageSource" observes="devtoolsMenuBroadcaster_PageSource" accesskey="&pageSourceCmd.accesskey;"/>
-                  <menuitem id="javascriptConsole" observes="devtoolsMenuBroadcaster_ErrorConsole" accesskey="&errorConsoleCmd.accesskey;"/>
+                  <menuitem id="menu_devToolbar"
+                            observes="devtoolsMenuBroadcaster_DevToolbar"
+                            accesskey="&devToolbarMenu.accesskey;"/>
+                  <menuitem id="menu_remoteWebConsole"
+                            observes="devtoolsMenuBroadcaster_RemoteWebConsole"/>
+                  <menuitem id="menu_responsiveUI"
+                            observes="devtoolsMenuBroadcaster_ResponsiveUI"
+                            accesskey="&responsiveDesignTool.accesskey;"/>
+                  <menuitem id="menu_scratchpad"
+                            observes="devtoolsMenuBroadcaster_Scratchpad"
+                            accesskey="&scratchpad.accesskey;"/>
+                  <menuitem id="menu_pageSource"
+                            observes="devtoolsMenuBroadcaster_PageSource"
+                            accesskey="&pageSourceCmd.accesskey;"/>
+                  <menuitem id="javascriptConsole"
+                            observes="devtoolsMenuBroadcaster_ErrorConsole"
+                            accesskey="&errorConsoleCmd.accesskey;"/>
+                  <menuseparator id="menu_devToolsConnectSeparator"/>
+                  <menuitem id="menu_devtools_connect"
+                            observes="devtoolsMenuBroadcaster_connect"/>
                   <menuseparator id="devToolsEndSeparator"/>
-                  <menuitem id="getMoreDevtools" observes="devtoolsMenuBroadcaster_GetMoreTools" accesskey="&getMoreDevtoolsCmd.accesskey;"/>
+                  <menuitem id="getMoreDevtools"
+                            observes="devtoolsMenuBroadcaster_GetMoreTools"
+                            accesskey="&getMoreDevtoolsCmd.accesskey;"/>
                 </menupopup>
               </menu>
               <menuitem id="menu_pageInfo"

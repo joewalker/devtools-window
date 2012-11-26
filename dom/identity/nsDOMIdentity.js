@@ -18,12 +18,10 @@ Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/IdentityUtils.jsm");
 
+// This is the child process corresponding to nsIDOMIdentity
 XPCOMUtils.defineLazyServiceGetter(this, "cpmm",
                                    "@mozilla.org/childprocessmessagemanager;1",
                                    "nsIMessageSender");
-
-// This is the child process corresponding to nsIDOMIdentity.
-
 
 function nsDOMIdentity(aIdentityInternal) {
   this._identityInternal = aIdentityInternal;
@@ -34,6 +32,8 @@ nsDOMIdentity.prototype = {
     watch: 'r',
     request: 'r',
     logout: 'r',
+    get: 'r',
+    getVerifiedEmail: 'r',
 
     // Provisioning
     beginProvisioning: 'r',
@@ -53,7 +53,6 @@ nsDOMIdentity.prototype = {
    */
 
   watch: function nsDOMIdentity_watch(aOptions) {
-    this._log("watch");
     if (this._rpWatcher) {
       throw new Error("navigator.id.watch was already called");
     }
@@ -77,7 +76,7 @@ nsDOMIdentity.prototype = {
       throw new Error("onready must be a function");
     }
 
-    let message = this.DOMIdentityMessage();
+    let message = this.DOMIdentityMessage(aOptions);
 
     // loggedInUser vs loggedInEmail
     // https://developer.mozilla.org/en-US/docs/DOM/navigator.id.watch
@@ -112,8 +111,11 @@ nsDOMIdentity.prototype = {
     let util = this._window.QueryInterface(Ci.nsIInterfaceRequestor)
                            .getInterface(Ci.nsIDOMWindowUtils);
 
-    // Do not allow call of request() outside of a user input handler.
-    if (!util.isHandlingUserInput) {
+    // The only time we permit calling of request() outside of a user
+    // input handler is when we are handling the (deprecated) get() or
+    // getVerifiedEmail() calls, which make use of an RP context
+    // marked as _internal.
+    if (!util.isHandlingUserInput && !aOptions._internal) {
       return;
     }
 
@@ -125,7 +127,7 @@ nsDOMIdentity.prototype = {
       throw new Error("navigator.id.request called too many times");
     }
 
-    let message = this.DOMIdentityMessage();
+    let message = this.DOMIdentityMessage(aOptions);
 
     if (aOptions) {
       // Optional string properties
@@ -166,6 +168,70 @@ nsDOMIdentity.prototype = {
     this._rpCalls++;
     let message = this.DOMIdentityMessage();
     this._identityInternal._mm.sendAsyncMessage("Identity:RP:Logout", message);
+  },
+
+  /*
+   * Get an assertion.  This function is deprecated.  RPs are
+   * encouraged to use the observer API instead (watch + request).
+   */
+  get: function nsDOMIdentity_get(aCallback, aOptions) {
+    var opts = {};
+    aOptions = aOptions || {};
+
+    // We use the observer API (watch + request) to implement get().
+    // Because the caller can call get() and getVerifiedEmail() as
+    // many times as they want, we lift the restriction that watch() can
+    // only be called once.
+    this._rpWatcher = null;
+
+    // This flag tells internal_api.js (in the shim) to record in the
+    // login parameters whether the assertion was acquired silently or
+    // with user interaction.
+    opts._internal = true;
+
+    opts.privacyPolicy = aOptions.privacyPolicy || undefined;
+    opts.termsOfService = aOptions.termsOfService || undefined;
+    opts.privacyURL = aOptions.privacyURL || undefined;
+    opts.tosURL = aOptions.tosURL || undefined;
+    opts.siteName = aOptions.siteName || undefined;
+    opts.siteLogo = aOptions.siteLogo || undefined;
+
+    if (checkDeprecated(aOptions, "silent")) {
+      // Silent has been deprecated, do nothing. Placing the check here
+      // prevents the callback from being called twice, once with null and
+      // once after internalWatch has been called. See issue #1532:
+      // https://github.com/mozilla/browserid/issues/1532
+      if (aCallback) {
+        setTimeout(function() { aCallback(null); }, 0);
+      }
+      return;
+    }
+
+    // Get an assertion by using our observer api: watch + request.
+    var self = this;
+    this.watch({
+      oncancel: function get_oncancel() {
+        if (aCallback) {
+          aCallback(null);
+          aCallback = null;
+        }
+      },
+      onlogin: function get_onlogin(assertion, internalParams) {
+        if (assertion && aCallback && internalParams && !internalParams.silent) {
+          aCallback(assertion);
+          aCallback = null;
+        }
+      },
+      onlogout: function get_onlogout() {},
+      onready: function get_onready() {
+        self.request(opts);
+      }
+    });
+  },
+
+  getVerifiedEmail: function nsDOMIdentity_getVerifiedEmail(aCallback) {
+    Cu.reportError("WARNING: getVerifiedEmail has been deprecated");
+    this.get(aCallback, {});
   },
 
   /**
@@ -314,7 +380,6 @@ nsDOMIdentity.prototype = {
 
   _receiveMessage: function nsDOMIdentity_receiveMessage(aMessage) {
     let msg = aMessage.json;
-    this._log("receiveMessage: " + aMessage.name);
 
     switch (aMessage.name) {
       case "Identity:ResetState":
@@ -327,16 +392,22 @@ nsDOMIdentity.prototype = {
       case "Identity:RP:Watch:OnLogin":
         // Do we have a watcher?
         if (!this._rpWatcher) {
+          dump("WARNING: Received OnLogin message, but there is no RP watcher\n");
           return;
         }
 
         if (this._rpWatcher.onlogin) {
-          this._rpWatcher.onlogin(msg.assertion);
+          if (this._rpWatcher._internal) {
+            this._rpWatcher.onlogin(msg.assertion, msg._internalParams);
+          } else {
+            this._rpWatcher.onlogin(msg.assertion);
+          }
         }
         break;
       case "Identity:RP:Watch:OnLogout":
         // Do we have a watcher?
         if (!this._rpWatcher) {
+          dump("WARNING: Received OnLogout message, but there is no RP watcher\n");
           return;
         }
 
@@ -347,6 +418,7 @@ nsDOMIdentity.prototype = {
       case "Identity:RP:Watch:OnReady":
         // Do we have a watcher?
         if (!this._rpWatcher) {
+          dump("WARNING: Received OnReady message, but there is no RP watcher\n");
           return;
         }
 
@@ -357,6 +429,7 @@ nsDOMIdentity.prototype = {
       case "Identity:RP:Request:OnCancel":
         // Do we have a watcher?
         if (!this._rpWatcher) {
+          dump("WARNING: Received OnCancel message, but there is no RP watcher\n");
           return;
         }
 
@@ -419,13 +492,23 @@ nsDOMIdentity.prototype = {
   },
 
   /**
-   * Helper to create messages to send using a message manager
+   * Helper to create messages to send using a message manager.
+   * Pass through user options if they are not functions.  Always
+   * overwrite id and origin.  Caller does not get to set those.
    */
-  DOMIdentityMessage: function DOMIdentityMessage() {
-    return {
-      id: this._id,
-      origin: this._origin,
-    };
+  DOMIdentityMessage: function DOMIdentityMessage(aOptions) {
+    aOptions = aOptions || {};
+    let message = {};
+
+    objectCopy(aOptions, message);
+
+    // outer window id
+    message.id = this._id;
+
+    // window origin
+    message.origin = this._origin;
+
+    return message;
   },
 
 };

@@ -43,7 +43,6 @@
 #include "nsDisplayList.h"
 #include "nsDOMCSSDeclaration.h"
 #include "mozilla/dom/Element.h"
-#include "nsGenericElement.h"
 #include "CSSCalc.h"
 #include "nsWrapperCacheInlines.h"
 
@@ -2916,7 +2915,7 @@ nsComputedDOMStyle::DoGetBorderImageSlice()
   NS_FOR_CSS_SIDES (side) {
     nsROCSSPrimitiveValue* val = GetROCSSPrimitiveValue();
     valueList->AppendCSSValue(val);
-    SetValueToCoord(val, border->mBorderImageSlice.Get(side), false, nullptr);
+    SetValueToCoord(val, border->mBorderImageSlice.Get(side), true, nullptr);
   }
 
   // Fill keyword.
@@ -2938,7 +2937,7 @@ nsComputedDOMStyle::DoGetBorderImageWidth()
     nsROCSSPrimitiveValue* val = GetROCSSPrimitiveValue();
     valueList->AppendCSSValue(val);
     SetValueToCoord(val, border->mBorderImageWidth.Get(side),
-                    false, nullptr);
+                    true, nullptr);
   }
 
   return valueList;
@@ -2955,7 +2954,7 @@ nsComputedDOMStyle::DoGetBorderImageOutset()
     nsROCSSPrimitiveValue* val = GetROCSSPrimitiveValue();
     valueList->AppendCSSValue(val);
     SetValueToCoord(val, border->mBorderImageOutset.Get(side),
-                    false, nullptr);
+                    true, nullptr);
   }
 
   return valueList;

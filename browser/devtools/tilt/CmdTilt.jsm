@@ -36,6 +36,29 @@ gcli.addCommand({
 
 
 /**
+ * 'tilt toggle' command
+ */
+gcli.addCommand({
+  name: "tilt toggle",
+  buttonId: "command-button-tilt",
+  buttonClass: "command-button",
+  hidden: true,
+  exec: function(args, context) {
+    let chromeWindow = context.environment.chromeDocument.defaultView;
+
+    if (TiltManager._instances.has(chromeWindow)) {
+      let Tilt = TiltManager.getTiltForBrowser(chromeWindow);
+      Tilt.destroy(Tilt.currentWindowId);
+    }
+    else {
+      let Tilt = TiltManager.getTiltForBrowser(chromeWindow);
+      Tilt.initializeForCurrentTab();
+    }
+  }
+});
+
+
+/**
  * 'tilt translate' command
  */
 gcli.addCommand({
@@ -161,7 +184,7 @@ gcli.addCommand({
   manual: gcli.lookup("tiltCloseManual"),
   exec: function(args, context) {
     let chromeWindow = context.environment.chromeDocument.defaultView;
-    let Tilt = chromeWindow.Tilt;
+    let Tilt = TiltManager.getTiltForBrowser(chromeWindow);
 
     Tilt.destroy(Tilt.currentWindowId);
   }

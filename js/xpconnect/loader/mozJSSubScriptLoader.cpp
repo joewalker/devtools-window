@@ -6,6 +6,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozJSSubScriptLoader.h"
+#include "mozJSComponentLoader.h"
 #include "mozJSLoaderUtils.h"
 
 #include "nsIServiceManager.h"
@@ -53,6 +54,9 @@ mozJSLoaderErrorReporter(JSContext *cx, const char *message, JSErrorReport *rep)
 
 mozJSSubScriptLoader::mozJSSubScriptLoader() : mSystemPrincipal(nullptr)
 {
+    // Force construction of the JS component loader.  We may need it later.
+    nsCOMPtr<xpcIJSModuleLoader> componentLoader =
+        do_GetService(MOZJSCOMPONENTLOADER_CONTRACTID);
 }
 
 mozJSSubScriptLoader::~mozJSSubScriptLoader()
@@ -115,8 +119,7 @@ mozJSSubScriptLoader::ReadScript(nsIURI *uri, JSContext *cx, JSObject *target_ob
 
     JS::CompileOptions options(cx);
     options.setPrincipals(nsJSPrincipals::get(principal))
-           .setFileAndLine(uriStr, 1)
-           .setSourcePolicy(JS::CompileOptions::LAZY_SOURCE);
+           .setFileAndLine(uriStr, 1);
     js::RootedObject target_obj_root(cx, target_obj);
     if (!charset.IsVoid()) {
         nsString script;
@@ -130,6 +133,9 @@ mozJSSubScriptLoader::ReadScript(nsIURI *uri, JSContext *cx, JSObject *target_ob
         *scriptp = JS::Compile(cx, target_obj_root, options,
                                reinterpret_cast<const jschar*>(script.get()), script.Length());
     } else {
+        // We only use LAZY_SOURCE when no special encoding is specified because
+        // the lazy source loader doesn't know the encoding.
+        options.setSourcePolicy(JS::CompileOptions::LAZY_SOURCE);
         *scriptp = JS::Compile(cx, target_obj_root, options, buf.get(), len);
     }
 
@@ -179,23 +185,10 @@ mozJSSubScriptLoader::LoadSubScript(const nsAString& url,
 
 
     if (!targetObj) {
-        // If the user didn't provide an object to eval onto, find the global
-        // object by walking the parent chain of the calling object.
-        nsCOMPtr<nsIXPConnect> xpc = do_GetService(nsIXPConnect::GetCID());
-        NS_ENSURE_TRUE(xpc, NS_ERROR_FAILURE);
-
-        nsAXPCNativeCallContext *cc = nullptr;
-        rv = xpc->GetCurrentNativeCallContext(&cc);
-        NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
-
-        nsCOMPtr<nsIXPConnectWrappedNative> wn;
-        rv = cc->GetCalleeWrapper(getter_AddRefs(wn));
-        NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
-
-        rv = wn->GetJSObject(&targetObj);
-        NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
-
-        targetObj = JS_GetGlobalForObject(cx, targetObj);
+        // If the user didn't provide an object to eval onto, find one.
+        mozJSComponentLoader* loader = mozJSComponentLoader::Get();
+        rv = loader->FindTargetObject(cx, &targetObj);
+        NS_ENSURE_SUCCESS(rv, rv);
     }
 
     // Remember an object out of the calling compartment so that we

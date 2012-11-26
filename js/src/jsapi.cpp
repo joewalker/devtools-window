@@ -55,6 +55,7 @@
 #include "jsxml.h"
 
 #include "builtin/Eval.h"
+#include "builtin/Intl.h"
 #include "builtin/MapObject.h"
 #include "builtin/RegExp.h"
 #include "builtin/ParallelArray.h"
@@ -679,54 +680,56 @@ static JSBool js_NewRuntimeWasCalled = JS_FALSE;
 /*
  * Thread Local Storage slot for storing the runtime for a thread.
  */
-namespace js {
-mozilla::ThreadLocal<PerThreadData *> TlsPerThreadData;
-}
-
-namespace JS {
+mozilla::ThreadLocal<PerThreadData *> js::TlsPerThreadData;
 
 #ifdef DEBUG
 JS_FRIEND_API(void)
-EnterAssertNoGCScope()
+JS::EnterAssertNoGCScope()
 {
     ++TlsPerThreadData.get()->gcAssertNoGCDepth;
 }
 
 JS_FRIEND_API(void)
-LeaveAssertNoGCScope()
+JS::LeaveAssertNoGCScope()
 {
     --TlsPerThreadData.get()->gcAssertNoGCDepth;
     JS_ASSERT(TlsPerThreadData.get()->gcAssertNoGCDepth >= 0);
 }
 
 JS_FRIEND_API(bool)
-InNoGCScope()
+JS::InNoGCScope()
 {
     return TlsPerThreadData.get()->gcAssertNoGCDepth > 0;
 }
 
 JS_FRIEND_API(bool)
-NeedRelaxedRootChecks()
+JS::isGCEnabled()
+{
+    return !TlsPerThreadData.get()->suppressGC;
+}
+
+JS_FRIEND_API(bool)
+JS::NeedRelaxedRootChecks()
 {
     return TlsPerThreadData.get()->gcRelaxRootChecks;
 }
 #else
-JS_FRIEND_API(void) EnterAssertNoGCScope() {}
-JS_FRIEND_API(void) LeaveAssertNoGCScope() {}
-JS_FRIEND_API(bool) InNoGCScope() { return false; }
-JS_FRIEND_API(bool) NeedRelaxedRootChecks() { return false; }
+JS_FRIEND_API(void) JS::EnterAssertNoGCScope() {}
+JS_FRIEND_API(void) JS::LeaveAssertNoGCScope() {}
+JS_FRIEND_API(bool) JS::InNoGCScope() { return false; }
+JS_FRIEND_API(bool) JS::isGCEnabled() { return true; }
+JS_FRIEND_API(bool) JS::NeedRelaxedRootChecks() { return false; }
 #endif
-
-} /* namespace JS */
 
 static const JSSecurityCallbacks NullSecurityCallbacks = { };
 
-js::PerThreadData::PerThreadData(JSRuntime *runtime)
-  : runtime_(runtime)
+PerThreadData::PerThreadData(JSRuntime *runtime)
+  : runtime_(runtime),
 #ifdef DEBUG
-  , gcRelaxRootChecks(false)
-  , gcAssertNoGCDepth(0)
+    gcRelaxRootChecks(false),
+    gcAssertNoGCDepth(0),
 #endif
+    suppressGC(0)
 {}
 
 JSRuntime::JSRuntime(JSUseHelperThreads useHelperThreads)
@@ -742,6 +745,7 @@ JSRuntime::JSRuntime(JSUseHelperThreads useHelperThreads)
 #ifdef JS_METHODJIT
     jaegerRuntime_(NULL),
 #endif
+    ionRuntime_(NULL),
     selfHostedGlobal_(NULL),
     nativeStackBase(0),
     nativeStackQuota(0),
@@ -803,7 +807,7 @@ JSRuntime::JSRuntime(JSUseHelperThreads useHelperThreads)
     gcSliceBudget(SliceBudget::Unlimited),
     gcIncrementalEnabled(true),
     gcExactScanningEnabled(true),
-    gcInTransplant(false),
+    gcManipulatingDeadCompartments(false),
     gcObjectsMarkedInDeadCompartments(0),
     gcPoke(false),
     heapState(Idle),
@@ -869,15 +873,16 @@ JSRuntime::JSRuntime(JSUseHelperThreads useHelperThreads)
 #ifdef DEBUG
     noGCOrAllocationCheck(0),
 #endif
-    inOOMReport(0),
     jitHardening(false),
     ionTop(NULL),
     ionJSContext(NULL),
     ionStackLimit(0),
     ionActivation(NULL),
     ionPcScriptCache(NULL),
+    threadPool(this),
     ionReturnOverride_(MagicValue(JS_ARG_POISON)),
-    useHelperThreads_(useHelperThreads)
+    useHelperThreads_(useHelperThreads),
+    requestedHelperThreadCount(-1)
 {
     /* Initialize infallibly first, so we can goto bad and JS_DestroyRuntime. */
     JS_INIT_CLIST(&debuggerList);
@@ -939,6 +944,9 @@ JSRuntime::init(uint32_t maxbytes)
         return false;
 
     if (!scriptFilenameTable.init())
+        return false;
+
+    if (!threadPool.init())
         return false;
 
 #ifdef JS_THREADSAFE
@@ -1013,6 +1021,9 @@ JSRuntime::~JSRuntime()
     js_delete(mathCache_);
 #ifdef JS_METHODJIT
     js_delete(jaegerRuntime_);
+#endif
+#ifdef JS_ION
+    js_delete(ionRuntime_);
 #endif
     js_delete(execAlloc_);  /* Delete after jaegerRuntime_. */
 
@@ -1483,6 +1494,14 @@ JSAutoCompartment::JSAutoCompartment(JSContext *cx, JSStackFrame *target)
     cx_->enterCompartment(Valueify(target)->global().compartment());
 }
 
+JSAutoCompartment::JSAutoCompartment(JSContext *cx, JSString *target)
+  : cx_(cx),
+    oldCompartment_(cx->compartment)
+{
+    AssertHeapIsIdleOrIterating(cx_);
+    cx_->enterCompartment(target->compartment());
+}
+
 JSAutoCompartment::~JSAutoCompartment()
 {
     cx_->leaveCompartment(oldCompartment_);
@@ -1557,7 +1576,7 @@ JS_TransplantObject(JSContext *cx, JSObject *origobjArg, JSObject *targetArg)
     JS_ASSERT(!IsCrossCompartmentWrapper(origobj));
     JS_ASSERT(!IsCrossCompartmentWrapper(target));
 
-    AutoTransplantGC agc(cx);
+    AutoMaybeTouchDeadCompartments agc(cx);
 
     JSCompartment *destination = target->compartment();
     WrapperMap &map = destination->crossCompartmentWrappers;
@@ -1631,7 +1650,7 @@ js_TransplantObjectWithWrapper(JSContext *cx,
     RootedObject targetobj(cx, targetobjArg);
     RootedObject targetwrapper(cx, targetwrapperArg);
 
-    AutoTransplantGC agc(cx);
+    AutoMaybeTouchDeadCompartments agc(cx);
 
     AssertHeapIsIdle(cx);
     JS_ASSERT(!IsCrossCompartmentWrapper(origobj));
@@ -1793,6 +1812,9 @@ static JSStdName standard_class_atoms[] = {
     {js_InitSetClass,                   EAGER_CLASS_ATOM(Set), &js::SetObject::class_},
     {js_InitParallelArrayClass,         EAGER_CLASS_ATOM(ParallelArray), &js::ParallelArrayObject::class_},
     {js_InitProxyClass,                 EAGER_ATOM_AND_CLASP(Proxy)},
+#if ENABLE_INTL_API
+    {js_InitIntlClass,                  EAGER_ATOM_AND_CLASP(Intl)},
+#endif
     {NULL,                              0, NULL}
 };
 
@@ -4857,8 +4879,8 @@ JS_CloneFunctionObject(JSContext *cx, JSObject *funobjArg, JSRawObject parentArg
      * script, we cannot clone it without breaking the compiler's assumptions.
      */
     RootedFunction fun(cx, funobj->toFunction());
-    if (fun->isInterpreted() && (fun->script()->enclosingStaticScope() ||
-        (fun->script()->compileAndGo && !parent->isGlobal())))
+    if (fun->isInterpreted() && (fun->nonLazyScript()->enclosingStaticScope() ||
+        (fun->nonLazyScript()->compileAndGo && !parent->isGlobal())))
     {
         JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_BAD_CLONE_FUNOBJ_SCOPE);
         return NULL;
@@ -4991,8 +5013,8 @@ JS_DefineFunctions(JSContext *cx, JSObject *objArg, JSFunctionSpec *fs)
 
             flags &= ~JSFUN_GENERIC_NATIVE;
             JSFunction *fun = js_DefineFunction(cx, ctor, id, js_generic_native_method_dispatcher,
-                                    fs->nargs + 1, flags, NullPtr(),
-                                    JSFunction::ExtendedFinalizeKind);
+                                                fs->nargs + 1, flags,
+                                                JSFunction::ExtendedFinalizeKind);
             if (!fun)
                 return JS_FALSE;
 
@@ -5013,19 +5035,36 @@ JS_DefineFunctions(JSContext *cx, JSObject *objArg, JSFunctionSpec *fs)
         if (fs->selfHostedName && cx->runtime->isSelfHostedGlobal(cx->global()))
             return JS_TRUE;
 
-        Rooted<PropertyName*> selfHostedPropertyName(cx);
+        /*
+         * Delay cloning self-hosted functions until they are called. This is
+         * achieved by passing js_DefineFunction a NULL JSNative which
+         * produces an interpreted JSFunction where !hasScript. Interpreted
+         * call paths then call InitializeLazyFunctionScript if !hasScript.
+         */
         if (fs->selfHostedName) {
-            JSAtom *selfHostedAtom = Atomize(cx, fs->selfHostedName, strlen(fs->selfHostedName));
-            if (!selfHostedAtom)
+            RootedFunction fun(cx, js_DefineFunction(cx, obj, id, /* native = */ NULL, fs->nargs, 0,
+                                                     JSFunction::ExtendedFinalizeKind));
+            if (!fun)
                 return JS_FALSE;
-            selfHostedPropertyName = selfHostedAtom->asPropertyName();
+            JSFunction::setSingletonType(cx, fun);
+            fun->setIsSelfHostedBuiltin();
+            fun->setExtendedSlot(0, PrivateValue(fs));
+            RootedAtom shAtom(cx, Atomize(cx, fs->selfHostedName, strlen(fs->selfHostedName)));
+            if (!shAtom)
+                return JS_FALSE;
+            RootedObject holder(cx, cx->global()->intrinsicsHolder());
+            if (!JS_DefinePropertyById(cx,holder, AtomToId(shAtom),
+                                       ObjectValue(*fun), NULL, NULL, 0))
+            {
+                return JS_FALSE;
+            }
+        } else {
+            JSFunction *fun = js_DefineFunction(cx, obj, id, fs->call.op, fs->nargs, flags);
+            if (!fun)
+                return JS_FALSE;
+            if (fs->call.info)
+                fun->setJitInfo(fs->call.info);
         }
-        JSFunction *fun = js_DefineFunction(cx, obj, id, fs->call.op, fs->nargs, flags,
-                                            selfHostedPropertyName);
-        if (!fun)
-            return JS_FALSE;
-        if (fs->call.info)
-            fun->setJitInfo(fs->call.info);
     }
     return JS_TRUE;
 }
@@ -5462,16 +5501,20 @@ JS_CompileFunction(JSContext *cx, JSObject *objArg, const char *name,
 }
 
 JS_PUBLIC_API(JSString *)
-JS_DecompileScript(JSContext *cx, JSScript *script, const char *name, unsigned indent)
+JS_DecompileScript(JSContext *cx, JSScript *scriptArg, const char *name, unsigned indent)
 {
     JS_THREADSAFE_ASSERT(cx->compartment != cx->runtime->atomsCompartment);
 
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
+    RootedScript script(cx, scriptArg);
     RootedFunction fun(cx, script->function());
     if (fun)
         return JS_DecompileFunction(cx, fun, indent);
-    return script->sourceData(cx);
+    bool haveSource = script->scriptSource()->hasSourceData();
+    if (!haveSource && !JSScript::loadSource(cx, script, &haveSource))
+        return NULL;
+    return haveSource ? script->sourceData(cx) : js_NewStringCopyZ(cx, "[no source]");
 }
 
 JS_PUBLIC_API(JSString *)
@@ -5750,10 +5793,8 @@ JS_CallFunctionValue(JSContext *cx, JSObject *objArg, jsval fval, unsigned argc,
     return Invoke(cx, ObjectOrNullValue(obj), fval, argc, argv, rval);
 }
 
-namespace JS {
-
 JS_PUBLIC_API(bool)
-Call(JSContext *cx, jsval thisv, jsval fval, unsigned argc, jsval *argv, jsval *rval)
+JS::Call(JSContext *cx, jsval thisv, jsval fval, unsigned argc, jsval *argv, jsval *rval)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
@@ -5762,8 +5803,6 @@ Call(JSContext *cx, jsval thisv, jsval fval, unsigned argc, jsval *argv, jsval *
 
     return Invoke(cx, thisv, fval, argc, argv, rval);
 }
-
-} // namespace JS
 
 JS_PUBLIC_API(JSObject *)
 JS_New(JSContext *cx, JSObject *ctorArg, unsigned argc, jsval *argv)
@@ -7086,8 +7125,6 @@ JS_CallOnce(JSCallOnceType *once, JSInitCallback func)
 #endif
 }
 
-namespace JS {
-
 AutoGCRooter::AutoGCRooter(JSContext *cx, ptrdiff_t tag)
   : down(cx->runtime->autoGCRooters), tag(tag), stackTop(&cx->runtime->autoGCRooters)
 {
@@ -7097,15 +7134,13 @@ AutoGCRooter::AutoGCRooter(JSContext *cx, ptrdiff_t tag)
 
 #ifdef DEBUG
 JS_PUBLIC_API(void)
-AssertArgumentsAreSane(JSContext *cx, const JS::Value &value)
+JS::AssertArgumentsAreSane(JSContext *cx, const JS::Value &value)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
     assertSameCompartment(cx, value);
 }
 #endif /* DEBUG */
-
-} // namespace JS
 
 JS_PUBLIC_API(void *)
 JS_EncodeScript(JSContext *cx, JSRawScript scriptArg, uint32_t *lengthp)

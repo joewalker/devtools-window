@@ -88,7 +88,7 @@ namespace types {
 inline
 CompilerOutput::CompilerOutput()
   : script(NULL),
-    isIonFlag(false),
+    kindInt(MethodJIT),
     constructing(false),
     barriers(false),
     chunkIndex(false)
@@ -99,7 +99,7 @@ inline mjit::JITScript *
 CompilerOutput::mjit() const
 {
 #ifdef JS_METHODJIT
-    JS_ASSERT(isJM() && isValid());
+    JS_ASSERT(kind() == MethodJIT && isValid());
     return script->getJIT(constructing, barriers);
 #else
     return NULL;
@@ -110,11 +110,15 @@ inline ion::IonScript *
 CompilerOutput::ion() const
 {
 #ifdef JS_ION
-    JS_ASSERT(isIon() && isValid());
-    return script->ionScript();
-#else
-    return NULL;
+    JS_ASSERT(kind() != MethodJIT && isValid());
+    switch (kind()) {
+      case MethodJIT: break;
+      case Ion: return script->ionScript();
+      case ParallelIon: return script->parallelIonScript();
+    }
 #endif
+    JS_NOT_REACHED("Invalid kind of CompilerOutput");
+    return NULL;
 }
 
 inline bool
@@ -127,8 +131,9 @@ CompilerOutput::isValid() const
     TypeCompartment &types = script->compartment()->types;
 #endif
 
+    switch (kind()) {
+      case MethodJIT: {
 #ifdef JS_METHODJIT
-    if (isJM()) {
         mjit::JITScript *jit = script->getJIT(constructing, barriers);
         if (!jit)
             return false;
@@ -137,20 +142,31 @@ CompilerOutput::isValid() const
             return false;
         JS_ASSERT(this == chunk->recompileInfo.compilerOutput(types));
         return true;
-    }
 #endif
+      }
 
+      case Ion:
 #ifdef JS_ION
-    if (isIon()) {
         if (script->hasIonScript()) {
             JS_ASSERT(this == script->ion->recompileInfo().compilerOutput(types));
             return true;
         }
         if (script->isIonCompilingOffThread())
             return true;
+#endif
+        return false;
+
+      case ParallelIon:
+#ifdef JS_ION
+        if (script->hasParallelIonScript()) {
+            JS_ASSERT(this == script->parallelIonScript()->recompileInfo().compilerOutput(types));
+            return true;
+        }
+        if (script->isParallelIonCompilingOffThread())
+            return true;
+#endif
         return false;
     }
-#endif
     return false;
 }
 
@@ -387,17 +403,12 @@ struct AutoEnterCompilation
 {
     JSContext *cx;
     RecompileInfo &info;
+    CompilerOutput::Kind kind;
 
-    enum Compiler {
-        JM,
-        Ion
-    };
-    Compiler mode;
-
-    AutoEnterCompilation(JSContext *cx, Compiler mode)
+    AutoEnterCompilation(JSContext *cx, CompilerOutput::Kind kind)
       : cx(cx),
         info(cx->compartment->types.compiledInfo),
-        mode(mode)
+        kind(kind)
     {
         JS_ASSERT(cx->compartment->activeAnalysis);
         JS_ASSERT(info.outputIndex == RecompileInfo::NoCompilerRunning);
@@ -407,7 +418,7 @@ struct AutoEnterCompilation
     {
         CompilerOutput co;
         co.script = script;
-        co.isIonFlag = (mode == Ion);
+        co.setKind(kind);
         co.constructing = constructing;
         co.barriers = cx->compartment->compileBarriers();
         co.chunkIndex = chunkIndex;
@@ -494,6 +505,8 @@ GetTypeCallerInitObject(JSContext *cx, JSProtoKey key)
     return GetTypeNewObject(cx, key);
 }
 
+void MarkIteratorUnknownSlow(JSContext *cx);
+
 /*
  * When using a custom iterator within the initialization of a 'for in' loop,
  * mark the iterator values as unknown.
@@ -501,11 +514,12 @@ GetTypeCallerInitObject(JSContext *cx, JSProtoKey key)
 inline void
 MarkIteratorUnknown(JSContext *cx)
 {
-    extern void MarkIteratorUnknownSlow(JSContext *cx);
-
     if (cx->typeInferenceEnabled())
         MarkIteratorUnknownSlow(cx);
 }
+
+void TypeMonitorCallSlow(JSContext *cx, HandleObject callee, const CallArgs &args,
+                         bool constructing);
 
 /*
  * Monitor a javascript call, either on entry to the interpreter or made
@@ -514,14 +528,11 @@ MarkIteratorUnknown(JSContext *cx)
 inline bool
 TypeMonitorCall(JSContext *cx, const js::CallArgs &args, bool constructing)
 {
-    extern void TypeMonitorCallSlow(JSContext *cx, HandleObject callee,
-                                    const CallArgs &args, bool constructing);
-
     js::RootedObject callee(cx, &args.callee());
     if (callee->isFunction()) {
         JSFunction *fun = callee->toFunction();
         if (fun->isInterpreted()) {
-            js::RootedScript script(cx, fun->script());
+            js::RootedScript script(cx, fun->nonLazyScript());
             if (!script->ensureRanAnalysis(cx))
                 return false;
             if (cx->typeInferenceEnabled())
@@ -692,7 +703,7 @@ UseNewTypeForClone(JSFunction *fun)
      * instance a singleton type and clone the underlying script.
      */
 
-    RawScript script = fun->script().get(nogc);
+    RawScript script = fun->nonLazyScript().get(nogc);
 
     if (script->length >= 50)
         return false;

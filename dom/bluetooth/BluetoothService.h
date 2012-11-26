@@ -264,7 +264,7 @@ public:
   virtual nsresult
   PrepareAdapterInternal(const nsAString& aPath) = 0;
 
-  virtual bool
+  virtual void
   Connect(const nsAString& aDeviceAddress,
           const nsAString& aAdapterPath,
           uint16_t aProfileId,
@@ -305,8 +305,8 @@ public:
 
 protected:
   BluetoothService()
-  : mEnabled(false), mSettingsCheckInProgress(false),
-    mRegisteredForLocalAgent(false)
+  : mEnabled(false)
+  , mSettingsCheckInProgress(false)
 #ifdef DEBUG
     , mLastRequestedEnable(false)
 #endif
@@ -399,7 +399,6 @@ protected:
 
   bool mEnabled;
   bool mSettingsCheckInProgress;
-  bool mRegisteredForLocalAgent;
 
 #ifdef DEBUG
   bool mLastRequestedEnable;

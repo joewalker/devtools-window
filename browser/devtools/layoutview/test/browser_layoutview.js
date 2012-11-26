@@ -1,6 +1,10 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+let tempScope = {};
+Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
+let TargetFactory = tempScope.TargetFactory;
+
 function test() {
   waitForExplicitFinish();
 
@@ -62,9 +66,10 @@ function test() {
     node = doc.querySelector("div");
     ok(node, "node found");
 
-    let toolbox = gDevTools.openToolboxForTab(gBrowser.selectedTab, "inspector");
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    let toolbox = gDevTools.openToolboxForTab(target, "inspector");
     toolbox.once("inspector-ready", function(event, panel) {
-      let inspector = gDevTools.getPanelForTarget("inspector", gBrowser.selectedTab);
+      let inspector = gDevTools.getPanelForTarget("inspector", target);
       openLayoutView(inspector);
     });
   }

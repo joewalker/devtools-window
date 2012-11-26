@@ -143,8 +143,6 @@ public:
 
   friend std::ostream& operator<<(std::ostream& stream, const ProfileEntry& entry);
 
-private:
-  friend class ThreadProfile;
   union {
     const char* mTagData;
     char mTagChars[sizeof(void*)];
@@ -156,6 +154,8 @@ private:
   };
   char mTagName;
 };
+
+typedef void (*IterateTagsCallback)(const ProfileEntry& entry, const char* tagStringData);
 
 #define PROFILE_MAX_ENTRY 100000
 class ThreadProfile
@@ -279,6 +279,33 @@ public:
   }
 
   friend std::ostream& operator<<(std::ostream& stream, const ThreadProfile& profile);
+
+  void IterateTags(IterateTagsCallback aCallback)
+  {
+    MOZ_ASSERT(aCallback);
+
+    int readPos = mReadPos;
+    while (readPos != mLastFlushPos) {
+      // Number of tag consumed
+      int incBy = 1;
+      const ProfileEntry& entry = mEntries[readPos];
+
+      // Read ahead to the next tag, if it's a 'd' tag process it now
+      const char* tagStringData = entry.mTagData;
+      int readAheadPos = (readPos + 1) % mEntrySize;
+      char tagBuff[DYNAMIC_MAX_STRING];
+      // Make sure the string is always null terminated if it fills up DYNAMIC_MAX_STRING-2
+      tagBuff[DYNAMIC_MAX_STRING-1] = '\0';
+
+      if (readAheadPos != mLastFlushPos && mEntries[readAheadPos].mTagName == 'd') {
+        tagStringData = processDynamicTag(readPos, &incBy, tagBuff);
+      }
+
+      aCallback(entry, tagStringData);
+
+      readPos = (readPos + incBy) % mEntrySize;
+    }
+  }
 
   JSObject *ToJSObject(JSContext *aCx)
   {
@@ -773,7 +800,9 @@ void TableTicker::doBacktrace(ThreadProfile &aProfile, TickSample* aSample)
   void *stackEnd = reinterpret_cast<void*>(-1);
   if (pt)
     stackEnd = static_cast<char*>(pthread_get_stackaddr_np(pt));
-  nsresult rv = FramePointerStackWalk(StackWalkCallback, 0, &array, reinterpret_cast<void**>(aSample->fp), stackEnd);
+  nsresult rv = NS_OK;
+  if (aSample->fp >= aSample->sp && aSample->fp <= stackEnd)
+    rv = FramePointerStackWalk(StackWalkCallback, 0, &array, reinterpret_cast<void**>(aSample->fp), stackEnd);
 #else
   nsresult rv = NS_StackWalk(StackWalkCallback, 0, &array, thread);
 #endif
@@ -834,7 +863,7 @@ void TableTicker::doBacktrace(ThreadProfile &aProfile, TickSample* aSample)
   // handle it correctly.
   unw_tdep_context_t *unw_ctx = reinterpret_cast<unw_tdep_context_t*> (&uc);
   mcontext_t& mcontext = reinterpret_cast<ucontext_t*> (aSample->context)->uc_mcontext;
-#define REPLACE_REG(num) unw_ctx->regs[num] = mcontext.gregs[R##num]
+#define REPLACE_REG(num) unw_ctx->regs[num] = (&mcontext.arm_r0)[num]
   REPLACE_REG(0);
   REPLACE_REG(1);
   REPLACE_REG(2);
@@ -1192,4 +1221,32 @@ const double* mozilla_sampler_get_responsiveness()
 void mozilla_sampler_frame_number(int frameNumber)
 {
   sFrameNumber = frameNumber;
+}
+
+void print_callback(const ProfileEntry& entry, const char* tagStringData) {
+  switch (entry.mTagName) {
+    case 's':
+    case 'c':
+      printf_stderr("  %s\n", tagStringData);
+  }
+}
+
+void mozilla_sampler_print_location()
+{
+  if (!stack_key_initialized)
+    mozilla_sampler_init();
+
+  ProfileStack *stack = tlsStack.get();
+  if (!stack) {
+    MOZ_ASSERT(false);
+    return;
+  }
+
+  ThreadProfile threadProfile(1000, stack);
+  doSampleStackTrace(stack, threadProfile, NULL);
+
+  threadProfile.flush();
+
+  printf_stderr("Backtrace:\n");
+  threadProfile.IterateTags(print_callback);
 }

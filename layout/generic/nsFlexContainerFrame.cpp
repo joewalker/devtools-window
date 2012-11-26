@@ -563,6 +563,16 @@ nsFlexContainerFrame::AppendFlexItemForChild(
                  "We gave flex item unconstrained available height, so it "
                  "should be complete");
 
+      // Call DidReflow to clear NS_FRAME_IN_REFLOW and any other state on the
+      // child before our next ReflowChild call.
+      // NOTE: We're intentionally calling DidReflow() instead of the wrapper
+      // FinishReflowChild() because we don't want the rest of the stuff in
+      // FinishReflowChild() (e.g. moving the frame's rect) to happen until we
+      // do our "real" reflow of the child.
+      rv = aChildFrame->DidReflow(aPresContext, &childRSForMeasuringHeight,
+                                  nsDidReflowStatus::FINISHED);
+      NS_ENSURE_SUCCESS(rv, rv);
+
       // Subtract border/padding in vertical axis, to get _just_
       // the effective computed value of the "height" property.
       nscoord childDesiredHeight = childDesiredSize.height -
@@ -944,6 +954,24 @@ nsFlexContainerFrame::GetFrameName(nsAString& aResult) const
 }
 #endif // DEBUG
 
+// Helper for BuildDisplayList, to implement this special-case for flex items
+// from the spec:
+//    Flex items paint exactly the same as block-level elements in the
+//    normal flow, except that 'z-index' values other than 'auto' create
+//    a stacking context even if 'position' is 'static'.
+// http://www.w3.org/TR/2012/CR-css3-flexbox-20120918/#painting
+uint32_t
+GetDisplayFlagsForFlexItem(nsIFrame* aFrame)
+{
+  MOZ_ASSERT(aFrame->IsFlexItem(), "Should only be called on flex items");
+
+  const nsStylePosition* pos = aFrame->GetStylePosition();
+  if (pos->mZIndex.GetUnit() == eStyleUnit_Integer) {
+    return nsIFrame::DISPLAY_CHILD_FORCE_STACKING_CONTEXT;
+  }
+  return 0;
+}
+
 NS_IMETHODIMP
 nsFlexContainerFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                        const nsRect&           aDirtyRect,
@@ -953,7 +981,8 @@ nsFlexContainerFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   NS_ENSURE_SUCCESS(rv, rv);
 
   for (nsFrameList::Enumerator e(mFrames); !e.AtEnd(); e.Next()) {
-    rv = BuildDisplayListForChild(aBuilder, e.get(), aDirtyRect, aLists);
+    rv = BuildDisplayListForChild(aBuilder, e.get(), aDirtyRect, aLists,
+                                  GetDisplayFlagsForFlexItem(e.get()));
     NS_ENSURE_SUCCESS(rv, rv);
   }
 

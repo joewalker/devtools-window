@@ -245,7 +245,7 @@ IsArrayLike(JSContext* cx, JSObject* obj)
 
   // XXXbz need to detect platform objects (including listbinding
   // ones) with indexGetters here!
-  return JS_IsArrayObject(cx, obj) || JS_IsTypedArrayObject(obj, cx);
+  return JS_IsArrayObject(cx, obj) || JS_IsTypedArrayObject(obj);
 }
 
 inline bool
@@ -272,7 +272,7 @@ IsPlatformObject(JSContext* cx, JSObject* obj)
     clasp = js::GetObjectJSClass(obj);
   }
   return IS_WRAPPER_CLASS(js::Valueify(clasp)) || IsDOMClass(clasp) ||
-    JS_IsArrayBufferObject(obj, cx);
+    JS_IsArrayBufferObject(obj);
 }
 
 // U must be something that a T* can be assigned to (e.g. T* or an nsRefPtr<T>).
@@ -398,6 +398,9 @@ bool
 DefineUnforgeableAttributes(JSContext* cx, JSObject* obj,
                             Prefable<JSPropertySpec>* props);
 
+bool
+DefineWebIDLBindingPropertiesOnXPCProto(JSContext* cx, JSObject* proto, const NativeProperties* properties);
+
 // If *vp is an object and *vp and obj are not in the same compartment, wrap *vp
 // into the compartment of obj (typically by replacing it with an Xray or
 // cross-compartment wrapper around the original object).
@@ -471,17 +474,43 @@ public:
                             sizeof(Check<T>(nullptr)) == sizeof(yes);
 };
 
+#ifdef DEBUG
+template <class T, bool isISupports=IsISupports<T>::Value>
+struct
+CheckWrapperCacheCast
+{
+  static bool Check()
+  {
+    return reinterpret_cast<uintptr_t>(
+      static_cast<nsWrapperCache*>(
+        reinterpret_cast<T*>(1))) == 1;
+  }
+};
+template <class T>
+struct
+CheckWrapperCacheCast<T, true>
+{
+  static bool Check()
+  {
+    return true;
+  }
+};
+#endif
+
 // Create a JSObject wrapping "value", for cases when "value" is a
 // non-wrapper-cached object using WebIDL bindings.  "value" must implement a
 // WrapObject() method taking a JSContext and a scope.
 template <class T>
-inline bool
+MOZ_ALWAYS_INLINE bool
 WrapNewBindingObject(JSContext* cx, JSObject* scope, T* value, JS::Value* vp)
 {
-  JSObject* obj = value->GetWrapper();
-  if (obj && js::GetObjectCompartment(obj) == js::GetObjectCompartment(scope)) {
-    *vp = JS::ObjectValue(*obj);
-    return true;
+  JSObject* obj = value->GetWrapperPreserveColor();
+  if (obj) {
+    xpc_UnmarkNonNullGrayObject(obj);
+    if (js::GetObjectCompartment(obj) == js::GetObjectCompartment(scope)) {
+      *vp = JS::ObjectValue(*obj);
+      return true;
+    }
   }
 
   if (!obj) {
@@ -497,21 +526,21 @@ WrapNewBindingObject(JSContext* cx, JSObject* scope, T* value, JS::Value* vp)
   }
 
 #ifdef DEBUG
-  // Some sanity asserts about our object.  Specifically:
-  // 1)  If our class claims we're nsISupports, we better be nsISupports
-  //     XXXbz ideally, we could assert that reinterpret_cast to nsISupports
-  //     does the right thing, but I don't see a way to do it.  :(
-  // 2)  If our class doesn't claim we're nsISupports we better be
-  //     reinterpret_castable to nsWrapperCache.
   const DOMClass* clasp = nullptr;
   DOMObjectSlot slot = GetDOMClass(obj, clasp);
-  MOZ_ASSERT(slot != eNonDOMObject, "Totally unexpected object here");
-  MOZ_ASSERT(clasp, "What happened here?");
-  MOZ_ASSERT_IF(clasp->mDOMObjectIsISupports, IsISupports<T>::Value);
-  MOZ_ASSERT_IF(!clasp->mDOMObjectIsISupports,
-                reinterpret_cast<uintptr_t>(
-                  static_cast<nsWrapperCache*>(
-                    reinterpret_cast<T*>(1))) == 1);
+  // slot can be eNonDOMObject if the cache contained a non-DOM object from a
+  // different compartment than scope.
+  if (slot != eNonDOMObject) {
+    // Some sanity asserts about our object.  Specifically:
+    // 1)  If our class claims we're nsISupports, we better be nsISupports
+    //     XXXbz ideally, we could assert that reinterpret_cast to nsISupports
+    //     does the right thing, but I don't see a way to do it.  :(
+    // 2)  If our class doesn't claim we're nsISupports we better be
+    //     reinterpret_castable to nsWrapperCache.
+    MOZ_ASSERT(clasp, "What happened here?");
+    MOZ_ASSERT_IF(clasp->mDOMObjectIsISupports, IsISupports<T>::Value);
+    MOZ_ASSERT(CheckWrapperCacheCast<T>::Check());
+  }
 #endif
 
   // When called via XrayWrapper, we end up here while running in the
@@ -1312,6 +1341,11 @@ public:
 
   void Construct() {
     mImpl.construct();
+  }
+
+  template <class T1>
+  void Construct(const T1 &t1) {
+    mImpl.construct(t1);
   }
 
   template <class T1, class T2>

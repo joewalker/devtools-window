@@ -158,7 +158,6 @@
 @BINPATH@/components/content_htmldoc.xpt
 @BINPATH@/components/content_html.xpt
 @BINPATH@/components/content_xslt.xpt
-@BINPATH@/components/content_xtf.xpt
 @BINPATH@/components/cookie.xpt
 @BINPATH@/components/directory.xpt
 @BINPATH@/components/docshell.xpt
@@ -465,6 +464,10 @@
 @BINPATH@/components/AitcComponents.manifest
 @BINPATH@/components/Aitc.js
 #endif
+#ifdef MOZ_SERVICES_HEALTHREPORT
+@BINPATH@/components/HealthReportComponents.manifest
+@BINPATH@/components/HealthReportService.js
+#endif
 #ifdef MOZ_SERVICES_NOTIFICATIONS
 @BINPATH@/components/NotificationsComponents.manifest
 #endif
@@ -571,6 +574,9 @@
 #endif
 #ifdef MOZ_SERVICES_SYNC
 @BINPATH@/@PREF_DIR@/services-sync.js
+#endif
+#ifdef MOZ_SERVICES_HEALTHREPORT
+@BINPATH@/@PREF_DIR@/healthreport-prefs.js
 #endif
 @BINPATH@/greprefs.js
 @BINPATH@/defaults/autoconfig/platform.js

@@ -22,6 +22,10 @@ Cu.import('resource://gre/modules/Keyboard.jsm');
 Cu.import('resource://gre/modules/NetworkStatsService.jsm');
 #endif
 
+// identity
+Cu.import('resource://gre/modules/SignInToWebsite.jsm');
+SignInToWebsiteController.init();
+
 XPCOMUtils.defineLazyServiceGetter(Services, 'env',
                                    '@mozilla.org/process/environment;1',
                                    'nsIEnvironment');
@@ -109,6 +113,10 @@ var shell = {
 
   // This function submits a crash when we're online.
   submitCrash: function shell_submitCrash(aCrashID) {
+    if (!Services.io.offline) {
+      this.CrashSubmit.submit(aCrashID);
+      return;
+    }
     Services.obs.addObserver(function observer(subject, topic, state) {
       if (state == 'online') {
         shell.CrashSubmit.submit(aCrashID);
@@ -137,6 +145,11 @@ var shell = {
    },
 
   start: function shell_start() {
+    // This forces the initialization of the cookie service before we hit the
+    // network.
+    // See bug 810209
+    let cookies = Cc["@mozilla.org/cookieService;1"];
+
     try {
       let cr = Cc["@mozilla.org/xre/app-info;1"]
                  .getService(Ci.nsICrashReporter);

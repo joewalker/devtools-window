@@ -160,7 +160,7 @@ public:
     nsresult TakeScreenshot(nsIDOMWindow *window, int32_t srcX, int32_t srcY, int32_t srcW, int32_t srcH, int32_t dstY, int32_t dstX, int32_t dstW, int32_t dstH, int32_t bufW, int32_t bufH, int32_t tabId, int32_t token, jobject buffer);
     nsresult GetDisplayPort(bool aPageSizeUpdate, bool aIsBrowserContentDisplayed, int32_t tabId, nsIAndroidViewport* metrics, nsIAndroidDisplayport** displayPort);
 
-    bool ProgressiveUpdateCallback(bool aHasPendingNewThebesContent, const gfx::Rect& aDisplayPort, float aDisplayResolution, gfx::Rect& aViewport, float& aScaleX, float& aScaleY);
+    bool ProgressiveUpdateCallback(bool aHasPendingNewThebesContent, const gfx::Rect& aDisplayPort, float aDisplayResolution, bool aDrawingCritical, gfx::Rect& aViewport, float& aScaleX, float& aScaleY);
 
     static void NotifyPaintedRect(float top, float left, float bottom, float right);
 
@@ -366,7 +366,11 @@ public:
     void UnregisterSurfaceTextureFrameListener(jobject surfaceTexture);
 
     void GetGfxInfoData(nsACString& aRet);
-
+    nsresult GetProxyForURI(const nsACString & aSpec,
+                            const nsACString & aScheme,
+                            const nsACString & aHost,
+                            const int32_t      aPort,
+                            nsACString & aResult);
 protected:
     static AndroidBridge *sBridge;
     static StaticAutoPtr<nsTArray<nsCOMPtr<nsISmsRequest> > > sSmsRequests;
@@ -466,6 +470,7 @@ protected:
     jmethodID jShowSurface;
     jmethodID jHideSurface;
     jmethodID jDestroySurface;
+    jmethodID jGetProxyForURI;
 
     jmethodID jNumberOfMessages;
     jmethodID jSendMessage;
@@ -532,6 +537,40 @@ protected:
     int (* Surface_unlockAndPost)(void* surface);
     void (* Region_constructor)(void* region);
     void (* Region_set)(void* region, void* rect);
+};
+
+class AutoJObject {
+public:
+    AutoJObject(JNIEnv* aJNIEnv = NULL) : mObject(NULL)
+    {
+        mJNIEnv = aJNIEnv ? aJNIEnv : AndroidBridge::GetJNIEnv();
+    }
+
+    AutoJObject(JNIEnv* aJNIEnv, jobject aObject)
+    {
+        mJNIEnv = aJNIEnv ? aJNIEnv : AndroidBridge::GetJNIEnv();
+        mObject = aObject;
+    }
+
+    ~AutoJObject() {
+        if (mObject)
+            mJNIEnv->DeleteLocalRef(mObject);
+    }
+
+    jobject operator=(jobject aObject)
+    {
+        if (mObject) {
+            mJNIEnv->DeleteLocalRef(mObject);
+        }
+        return mObject = aObject;
+    }
+
+    operator jobject() {
+        return mObject;
+    }
+private:
+    JNIEnv* mJNIEnv;
+    jobject mObject;
 };
 
 class AutoLocalJNIFrame {

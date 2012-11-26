@@ -1,6 +1,10 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+let tempScope = {};
+Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
+let TargetFactory = tempScope.TargetFactory;
+
 let doc;
 let inspector;
 
@@ -24,7 +28,8 @@ function inspectorRuleViewOpened()
   inspector.sidebar.select("computedview");
 
   gDevTools.once("toolbox-destroyed", inspectorClosed);
-  let toolbox = gDevTools.getToolboxForTarget(gBrowser.selectedTab);
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+  let toolbox = gDevTools.getToolboxForTarget(target);
   executeSoon(function() {
     toolbox.destroy();
   });
@@ -32,18 +37,20 @@ function inspectorRuleViewOpened()
 
 function inspectorClosed()
 {
-  Services.obs.addObserver(computedViewPopulated,
-    "StyleInspector-populated", false);
-
   openInspector(function(panel) {
     inspector = panel;
+    if (inspector.sidebar.getCurrentTabID()) {
+      // Default sidebar already selected.
+      testNewDefaultTab();
+    } else {
+      // Default sidebar still to be selected.
+      inspector.sidebar.once("select", testNewDefaultTab);
+    }
   });
 }
 
-function computedViewPopulated()
+function testNewDefaultTab()
 {
-  Services.obs.removeObserver(computedViewPopulated,
-    "StyleInspector-populated");
   is(inspector.sidebar.getCurrentTabID(), "computedview", "Computed view is selected by default.");
 
   finishTest();

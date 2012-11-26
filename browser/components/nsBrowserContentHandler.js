@@ -5,6 +5,9 @@
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
 Components.utils.import("resource://gre/modules/Services.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "PrivateBrowsingUtils",
+                                  "resource://gre/modules/PrivateBrowsingUtils.jsm");
+
 const nsISupports            = Components.interfaces.nsISupports;
 
 const nsIBrowserDOMWindow    = Components.interfaces.nsIBrowserDOMWindow;
@@ -77,6 +80,8 @@ function resolveURIInternal(aCmdLine, aArgument) {
 
   return uri;
 }
+
+var gFirstWindow = false;
 
 const OVERRIDE_NONE        = 0;
 const OVERRIDE_NEW_PROFILE = 1;
@@ -511,13 +516,32 @@ nsBrowserContentHandler.prototype = {
     }
     if (cmdLine.handleFlag("silent", false))
       cmdLine.preventDefault = true;
+#ifdef MOZ_PER_WINDOW_PRIVATE_BROWSING
+    if (cmdLine.findFlag("private-window", false) >= 0) {
+      openWindow(null, this.chromeURL, "_blank",
+        "chrome,dialog=no,private,all" + this.getFeatures(cmdLine),
+        "about:privatebrowsing");
+      cmdLine.preventDefault = true;
+    }
+#else
     if (cmdLine.findFlag("private-toggle", false) >= 0)
       cmdLine.preventDefault = true;
+#endif
 
     var searchParam = cmdLine.handleFlagWithParam("search", false);
     if (searchParam) {
       doSearch(searchParam, cmdLine);
       cmdLine.preventDefault = true;
+    }
+
+    // The global PB Service consumes this flag, so only eat it in per-window
+    // PB builds.
+#ifdef MOZ_PER_WINDOW_PRIVATE_BROWSING
+    if (cmdLine.handleFlag("private", false)) {
+#else
+    if (cmdLine.findFlag("private", false) >= 0) {
+#endif
+      PrivateBrowsingUtils.enterTemporaryAutoStartMode();
     }
 
     var fileParam = cmdLine.handleFlagWithParam("file", false);
@@ -562,6 +586,13 @@ nsBrowserContentHandler.prototype = {
   get defaultArgs() {
     var prefb = Components.classes["@mozilla.org/preferences-service;1"]
                           .getService(nsIPrefBranch);
+
+    if (!gFirstWindow) {
+      gFirstWindow = true;
+      if (PrivateBrowsingUtils.isInTemporaryAutoStartMode) {
+        return "about:privatebrowsing";
+      }
+    }
 
     var overridePage = "";
     var haveUpdateSession = false;
@@ -651,6 +682,12 @@ nsBrowserContentHandler.prototype = {
           this.mFeatures += ",height=" + height;
       }
       catch (e) {
+      }
+
+      // The global PB Service consumes this flag, so only eat it in per-window
+      // PB builds.
+      if (PrivateBrowsingUtils.isInTemporaryAutoStartMode) {
+        this.mFeatures = ",private";
       }
     }
 

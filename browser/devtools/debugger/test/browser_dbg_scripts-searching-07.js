@@ -29,6 +29,7 @@ function test()
     gDebuggee = aDebuggee;
     gPane = aPane;
     gDebugger = gPane.panelWin;
+    gDebugger.SourceResults.prototype.alwaysExpand = false;
 
     gDebugger.DebuggerController.activeThread.addOneTimeListener("framesadded", function() {
       framesAdded = true;

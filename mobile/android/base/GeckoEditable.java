@@ -34,6 +34,20 @@ interface GeckoEditableClient {
 /* interface for the Editable to listen to the Gecko thread
    and also for the UI thread to listen to the Editable */
 interface GeckoEditableListener {
+    // IME notification type for notifyIME()
+    final int NOTIFY_IME_RESETINPUTSTATE = 0;
+    final int NOTIFY_IME_REPLY_EVENT = 1;
+    final int NOTIFY_IME_CANCELCOMPOSITION = 2;
+    final int NOTIFY_IME_FOCUSCHANGE = 3;
+    // IME focus state for notifyIME(NOTIFY_IME_FOCUSCHANGE, ..)
+    final int IME_FOCUS_STATE_FOCUS = 1;
+    final int IME_FOCUS_STATE_BLUR = 0;
+    // IME enabled state for notifyIMEEnabled()
+    final int IME_STATE_DISABLED = 0;
+    final int IME_STATE_ENABLED = 1;
+    final int IME_STATE_PASSWORD = 2;
+    final int IME_STATE_PLUGIN = 3;
+
     void notifyIME(int type, int state);
     void notifyIMEEnabled(int state, String typeHint,
                           String modeHint, String actionHint);
@@ -52,7 +66,6 @@ final class GeckoEditable
 
     private static final boolean DEBUG = false;
     private static final String LOGTAG = "GeckoEditable";
-    private static final int NOTIFY_IME_REPLY_EVENT = 1;
 
     // Filters to implement Editable's filtering functionality
     private InputFilter[] mFilters;
@@ -67,6 +80,7 @@ final class GeckoEditable
     private int mUIUpdateSeqno;
     private int mLastUIUpdateSeqno;
     private boolean mUpdateGecko;
+    private boolean mFocused;
 
     /* An action that alters the Editable
 
@@ -211,7 +225,7 @@ final class GeckoEditable
             if (DEBUG) {
                 GeckoApp.assertOnUiThread();
             }
-            if (!mActions.isEmpty()) {
+            if (mFocused && !mActions.isEmpty()) {
                 mActionsActive.acquireUninterruptibly();
                 mActionsActive.release();
             }
@@ -464,6 +478,16 @@ final class GeckoEditable
             public void run() {
                 // Make sure there are no other things going on
                 mActionQueue.syncWithGecko();
+                if (type == NOTIFY_IME_FOCUSCHANGE) {
+                    if (state == IME_FOCUS_STATE_BLUR) {
+                        mFocused = false;
+                    } else {
+                        mFocused = true;
+                        // Unmask events on the Gecko side
+                        GeckoAppShell.sendEventToGecko(GeckoEvent.createIMEEvent(
+                                GeckoEvent.IME_ACKNOWLEDGE_FOCUS));
+                    }
+                }
                 if (mListener != null) {
                     mListener.notifyIME(type, state);
                 }
@@ -553,14 +577,14 @@ final class GeckoEditable
             }
         } else {
             mText.replace(start, oldEnd, text, 0, text.length());
-            geckoPostToUI(new Runnable() {
-                public void run() {
-                    if (mListener != null) {
-                        mListener.onTextChange(text, start, oldEnd, newEnd);
-                    }
-                }
-            });
         }
+        geckoPostToUI(new Runnable() {
+            public void run() {
+                if (mListener != null) {
+                    mListener.onTextChange(text, start, oldEnd, newEnd);
+                }
+            }
+        });
     }
 
     // InvocationHandler interface
@@ -638,9 +662,9 @@ final class GeckoEditable
                 what == Selection.SELECTION_END) {
             Log.w(LOGTAG, "selection removed with removeSpan()");
         }
-        // Okay to remove immediately
-        mText.removeSpan(what);
-        if (mUpdateGecko) {
+        if (mText.getSpanStart(what) >= 0) { // only remove if it's there
+            // Okay to remove immediately
+            mText.removeSpan(what);
             mActionQueue.offer(new Action(Action.TYPE_REMOVE_SPAN));
         }
     }

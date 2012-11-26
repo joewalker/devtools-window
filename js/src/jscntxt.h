@@ -26,6 +26,7 @@
 #include "jsprototypes.h"
 #include "jsutil.h"
 #include "prmjtime.h"
+#include "vm/threadpool.h"
 
 #include "ds/LifoAlloc.h"
 #include "gc/Statistics.h"
@@ -91,6 +92,7 @@ class JaegerRuntime;
 class MathCache;
 
 namespace ion {
+class IonRuntime;
 class IonActivation;
 }
 
@@ -433,6 +435,16 @@ class PerThreadData : public js::PerThreadDataFriendFields
     int                 gcAssertNoGCDepth;
 #endif
 
+    /*
+     * When this flag is non-zero, any attempt to GC will be skipped. It is used
+     * to suppress GC when reporting an OOM (see js_ReportOutOfMemory) and in
+     * debugging facilities that cannot tolerate a GC and would rather OOM
+     * immediately, such as utilities exposed to GDB. Setting this flag is
+     * extremely dangerous and should only be used when in an OOM situation or
+     * in non-exposed debugging facilities.
+     */
+    int32_t             suppressGC;
+
     PerThreadData(JSRuntime *runtime);
 
     bool associatedWith(const JSRuntime *rt) { return runtime_ == rt; }
@@ -499,12 +511,14 @@ struct JSRuntime : js::RuntimeFriendFields
 #ifdef JS_METHODJIT
     js::mjit::JaegerRuntime *jaegerRuntime_;
 #endif
+    js::ion::IonRuntime *ionRuntime_;
 
     JSObject *selfHostedGlobal_;
 
     JSC::ExecutableAllocator *createExecutableAllocator(JSContext *cx);
     WTF::BumpPointerAllocator *createBumpPointerAllocator(JSContext *cx);
     js::mjit::JaegerRuntime *createJaegerRuntime(JSContext *cx);
+    js::ion::IonRuntime *createIonRuntime(JSContext *cx);
 
   public:
     JSC::ExecutableAllocator *getExecAlloc(JSContext *cx) {
@@ -513,6 +527,9 @@ struct JSRuntime : js::RuntimeFriendFields
     JSC::ExecutableAllocator &execAlloc() {
         JS_ASSERT(execAlloc_);
         return *execAlloc_;
+    }
+    JSC::ExecutableAllocator *maybeExecAlloc() {
+        return execAlloc_;
     }
     WTF::BumpPointerAllocator *getBumpPointerAllocator(JSContext *cx) {
         return bumpAlloc_ ? bumpAlloc_ : createBumpPointerAllocator(cx);
@@ -529,15 +546,21 @@ struct JSRuntime : js::RuntimeFriendFields
         return *jaegerRuntime_;
     }
 #endif
+    js::ion::IonRuntime *getIonRuntime(JSContext *cx) {
+        return ionRuntime_ ? ionRuntime_ : createIonRuntime(cx);
+    }
 
     bool initSelfHosting(JSContext *cx);
     void markSelfHostedGlobal(JSTracer *trc);
     bool isSelfHostedGlobal(js::HandleObject global) {
         return global == selfHostedGlobal_;
     }
-    JSFunction *getSelfHostedFunction(JSContext *cx, js::Handle<js::PropertyName*> name);
-    bool cloneSelfHostedValueById(JSContext *cx, js::HandleId id, js::HandleObject holder,
-                                  js::MutableHandleValue vp);
+    bool getUnclonedSelfHostedValue(JSContext *cx, js::Handle<js::PropertyName*> name,
+                                    js::MutableHandleValue vp);
+    bool cloneSelfHostedFunctionScript(JSContext *cx, js::Handle<js::PropertyName*> name,
+                                       js::Handle<JSFunction*> targetFun);
+    bool cloneSelfHostedValue(JSContext *cx, js::Handle<js::PropertyName*> name,
+                              js::MutableHandleValue vp);
 
     /* Base address of the native stack for the current thread. */
     uintptr_t           nativeStackBase;
@@ -719,9 +742,10 @@ struct JSRuntime : js::RuntimeFriendFields
 
     /*
      * This is true if we are in the middle of a brain transplant (e.g.,
-     * JS_TransplantObject).
+     * JS_TransplantObject) or some other operation that can manipulate
+     * dead compartments.
      */
-    bool                gcInTransplant;
+    bool                gcManipulatingDeadCompartments;
 
     /*
      * This field is incremented each time we mark an object inside a
@@ -987,13 +1011,6 @@ struct JSRuntime : js::RuntimeFriendFields
     size_t              noGCOrAllocationCheck;
 #endif
 
-    /*
-     * To ensure that cx->malloc does not cause a GC, we set this flag during
-     * OOM reporting (in js_ReportOutOfMemory). If a GC is requested while
-     * reporting the OOM, we ignore it.
-     */
-    int32_t             inOOMReport;
-
     bool                jitHardening;
 
     // If Ion code is on the stack, and has called into C++, this will be
@@ -1011,6 +1028,8 @@ struct JSRuntime : js::RuntimeFriendFields
 
     // Cache for ion::GetPcScript().
     js::ion::PcScriptCache *ionPcScriptCache;
+
+    js::ThreadPool threadPool;
 
   private:
     // In certain cases, we want to optimize certain opcodes to typed instructions,
@@ -1160,13 +1179,32 @@ struct JSRuntime : js::RuntimeFriendFields
     size_t sizeOfExplicitNonHeap();
 
   private:
+
     JSUseHelperThreads useHelperThreads_;
+    int32_t requestedHelperThreadCount;
+
   public:
+
     bool useHelperThreads() const {
 #ifdef JS_THREADSAFE
         return useHelperThreads_ == JS_USE_HELPER_THREADS;
 #else
         return false;
+#endif
+    }
+
+    void requestHelperThreadCount(size_t count) {
+        requestedHelperThreadCount = count;
+    }
+
+    /* Number of helper threads which should be created for this runtime. */
+    size_t helperThreadCount() const {
+#ifdef JS_THREADSAFE
+        if (requestedHelperThreadCount < 0)
+            return js::GetCPUCount() - 1;
+        return requestedHelperThreadCount;
+#else
+        return 0;
 #endif
     }
 };
@@ -2193,6 +2231,7 @@ class RuntimeAllocPolicy
     RuntimeAllocPolicy(JSRuntime *rt) : runtime(rt) {}
     RuntimeAllocPolicy(JSContext *cx) : runtime(cx->runtime) {}
     void *malloc_(size_t bytes) { return runtime->malloc_(bytes); }
+    void *calloc_(size_t bytes) { return runtime->calloc_(bytes); }
     void *realloc_(void *p, size_t bytes) { return runtime->realloc_(p, bytes); }
     void free_(void *p) { js_free(p); }
     void reportAllocOverflow() const {}
@@ -2209,6 +2248,7 @@ class ContextAllocPolicy
     ContextAllocPolicy(JSContext *cx) : cx(cx) {}
     JSContext *context() const { return cx; }
     void *malloc_(size_t bytes) { return cx->malloc_(bytes); }
+    void *calloc_(size_t bytes) { return cx->calloc_(bytes); }
     void *realloc_(void *p, size_t oldBytes, size_t bytes) { return cx->realloc_(p, oldBytes, bytes); }
     void free_(void *p) { js_free(p); }
     void reportAllocOverflow() const { js_ReportAllocationOverflow(cx); }

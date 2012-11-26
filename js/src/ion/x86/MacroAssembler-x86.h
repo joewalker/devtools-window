@@ -195,12 +195,6 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     void movePtr(const Register &src, const Register &dest) {
         movl(src, dest);
     }
-    void movePtr(Operand op, const Register &dest) {
-        movl(op, dest);
-    }
-    void movePtr(const Address &src, const Register &dest) {
-        movl(Operand(src), dest);
-    }
 
     // Returns the register containing the type tag.
     Register splitTagForTest(const ValueOperand &value) {
@@ -533,6 +527,11 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         psrldq(Imm32(4), src);
         movd(src, dest.typeReg());
     }
+    void boxNonDouble(JSValueType type, const Register &src, const ValueOperand &dest) {
+        if (src != dest.payloadReg())
+            movl(src, dest.payloadReg());
+        movl(ImmType(type), dest.typeReg());
+    }
     void unboxInt32(const ValueOperand &src, const Register &dest) {
         movl(src.payloadReg(), dest);
     }
@@ -682,6 +681,14 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         // correct the double value by adding 0x80000000.
         static const double NegativeOne = 2147483648.0;
         addsd(Operand(&NegativeOne), dest);
+    }
+
+    void inc64(AbsoluteAddress dest) {
+        addl(Imm32(1), Operand(dest));
+        Label noOverflow;
+        j(NonZero, &noOverflow);
+        addl(Imm32(1), Operand(dest.offset(4)));
+        bind(&noOverflow);
     }
 
     // Setup a call to C/C++ code, given the number of general arguments it

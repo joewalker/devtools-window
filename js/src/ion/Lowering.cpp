@@ -10,6 +10,7 @@
 #include "MIR.h"
 #include "MIRGraph.h"
 #include "IonSpewer.h"
+#include "RangeAnalysis.h"
 #include "jsanalyze.h"
 #include "jsbool.h"
 #include "jsnum.h"
@@ -1398,6 +1399,20 @@ LIRGenerator::visitBoundsCheckLower(MBoundsCheckLower *ins)
 }
 
 bool
+LIRGenerator::visitInArray(MInArray *ins)
+{
+    JS_ASSERT(ins->elements()->type() == MIRType_Elements);
+    JS_ASSERT(ins->index()->type() == MIRType_Int32);
+    JS_ASSERT(ins->initLength()->type() == MIRType_Int32);
+    JS_ASSERT(ins->type() == MIRType_Boolean);
+
+    LInArray *lir = new LInArray(useRegister(ins->elements()),
+                                 useRegisterOrConstant(ins->index()),
+                                 useRegister(ins->initLength()));
+    return define(lir, ins) && assignSafepoint(lir, ins);
+}
+
+bool
 LIRGenerator::visitLoadElement(MLoadElement *ins)
 {
     JS_ASSERT(ins->elements()->type() == MIRType_Elements);
@@ -1669,6 +1684,15 @@ LIRGenerator::visitGetNameCache(MGetNameCache *ins)
 }
 
 bool
+LIRGenerator::visitCallGetIntrinsicValue(MCallGetIntrinsicValue *ins)
+{
+    LCallGetIntrinsicValue *lir = new LCallGetIntrinsicValue();
+    if (!defineVMReturn(lir, ins))
+        return false;
+    return assignSafepoint(lir, ins);
+}
+
+bool
 LIRGenerator::visitGetPropertyCache(MGetPropertyCache *ins)
 {
     JS_ASSERT(ins->object()->type() == MIRType_Object);
@@ -1901,6 +1925,22 @@ LIRGenerator::visitIn(MIn *ins)
 }
 
 bool
+LIRGenerator::visitInstanceOfTyped(MInstanceOfTyped *ins)
+{
+    MDefinition *lhs = ins->getOperand(0);
+
+    JS_ASSERT(lhs->type() == MIRType_Value || lhs->type() == MIRType_Object);
+
+    if (lhs->type() == MIRType_Object) {
+        LInstanceOfTypedO *lir = new LInstanceOfTypedO(useRegister(lhs));
+        return define(lir, ins) && assignSafepoint(lir, ins);
+    }
+
+    LInstanceOfTypedV *lir = new LInstanceOfTypedV();
+    return useBox(lir, LInstanceOfTypedV::LHS, lhs) && define(lir, ins) && assignSafepoint(lir, ins);
+}
+
+bool
 LIRGenerator::visitInstanceOf(MInstanceOf *ins)
 {
     MDefinition *lhs = ins->lhs();
@@ -1909,7 +1949,6 @@ LIRGenerator::visitInstanceOf(MInstanceOf *ins)
     JS_ASSERT(lhs->type() == MIRType_Value || lhs->type() == MIRType_Object);
     JS_ASSERT(rhs->type() == MIRType_Object);
 
-    // InstanceOf with non-object will always return false
     if (lhs->type() == MIRType_Object) {
         LInstanceOfO *lir = new LInstanceOfO(useRegister(lhs), useRegister(rhs), temp(), temp());
         return define(lir, ins) && assignSafepoint(lir, ins);

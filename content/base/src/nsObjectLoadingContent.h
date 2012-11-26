@@ -106,7 +106,7 @@ class nsObjectLoadingContent : public nsImageLoadingContent
      */
     nsEventStates ObjectState() const;
 
-    ObjectType Type() { return mType; }
+    ObjectType Type() const { return mType; }
 
     void SetIsNetworkCreated(bool aNetworkCreated)
     {
@@ -348,13 +348,6 @@ class nsObjectLoadingContent : public nsImageLoadingContent
      */
     void NotifyStateChanged(ObjectType aOldType, nsEventStates aOldState,
                             bool aSync, bool aNotify);
-
-    /**
-     * Fires the nsPluginErrorEvent. This function doesn't do any checks
-     * whether it should be fired, or whether the given state translates to a
-     * meaningful event
-     */
-    void FirePluginError(FallbackType aFallbackType);
 
     /**
      * Returns a ObjectType value corresponding to the type of content we would

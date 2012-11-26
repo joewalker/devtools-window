@@ -6925,6 +6925,14 @@ nsCSSFrameConstructor::ContentRangeInserted(nsIContent*            aContainer,
 #endif
     }
 
+    if (aFrameState) {
+      // Restore frame state for the root scroll frame if there is one
+      nsIFrame* rootScrollFrame = mPresShell->GetRootScrollFrame();
+      if (rootScrollFrame) {
+        RestoreFrameStateFor(rootScrollFrame, aFrameState);
+      }
+    }
+
 #ifdef ACCESSIBILITY
     nsAccessibilityService* accService = nsIPresShell::AccService();
     if (accService) {
@@ -8040,7 +8048,13 @@ NeedToReframeForAddingOrRemovingTransform(nsIFrame* aFrame)
     positionMask = (1 << NS_STYLE_POSITION_FIXED) |
         (1 << NS_STYLE_POSITION_ABSOLUTE);
   }
-  return FrameHasPositionedPlaceholderDescendants(aFrame, positionMask);
+  for (nsIFrame* f = aFrame; f;
+       f = nsLayoutUtils::GetNextContinuationOrSpecialSibling(f)) {
+    if (FrameHasPositionedPlaceholderDescendants(f, positionMask)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 nsresult

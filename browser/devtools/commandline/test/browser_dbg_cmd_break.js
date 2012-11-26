@@ -6,6 +6,10 @@
 const TEST_URI = "http://example.com/browser/browser/devtools/commandline/" +
                  "test/browser_dbg_cmd_break.html";
 
+let tempScope = {};
+Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
+let TargetFactory = tempScope.TargetFactory;
+
 function test() {
   DeveloperToolbarTest.test(TEST_URI, [ testBreakCommands ]);
 }
@@ -35,10 +39,10 @@ function testBreakCommands() {
     status: 'ERROR'
   });
 
-  let tab = gBrowser.selectedTab;
-  let toolbox = gDevTools.openToolboxForTab(tab, "jsdebugger");
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+  let toolbox = gDevTools.openToolboxForTab(target, "jsdebugger");
   toolbox.once("jsdebugger-ready", function dbgReady() {
-    let dbg = gDevTools.getPanelForTarget("jsdebugger", tab);
+    let dbg = gDevTools.getPanelForTarget("jsdebugger", target);
     ok(dbg, "DebuggerPanel exists");
     dbg.once("connected", function() {
       // Wait for the initial resume...

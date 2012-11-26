@@ -74,10 +74,11 @@ public:
   NS_FORWARD_NSIDOMNODE_TO_NSINODE
 
   // nsIDOMElement
-  NS_FORWARD_NSIDOMELEMENT(nsGenericHTMLFormElement::)
+  NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
 
   // nsIDOMHTMLElement
-  NS_FORWARD_NSIDOMHTMLELEMENT(nsGenericHTMLFormElement::)
+  NS_FORWARD_NSIDOMHTMLELEMENT_TO_GENERIC
+
   virtual void Click() MOZ_OVERRIDE;
   virtual int32_t TabIndexDefault() MOZ_OVERRIDE;
   virtual void Focus(mozilla::ErrorResult& aError) MOZ_OVERRIDE;
@@ -509,6 +510,8 @@ protected:
    * VALUE_MODE_VALUE.
    */
   nsresult SetDefaultValueAsValue();
+
+  virtual void SetDirectionIfAuto(bool aAuto, bool aNotify);
 
   /**
    * Return if an element should have a specific validity UI

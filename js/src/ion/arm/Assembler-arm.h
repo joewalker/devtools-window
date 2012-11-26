@@ -1269,6 +1269,10 @@ class Assembler
     static const uint32 * getPtr32Target(Iter *iter, Register *dest = NULL, RelocStyle *rs = NULL);
 
     bool oom() const;
+
+    void setPrinter(Sprinter *sp) {
+    }
+
   private:
     bool isFinished;
   public:
@@ -1495,7 +1499,7 @@ class Assembler
     // our encoding actually allows just the src and the dest (and theiyr types)
     // to uniquely specify the encoding that we are going to use.
     BufferOffset as_vcvt(VFPRegister vd, VFPRegister vm, bool useFPSCR = false,
-                 Condition c = Always);
+                         Condition c = Always);
     // hard coded to a 32 bit fixed width result for now
     BufferOffset as_vcvtFixed(VFPRegister vd, bool isSigned, uint32 fixedPoint, bool toFixed, Condition c = Always);
 

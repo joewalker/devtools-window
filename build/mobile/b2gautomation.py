@@ -99,11 +99,12 @@ class B2GRemoteAutomation(Automation):
         # is in place.
         dumpDir = tempfile.mkdtemp()
         self._devicemanager.getDirectory(self._remoteProfile + '/minidumps/', dumpDir)
-        automationutils.checkForCrashes(dumpDir, symbolsPath, self.lastTestSeen)
+        crashed = automationutils.checkForCrashes(dumpDir, symbolsPath, self.lastTestSeen)
         try:
           shutil.rmtree(dumpDir)
         except:
           print "WARNING: unable to remove directory: %s" % (dumpDir)
+        return crashed
 
     def initializeProfile(self, profileDir, extraPrefs = [], useServerLocations = False):
         # add b2g specific prefs
@@ -294,9 +295,9 @@ class B2GRemoteAutomation(Automation):
             # into a queue.  The lines in this queue are
             # retrieved and returned by accessing the stdout property of
             # this class.
-            cmd = [self.dm.adbPath]
-            if self.dm.deviceSerial:
-                cmd.extend(['-s', self.dm.deviceSerial])
+            cmd = [self.dm._adbPath]
+            if self.dm._deviceSerial:
+                cmd.extend(['-s', self.dm._deviceSerial])
             cmd.append('shell')
             cmd.append('/system/bin/b2g.sh')
             proc = threading.Thread(target=self._save_stdout_proc, args=(cmd, self.queue))

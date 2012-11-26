@@ -81,6 +81,7 @@
 #include "mozAutoDocUpdate.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsContentUtils.h"
+#include "mozilla/dom/DirectionalityUtils.h"
 #include "nsRadioVisitor.h"
 
 #include "mozilla/LookAndFeel.h"
@@ -626,18 +627,18 @@ nsHTMLInputElement::GetEditorState() const
 NS_IMPL_CYCLE_COLLECTION_CLASS(nsHTMLInputElement)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsHTMLInputElement,
                                                   nsGenericHTMLFormElement)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mControllers)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mControllers)
   if (tmp->IsSingleLineTextControl(false)) {
     tmp->mInputData.mState->Traverse(cb);
   }
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMARRAY(mFiles)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mFileList)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFiles)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFileList)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsHTMLInputElement,
                                                   nsGenericHTMLFormElement)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mControllers)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMARRAY(mFiles)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mControllers)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mFiles)
   if (tmp->mFileList) {
     tmp->mFileList->Disconnect();
     tmp->mFileList = nullptr;
@@ -648,8 +649,8 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsHTMLInputElement,
   //XXX should unlink more?
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
                                                               
-NS_IMPL_ADDREF_INHERITED(nsHTMLInputElement, nsGenericElement) 
-NS_IMPL_RELEASE_INHERITED(nsHTMLInputElement, nsGenericElement) 
+NS_IMPL_ADDREF_INHERITED(nsHTMLInputElement, Element)
+NS_IMPL_RELEASE_INHERITED(nsHTMLInputElement, Element)
 
 
 DOMCI_NODE_DATA(HTMLInputElement, nsHTMLInputElement)
@@ -760,6 +761,10 @@ nsHTMLInputElement::BeforeSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
       }
     } else if (aNotify && aName == nsGkAtoms::disabled) {
       mDisabledChanged = true;
+    } else if (aName == nsGkAtoms::dir &&
+               AttrValueIs(kNameSpaceID_None, nsGkAtoms::dir,
+                           nsGkAtoms::_auto, eIgnoreCase)) {
+      SetDirectionIfAuto(false, aNotify);
     }
   }
 
@@ -866,6 +871,9 @@ nsHTMLInputElement::AfterSetAttr(int32_t aNameSpaceID, nsIAtom* aName,
       UpdateStepMismatchValidityState();
     } else if (aName == nsGkAtoms::step) {
       UpdateStepMismatchValidityState();
+    } else if (aName == nsGkAtoms::dir &&
+               aValue && aValue->Equals(nsGkAtoms::_auto, eIgnoreCase)) {
+      SetDirectionIfAuto(true, aNotify);
     }
 
     UpdateState(aNotify);
@@ -2404,7 +2412,7 @@ nsHTMLInputElement::PostHandleEvent(nsEventChainPostVisitor& aVisitor)
                 nsCOMPtr<nsIContent> radioContent =
                   do_QueryInterface(selectedRadioButton);
                 if (radioContent) {
-                  rv = selectedRadioButton->DOMFocus();
+                  rv = selectedRadioButton->Focus();
                   if (NS_SUCCEEDED(rv)) {
                     nsEventStatus status = nsEventStatus_eIgnore;
                     nsMouseEvent event(NS_IS_TRUSTED_EVENT(aVisitor.mEvent),
@@ -2581,6 +2589,9 @@ nsHTMLInputElement::BindToTree(nsIDocument* aDocument, nsIContent* aParent,
   if (aDocument && !mForm && mType == NS_FORM_INPUT_RADIO) {
     AddedToRadioGroup();
   }
+
+  // Set direction based on value if dir=auto
+  SetDirectionIfAuto(HasDirAuto(), false);
 
   // An element can't suffer from value missing if it is not in a document.
   // We have to check if we suffer from that as we are now in a document.
@@ -3195,6 +3206,21 @@ nsHTMLInputElement::SetDefaultValueAsValue()
 
   // SetValueInternal is going to sanitize the value.
   return SetValueInternal(resetVal, false, false);
+}
+
+void
+nsHTMLInputElement::SetDirectionIfAuto(bool aAuto, bool aNotify)
+{
+  if (aAuto) {
+    SetHasDirAuto();
+    if (IsSingleLineTextControl(true)) {
+      nsAutoString value;
+      GetValue(value);
+      SetDirectionalityFromValue(this, value, aNotify);
+    }
+  } else {
+    ClearHasDirAuto();
+  }
 }
 
 NS_IMETHODIMP
@@ -4606,6 +4632,10 @@ NS_IMETHODIMP_(void)
 nsHTMLInputElement::OnValueChanged(bool aNotify)
 {
   UpdateAllValidityStates(aNotify);
+
+  if (HasDirAuto()) {
+    SetDirectionIfAuto(true, aNotify);
+  }
 }
 
 NS_IMETHODIMP_(bool)

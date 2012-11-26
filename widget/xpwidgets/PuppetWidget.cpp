@@ -284,6 +284,8 @@ PuppetWidget::DispatchEvent(nsGUIEvent* event, nsEventStatus& aStatus)
     if (mIMELastReceivedSeqno < mIMELastBlurSeqno)
       return NS_OK;
     break;
+  default:
+    break;
   }
 
   aStatus = mAttachedWidgetListener->HandleEvent(event, mUseAttachedEvents);
@@ -429,14 +431,19 @@ PuppetWidget::OnIMEFocusChange(bool aFocus)
     return NS_ERROR_FAILURE;
 
   if (aFocus) {
-    if (!mIMEPreference.mWantUpdates && !mIMEPreference.mWantHints)
-      // call OnIMEFocusChange on blur but no other updates
-      return NS_ERROR_NOT_IMPLEMENTED;
-    OnIMESelectionChange(); // Update selection
+    if (mIMEPreference.mWantUpdates && mIMEPreference.mWantHints) {
+      OnIMESelectionChange(); // Update selection
+    }
   } else {
     mIMELastBlurSeqno = chromeSeqno;
   }
   return NS_OK;
+}
+
+nsIMEUpdatePreference
+PuppetWidget::GetIMEUpdatePreference()
+{
+  return mIMEPreference;
 }
 
 NS_IMETHODIMP

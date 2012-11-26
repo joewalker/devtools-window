@@ -24,8 +24,6 @@
 #include "nsARIAMap.h"
 #include "nsEventShell.h"
 #include "nsIAccessibleProvider.h"
-#include "nsXFormsFormControlsAccessible.h"
-#include "nsXFormsWidgetsAccessible.h"
 #include "OuterDocAccessible.h"
 #include "Role.h"
 #include "RootAccessibleWrap.h"
@@ -127,7 +125,7 @@ ApplicationAccessible* nsAccessibilityService::gApplicationAccessible = nullptr;
 bool nsAccessibilityService::gIsShutdown = true;
 
 nsAccessibilityService::nsAccessibilityService() :
-  nsAccDocManager(), FocusManager()
+  DocManager(), FocusManager()
 {
 }
 
@@ -141,7 +139,7 @@ nsAccessibilityService::~nsAccessibilityService()
 // nsISupports
 
 NS_IMPL_ISUPPORTS_INHERITED3(nsAccessibilityService,
-                             nsAccDocManager,
+                             DocManager,
                              nsIAccessibilityService,
                              nsIAccessibleRetrieval,
                              nsIObserver)
@@ -623,7 +621,7 @@ nsAccessibilityService::GetAccessibleFromCache(nsIDOMNode* aNode,
   // caches. If we don't find it, and the given node is itself a document, check
   // our cache of document accessibles (document cache). Note usually shutdown
   // document accessibles are not stored in the document cache, however an
-  // "unofficially" shutdown document (i.e. not from nsAccDocManager) can still
+  // "unofficially" shutdown document (i.e. not from DocManager) can still
   // exist in the document cache.
   Accessible* accessible = FindAccessibleInCache(node);
   if (!accessible) {
@@ -977,7 +975,7 @@ bool
 nsAccessibilityService::Init()
 {
   // Initialize accessible document manager.
-  if (!nsAccDocManager::Init())
+  if (!DocManager::Init())
     return false;
 
   // Add observers.
@@ -1028,7 +1026,7 @@ nsAccessibilityService::Shutdown()
   }
 
   // Stop accessible document loader.
-  nsAccDocManager::Shutdown();
+  DocManager::Shutdown();
 
   // Application is going to be closed, shutdown accessibility and mark
   // accessibility service as shutdown to prevent calls of its methods.
@@ -1246,83 +1244,6 @@ nsAccessibilityService::CreateAccessibleByType(nsIContent* aContent,
       break;
 
 #endif // MOZ_XUL
-
-    // XForms elements
-    case nsIAccessibleProvider::XFormsContainer:
-      accessible = new nsXFormsContainerAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XFormsLabel:
-      accessible = new nsXFormsLabelAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XFormsOutput:
-      accessible = new nsXFormsOutputAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XFormsTrigger:
-      accessible = new nsXFormsTriggerAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XFormsInput:
-      accessible = new nsXFormsInputAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XFormsInputBoolean:
-      accessible = new nsXFormsInputBooleanAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XFormsInputDate:
-      accessible = new nsXFormsInputDateAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XFormsSecret:
-      accessible = new nsXFormsSecretAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XFormsSliderRange:
-      accessible = new nsXFormsRangeAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XFormsSelect:
-      accessible = new nsXFormsSelectAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XFormsChoices:
-      accessible = new nsXFormsChoicesAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XFormsSelectFull:
-      accessible = new nsXFormsSelectFullAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XFormsItemCheckgroup:
-      accessible = new nsXFormsItemCheckgroupAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XFormsItemRadiogroup:
-      accessible = new nsXFormsItemRadiogroupAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XFormsSelectCombobox:
-      accessible = new nsXFormsSelectComboboxAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XFormsItemCombobox:
-      accessible = new nsXFormsItemComboboxAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XFormsDropmarkerWidget:
-      accessible = new nsXFormsDropmarkerWidgetAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XFormsCalendarWidget:
-      accessible = new nsXFormsCalendarWidgetAccessible(aContent, aDoc);
-      break;
-
-    case nsIAccessibleProvider::XFormsComboboxPopupWidget:
-      accessible = new nsXFormsComboboxPopupWidgetAccessible(aContent, aDoc);
-      break;
 
     default:
       return nullptr;

@@ -30,7 +30,7 @@
 #include "nsContentUtils.h"
 #include "nsEmbedCID.h"
 #include "nsEventListenerManager.h"
-#include "nsGenericElement.h"
+#include "mozilla/dom/Element.h"
 #include "nsIAppsService.h"
 #include "nsIBaseWindow.h"
 #include "nsIComponentManager.h"
@@ -64,6 +64,7 @@
 #include "nsInterfaceHashtable.h"
 #include "nsPIDOMWindow.h"
 #include "nsPIWindowRoot.h"
+#include "nsGlobalWindow.h"
 #include "nsPresContext.h"
 #include "nsPrintfCString.h"
 #include "nsScriptLoader.h"
@@ -422,11 +423,20 @@ TabChild::HandlePossibleViewportChange()
     bodyDOMElement->GetScrollHeight(&bodyHeight);
   }
 
-  float pageWidth = NS_MAX(htmlWidth, bodyWidth);
-  float pageHeight = NS_MAX(htmlHeight, bodyHeight);
+  float pageWidth, pageHeight;
+  if (htmlDOMElement || bodyDOMElement) {
+    pageWidth = NS_MAX(htmlWidth, bodyWidth);
+    pageHeight = NS_MAX(htmlHeight, bodyHeight);
+  } else {
+    // For non-HTML content (e.g. SVG), just assume page size == viewport size.
+    pageWidth = viewportW;
+    pageHeight = viewportH;
+  }
+  NS_ENSURE_TRUE_VOID(pageWidth); // (return early rather than divide by 0)
 
   minScale = mInnerSize.width / pageWidth;
   minScale = clamped((double)minScale, viewportInfo.minZoom, viewportInfo.maxZoom);
+  NS_ENSURE_TRUE_VOID(minScale); // (return early rather than divide by 0)
 
   viewportH = NS_MAX(viewportH, screenH / minScale);
   SetCSSViewport(viewportW, viewportH);
@@ -1145,6 +1155,17 @@ TabChild::DispatchMessageManagerMessage(const nsAString& aMessageName,
                        aMessageName, false, &cloneData, nullptr, nullptr);
 }
 
+static void
+ScrollWindowTo(nsIDOMWindow* aWindow, const mozilla::gfx::Point& aPoint)
+{
+    nsGlobalWindow* window = static_cast<nsGlobalWindow*>(aWindow);
+    nsIScrollableFrame* sf = window->GetScrollFrame();
+
+    if (sf) {
+        sf->ScrollToCSSPixelsApproximate(aPoint);
+    }
+}
+
 bool
 TabChild::RecvUpdateFrame(const FrameMetrics& aFrameMetrics)
 {
@@ -1190,8 +1211,7 @@ TabChild::RecvUpdateFrame(const FrameMetrics& aFrameMetrics)
       AsyncPanZoomController::CalculateCompositedRectInCssPixels(aFrameMetrics);
     utils->SetScrollPositionClampingScrollPortSize(
       cssCompositedRect.width, cssCompositedRect.height);
-    window->ScrollTo(aFrameMetrics.mScrollOffset.x,
-                     aFrameMetrics.mScrollOffset.y);
+    ScrollWindowTo(window, aFrameMetrics.mScrollOffset);
     gfxSize resolution = AsyncPanZoomController::CalculateResolution(
       aFrameMetrics);
     utils->SetResolution(resolution.width, resolution.height);
@@ -1500,7 +1520,7 @@ TabChild::DeallocPContentDialog(PContentDialogChild* aDialog)
 }
 
 PContentPermissionRequestChild*
-TabChild::AllocPContentPermissionRequest(const nsCString& aType, const IPC::Principal&)
+TabChild::AllocPContentPermissionRequest(const nsCString& aType, const nsCString& aAccess, const IPC::Principal&)
 {
   NS_RUNTIMEABORT("unused");
   return nullptr;
@@ -1923,12 +1943,12 @@ NS_IMPL_CYCLE_COLLECTION_CLASS(TabChildGlobal)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(TabChildGlobal,
                                                 nsDOMEventTargetHelper)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK_NSCOMPTR(mMessageManager)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mMessageManager)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(TabChildGlobal,
                                                   nsDOMEventTargetHelper)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE_NSCOMPTR(mMessageManager)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMessageManager)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(TabChildGlobal)
