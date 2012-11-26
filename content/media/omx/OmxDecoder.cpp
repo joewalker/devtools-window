@@ -89,6 +89,11 @@ ssize_t MediaStreamSource::readAt(off64_t offset, void *data, size_t size)
         NS_FAILED(mResource->Read(ptr, todo, &bytesRead))) {
       return ERROR_IO;
     }
+
+    if (bytesRead == 0) {
+      return size - todo;
+    }
+
     offset += bytesRead;
     todo -= bytesRead;
     ptr += bytesRead;
@@ -564,6 +569,11 @@ bool OmxDecoder::ReadAudio(AudioFrame *aFrame, int64_t aSeekTimeUs)
       return false;
     } else {
       return ReadAudio(aFrame, aSeekTimeUs);
+    }
+  }
+  else if (err == ERROR_END_OF_STREAM) {
+    if (aFrame->mSize == 0) {
+      return false;
     }
   }
 

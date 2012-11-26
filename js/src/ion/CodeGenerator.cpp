@@ -311,7 +311,7 @@ CodeGenerator::visitLambda(LLambda *lir)
 
     JS_STATIC_ASSERT(offsetof(JSFunction, flags) == offsetof(JSFunction, nargs) + 2);
     masm.store32(Imm32(u.word), Address(output, offsetof(JSFunction, nargs)));
-    masm.storePtr(ImmGCPtr(fun->script().unsafeGet()),
+    masm.storePtr(ImmGCPtr(fun->nonLazyScript().unsafeGet()),
                   Address(output, JSFunction::offsetOfNativeOrScript()));
     masm.storePtr(scopeChain, Address(output, JSFunction::offsetOfEnvironment()));
     masm.storePtr(ImmGCPtr(fun->displayAtom()), Address(output, JSFunction::offsetOfAtom()));
@@ -926,7 +926,7 @@ CodeGenerator::visitCallKnown(LCallKnown *call)
 
     // If the function is known to be uncompilable, only emit the call to InvokeFunction.
     ExecutionMode executionMode = gen->info().executionMode();
-    RootedScript targetScript(cx, target->script());
+    RootedScript targetScript(cx, target->nonLazyScript());
     if (GetIonScript(targetScript, executionMode) == ION_DISABLED_SCRIPT) {
         if (!emitCallInvokeFunction(call, calleereg, call->numActualArgs(), unusedStack))
             return false;
@@ -1435,6 +1435,70 @@ CodeGenerator::maybeCreateScriptCounts()
     return counts;
 }
 
+// Structure for managing the state tracked for a block by script counters.
+struct ScriptCountBlockState
+{
+    IonBlockCounts &block;
+    MacroAssembler &masm;
+
+    Sprinter printer;
+
+    uint32 instructionBytes;
+    uint32 spillBytes;
+
+    // Pointer to instructionBytes, spillBytes, or NULL, depending on the last
+    // instruction processed.
+    uint32 *last;
+    uint32 lastLength;
+
+  public:
+    ScriptCountBlockState(IonBlockCounts *block, MacroAssembler *masm)
+      : block(*block), masm(*masm),
+        printer(GetIonContext()->cx),
+        instructionBytes(0), spillBytes(0), last(NULL), lastLength(0)
+    {
+    }
+
+    bool init()
+    {
+        if (!printer.init())
+            return false;
+
+        // Bump the hit count for the block at the start. This code is not
+        // included in either the text for the block or the instruction byte
+        // counts.
+        masm.inc64(AbsoluteAddress(block.addressOfHitCount()));
+
+        // Collect human readable assembly for the code generated in the block.
+        masm.setPrinter(&printer);
+
+        return true;
+    }
+
+    void visitInstruction(LInstruction *ins)
+    {
+        if (last)
+            *last += masm.size() - lastLength;
+        lastLength = masm.size();
+        last = ins->isMoveGroup() ? &spillBytes : &instructionBytes;
+
+        // Prefix stream of assembly instructions with their LIR instruction name.
+        printer.printf("[%s]\n", ins->opName());
+    }
+
+    ~ScriptCountBlockState()
+    {
+        masm.setPrinter(NULL);
+
+        if (last)
+            *last += masm.size() - lastLength;
+
+        block.setCode(printer.string());
+        block.setInstructionBytes(instructionBytes);
+        block.setSpillBytes(spillBytes);
+    }
+};
+
 bool
 CodeGenerator::generateBody()
 {
@@ -1451,19 +1515,18 @@ CodeGenerator::generateBody()
             return false;
         iter++;
 
-        mozilla::Maybe<Sprinter> printer;
+        mozilla::Maybe<ScriptCountBlockState> blockCounts;
         if (counts) {
-            masm.inc64(AbsoluteAddress(counts->block(i).addressOfHitCount()));
-            printer.construct(GetIonContext()->cx);
-            if (!printer.ref().init())
+            blockCounts.construct(&counts->block(i), &masm);
+            if (!blockCounts.ref().init())
                 return false;
-            masm.setPrinter(printer.addr());
         }
 
         for (; iter != current->end(); iter++) {
             IonSpew(IonSpew_Codegen, "instruction %s", iter->opName());
+
             if (counts)
-                printer.ref().printf("[%s]\n", iter->opName());
+                blockCounts.ref().visitInstruction(*iter);
 
             if (iter->safepoint() && pushedArgumentSlots_.length()) {
                 if (!markArgumentSlots(iter->safepoint()))
@@ -1475,11 +1538,6 @@ CodeGenerator::generateBody()
         }
         if (masm.oom())
             return false;
-
-        if (counts) {
-            counts->block(i).setCode(printer.ref().string());
-            masm.setPrinter(NULL);
-        }
     }
 
     JS_ASSERT(pushedArgumentSlots_.empty());

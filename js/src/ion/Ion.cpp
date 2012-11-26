@@ -868,6 +868,17 @@ CompileBackEnd(MIRGenerator *mir)
             return NULL;
     }
 
+    if (js_IonOptions.licm) {
+        LICM licm(mir, graph);
+        if (!licm.analyze())
+            return NULL;
+        IonSpewPass("LICM");
+        AssertGraphCoherency(graph);
+
+        if (mir->shouldCancel("LICM"))
+            return NULL;
+    }
+
     if (js_IonOptions.rangeAnalysis) {
         RangeAnalysis r(graph);
         if (!r.addBetaNobes())
@@ -902,17 +913,6 @@ CompileBackEnd(MIRGenerator *mir)
 
     if (mir->shouldCancel("DCE"))
         return NULL;
-
-    if (js_IonOptions.licm) {
-        LICM licm(mir, graph);
-        if (!licm.analyze())
-            return NULL;
-        IonSpewPass("LICM");
-        AssertGraphCoherency(graph);
-
-        if (mir->shouldCancel("LICM"))
-            return NULL;
-    }
 
     if (js_IonOptions.edgeCaseAnalysis) {
         EdgeCaseAnalysis edgeCaseAnalysis(mir, graph);
@@ -1130,7 +1130,13 @@ SequentialCompileContext::compile(IonBuilder *builder, MIRGraph *graph,
     }
     builder->clearForBackEnd();
 
-    if (js_IonOptions.parallelCompilation && OffThreadCompilationAvailable(cx)) {
+    // Try to compile the script off thread, if possible. Compilation cannot be
+    // performed off thread during an incremental GC, as doing so may trip
+    // incremental read barriers.
+    if (js_IonOptions.parallelCompilation &&
+        OffThreadCompilationAvailable(cx) &&
+        !cx->compartment->needsBarrier())
+    {
         builder->script()->ion = ION_COMPILING_SCRIPT;
 
         if (!StartOffThreadIonCompile(cx, builder)) {
@@ -1564,7 +1570,7 @@ ion::FastInvoke(JSContext *cx, HandleFunction fun, CallArgsList &args)
 {
     JS_CHECK_RECURSION(cx, return IonExec_Error);
 
-    RootedScript script(cx, fun->script());
+    RootedScript script(cx, fun->nonLazyScript());
     IonScript *ion = script->ionScript();
     IonCode *code = ion->method();
     void *jitcode = code->raw();
@@ -1880,8 +1886,6 @@ ion::FinishInvalidation(FreeOp *fop, JSScript *script)
 void
 ion::MarkFromIon(JSRuntime *rt, Value *vp)
 {
-    JS_ASSERT_IF(vp->isMarkable(),
-                 ((gc::Cell*)vp->toGCThing())->compartment()->needsBarrier());
     gc::MarkValueUnbarriered(&rt->gcMarker, vp, "write barrier");
 }
 
