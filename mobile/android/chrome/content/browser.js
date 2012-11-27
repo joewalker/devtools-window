@@ -1664,6 +1664,9 @@ var SelectionHandler = {
           // Knowing when the page is done drawing is hard, so let's just cancel
           // the selection when the window changes. We should fix this later.
           this.endSelection();
+        } else if (this._activeType == this.TYPE_CURSOR) {
+          //  Hide the cursor if the window changes
+          this.hideThumb();
         }
         break;
       }
@@ -2458,6 +2461,7 @@ function Tab(aURL, aParams) {
   this.desktopMode = false;
   this.originalURI = null;
   this.savedArticle = null;
+  this.hasTouchListener = false;
 
   this.create(aURL, aParams);
 }
@@ -2745,7 +2749,26 @@ Tab.prototype = {
         Math.abs(displayPort.y - this._oldDisplayPort.y) > epsilon ||
         Math.abs(displayPort.width - this._oldDisplayPort.width) > epsilon ||
         Math.abs(displayPort.height - this._oldDisplayPort.height) > epsilon) {
-      cwu.setDisplayPortForElement(displayPort.x, displayPort.y, displayPort.width, displayPort.height, element);
+      // Set the display-port to be 4x the size of the critical display-port,
+      // on each dimension, giving us a 0.25x lower precision buffer around the
+      // critical display-port. Spare area is *not* redistributed to the other
+      // axis, as display-list building and invalidation cost scales with the
+      // size of the display-port.
+      let pageRect = cwu.getRootBounds();
+      let pageXMost = pageRect.right - geckoScrollX;
+      let pageYMost = pageRect.bottom - geckoScrollY;
+
+      let dpW = Math.min(pageRect.right - pageRect.left, displayPort.width * 4);
+      let dpH = Math.min(pageRect.bottom - pageRect.top, displayPort.height * 4);
+
+      let dpX = Math.min(Math.max(displayPort.x - displayPort.width * 1.5,
+                                  pageRect.left - geckoScrollX), pageXMost - dpW);
+      let dpY = Math.min(Math.max(displayPort.y - displayPort.height * 1.5,
+                                  pageRect.top - geckoScrollY), pageYMost - dpH);
+      cwu.setDisplayPortForElement(dpX, dpY, dpW, dpH, element);
+      cwu.setCriticalDisplayPortForElement(displayPort.x, displayPort.y,
+                                           displayPort.width, displayPort.height,
+                                           element);
     }
 
     this._oldDisplayPort = displayPort;
@@ -3187,6 +3210,11 @@ Tab.prototype = {
           }
         });
 
+        // For low-memory devices, don't allow reader mode since it takes up a lot of memory.
+        // See https://bugzilla.mozilla.org/show_bug.cgi?id=792603 for details.
+        if (Cc["@mozilla.org/xpcom/memory-service;1"].getService(Ci.nsIMemory).isLowMemoryPlatform())
+          return;
+
         // Once document is fully loaded, parse it
         Reader.parseDocumentFromTab(this.id, function (article) {
           // Do nothing if there's no article or the page in this tab has
@@ -3309,6 +3337,7 @@ Tab.prototype = {
       // XXX This code assumes that this is the earliest hook we have at which
       // browser.contentDocument is changed to the new document we're loading
       this.contentDocumentIsDisplayed = false;
+      this.hasTouchListener = false;
     } else {
       this.sendViewportUpdate();
     }
@@ -3711,9 +3740,10 @@ var BrowserEventHandler = {
   observe: function(aSubject, aTopic, aData) {
     if (aTopic == "dom-touch-listener-added") {
       let tab = BrowserApp.getTabForWindow(aSubject.top);
-      if (!tab)
+      if (!tab || tab.hasTouchListener)
         return;
 
+      tab.hasTouchListener = true;
       sendMessageToJava({
         gecko: {
           type: "Tab:HasTouchListener",
@@ -5984,18 +6014,15 @@ var PermissionsHelper = {
                          "allowed" : "denied";
           let valueString = Strings.browser.GetStringFromName(typeStrings[valueKey]);
 
-          // If we implement a two-line UI, we will need to pass the label and
-          // value individually and let java handle the formatting
-          let setting = Strings.browser.formatStringFromName("siteSettings.labelToValue",
-                                                             [ label, valueString ], 2);
           permissions.push({
             type: type,
-            setting: setting
+            setting: label,
+            value: valueString
           });
         }
 
         // Keep track of permissions, so we know which ones to clear
-        this._currentPermissions = permissions; 
+        this._currentPermissions = permissions;
 
         let host;
         try {

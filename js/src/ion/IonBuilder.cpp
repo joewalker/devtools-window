@@ -204,7 +204,7 @@ IonBuilder::canInlineTarget(JSFunction *target)
         return false;
     }
 
-    RootedScript inlineScript(cx, target->script());
+    RootedScript inlineScript(cx, target->nonLazyScript());
     ExecutionMode executionMode = info().executionMode();
     if (!CanIonCompile(inlineScript, executionMode)) {
         IonSpew(IonSpew_Inlining, "Cannot inline due to disable Ion compilation");
@@ -2835,7 +2835,7 @@ IonBuilder::jsop_call_inline(HandleFunction callee, uint32 argc, bool constructi
 
     // Compilation information is allocated for the duration of the current tempLifoAlloc
     // lifetime.
-    RootedScript calleeScript(cx, callee->script());
+    RootedScript calleeScript(cx, callee->nonLazyScript());
     CompileInfo *info = cx->tempLifoAlloc().new_<CompileInfo>(calleeScript.get(), callee,
                                                               (jsbytecode *)NULL, constructing,
                                                               SequentialExecution);
@@ -2930,7 +2930,7 @@ IonBuilder::makeInliningDecision(AutoObjectVector &targets, uint32 argc)
         if (!target->isInterpreted())
             return false;
 
-        script = target->script();
+        script = target->nonLazyScript();
         uint32_t calleeUses = script->getUseCount();
 
         if (target->nargs < argc) {
@@ -3549,7 +3549,7 @@ IonBuilder::createThisScriptedSingleton(HandleFunction target, HandleObject prot
     types::TypeObject *type = proto->getNewType(cx, target);
     if (!type)
         return NULL;
-    if (!types::TypeScript::ThisTypes(target->script().unsafeGet())->hasType(types::Type::ObjectType(type)))
+    if (!types::TypeScript::ThisTypes(target->nonLazyScript().unsafeGet())->hasType(types::Type::ObjectType(type)))
         return NULL;
 
     RootedObject templateObject(cx, js_CreateThisForFunctionWithProto(cx, target, proto));
@@ -6498,9 +6498,37 @@ IonBuilder::jsop_in_dense()
 bool
 IonBuilder::jsop_instanceof()
 {
-    MDefinition *proto = current->pop();
+    MDefinition *rhs = current->pop();
     MDefinition *obj = current->pop();
-    MInstanceOf *ins = new MInstanceOf(obj, proto);
+
+    TypeOracle::BinaryTypes types = oracle->binaryTypes(script_, pc);
+
+    // If this is an 'x instanceof function' operation and we can determine the
+    // exact function and prototype object being tested for, use a typed path.
+    do {
+        RawObject rhsObject = types.rhsTypes ? types.rhsTypes->getSingleton() : NULL;
+        if (!rhsObject || !rhsObject->isFunction() || rhsObject->isBoundFunction())
+            break;
+
+        types::TypeObject *rhsType = rhsObject->getType(cx);
+        if (!rhsType || rhsType->unknownProperties())
+            break;
+
+        types::HeapTypeSet *protoTypes =
+            rhsType->getProperty(cx, NameToId(cx->names().classPrototype), false);
+        RawObject protoObject = protoTypes ? protoTypes->getSingleton(cx) : NULL;
+        if (!protoObject)
+            break;
+
+        MInstanceOfTyped *ins = new MInstanceOfTyped(obj, protoObject);
+
+        current->add(ins);
+        current->push(ins);
+
+        return resumeAfter(ins);
+    } while (false);
+
+    MInstanceOf *ins = new MInstanceOf(obj, rhs);
 
     current->add(ins);
     current->push(ins);
