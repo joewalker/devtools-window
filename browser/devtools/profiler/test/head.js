@@ -1,7 +1,11 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+let temp = {};
 const PROFILER_ENABLED = "devtools.profiler.enabled";
+
+Cu.import("resource:///modules/devtools/Target.jsm", temp);
+let TargetFactory = temp.TargetFactory;
 
 function loadTab(url, callback) {
   let tab = gBrowser.addTab();
@@ -23,15 +27,17 @@ function loadTab(url, callback) {
 }
 
 function openProfiler(tab, callback) {
-  let tb = gDevTools.openToolboxForTab(tab, "jsprofiler");
+  let target = TargetFactory.forTab(tab);
+  let tb = gDevTools.openToolboxForTab(target, "jsprofiler");
   tb.once("jsprofiler-ready", callback);
 }
 
 function closeProfiler(tab, callback) {
-  let panel = gDevTools.getPanelForTarget("jsprofiler", tab);
+  let target = TargetFactory.forTab(tab);
+  let panel = gDevTools.getPanelForTarget("jsprofiler", target);
   panel.once("destroyed", callback);
 
-  gDevTools.closeToolbox(tab);
+  gDevTools.closeToolbox(target);
 }
 
 function setUp(url, callback=function(){}) {
@@ -39,7 +45,8 @@ function setUp(url, callback=function(){}) {
 
   loadTab(url, function onTabLoad(tab, browser) {
     openProfiler(tab, function onProfilerOpen() {
-      let panel = gDevTools.getPanelForTarget("jsprofiler", tab);
+      let target = TargetFactory.forTab(tab);
+      let panel = gDevTools.getPanelForTarget("jsprofiler", target);
       callback(tab, browser, panel);
     });
   });

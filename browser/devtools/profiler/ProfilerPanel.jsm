@@ -28,14 +28,11 @@ const ProfilerDefinition = {
   label: "Profiler", // FIXME: l10n
 
   isTargetSupported: function (target) {
-    switch (target.type) {
-      case gDevTools.TargetType.TAB:
-        return true;
-      case gDevTools.TargetType.REMOTE:
-      case gDevTools.TargetType.CHROME:
-      default:
-        return false;
+    if (target.isRemote || target.isChrome) {
+      return false;
     }
+
+    return true;
   },
 
   build: function (frame, target) {
