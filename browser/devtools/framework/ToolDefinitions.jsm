@@ -11,6 +11,9 @@ const inspectorProps = "chrome://browser/locale/devtools/inspector.properties";
 const debuggerProps = "chrome://browser/locale/devtools/debugger.properties";
 const styleEditorProps = "chrome://browser/locale/devtools/styleeditor.properties";
 const webConsoleProps = "chrome://browser/locale/devtools/webconsole.properties";
+XPCOMUtils.defineLazyGetter(this, "osString",
+  function() Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS);
+
 // Panels
 XPCOMUtils.defineLazyModuleGetter(this, "WebConsolePanel",
   "resource:///modules/WebConsolePanel.jsm");
@@ -118,3 +121,22 @@ this.defaultTools = [
   debuggerDefinition,
   inspectorDefinition,
 ];
+
+/**
+ * Lookup l10n string from a string bundle.
+ *
+ * @param {string} name
+ *        The key to lookup.
+ * @param {StringBundle} bundle
+ *        The key to lookup.
+ * @returns A localized version of the given key.
+ */
+function l10n(name, bundle)
+{
+  try {
+    return bundle.GetStringFromName(name);
+  } catch (ex) {
+    Services.console.logStringMessage("Error reading '" + name + "'");
+    throw new Error("l10n error with " + name);
+  }
+}
