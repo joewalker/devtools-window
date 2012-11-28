@@ -5,49 +5,16 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 "use strict";
 
-const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
+const Cu = Components.utils;
 
-this.EXPORTED_SYMBOLS = ["DebuggerDefinition"];
-
-const STRINGS_URI = "chrome://browser/locale/devtools/debugger.properties";
+this.EXPORTED_SYMBOLS = ["DebuggerPanel"];
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "Services",
-                                  "resource://gre/modules/Services.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "EventEmitter",
-                                  "resource:///modules/devtools/EventEmitter.jsm");
+  "resource:///modules/devtools/EventEmitter.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "DebuggerServer",
-                                  "resource://gre/modules/devtools/dbg-server.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
-                                  "resource:///modules/devtools/gDevTools.jsm");
-XPCOMUtils.defineLazyGetter(this, "_strings",
-  function() Services.strings.createBundle(STRINGS_URI));
-
-XPCOMUtils.defineLazyGetter(this, "osString", function() {
-  return Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime).OS;
-});
-
-this.DebuggerDefinition = {
-  id: "jsdebugger",
-  key: l10n("open.commandkey"),
-  accesskey: l10n("debuggerMenu.accesskey"),
-  modifiers: osString == "Darwin" ? "accel,alt" : "accel,shift",
-  ordinal: 1,
-  killswitch: "devtools.debugger.enabled",
-  icon: "chrome://browser/skin/devtools/tools-icons-small.png",
-  url: "chrome://browser/content/debugger.xul",
-  label: l10n("ToolboxDebugger.label"),
-
-  isTargetSupported: function(target) {
-    return true;
-  },
-
-  build: function(iframeWindow, toolbox) {
-    return new DebuggerPanel(iframeWindow, toolbox);
-  }
-};
-
+  "resource://gre/modules/devtools/dbg-server.jsm");
 
 function DebuggerPanel(iframeWindow, toolbox) {
   this._toolbox = toolbox;
@@ -127,18 +94,3 @@ DebuggerPanel.prototype = {
     // FIXME
   },
 };
-
-/**
- * Lookup l10n string from a string bundle.
- * @param {string} aName The key to lookup.
- * @returns A localized version of the given key.
- */
-function l10n(aName)
-{
-  try {
-    return _strings.GetStringFromName(aName);
-  } catch (ex) {
-    Services.console.logStringMessage("Error reading '" + aName + "'");
-    throw new Error("l10n error with " + aName);
-  }
-}
