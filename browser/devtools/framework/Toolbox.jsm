@@ -14,14 +14,15 @@ XPCOMUtils.defineLazyModuleGetter(this, "EventEmitter",
                                   "resource:///modules/devtools/EventEmitter.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Hosts",
                                   "resource:///modules/devtools/ToolboxHosts.jsm");
-XPCOMUtils.defineLazyModuleGetter(this, "gcli",
-                                  "resource:///modules/devtools/gcli.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
                                   "resource:///modules/devtools/gDevTools.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "CommandUtils",
                                   "resource:///modules/devtools/DeveloperToolbar.jsm");
 
-Components.utils.import("resource://gre/modules/devtools/Require.jsm");
+// DO NOT put Require.jsm or gcli.jsm into lazy getters as this breaks the
+// requisition import a few lines down.
+Cu.import("resource://gre/modules/devtools/gcli.jsm");
+Cu.import("resource://gre/modules/devtools/Require.jsm");
 
 let Requisition = require('gcli/cli').Requisition;
 let CommandOutputManager = require('gcli/canon').CommandOutputManager;
