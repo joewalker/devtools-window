@@ -6,7 +6,8 @@
 
 this.EXPORTED_SYMBOLS = [ "defaultTools" ];
 
-Components.utils.import("resource:///modules/devtools/InspectorDefinition.jsm");
+
+const inspectorProps = "chrome://browser/locale/devtools/inspector.properties";
 const debuggerProps = "chrome://browser/locale/devtools/debugger.properties";
 const styleEditorProps = "chrome://browser/locale/devtools/styleeditor.properties";
 const webConsoleProps = "chrome://browser/locale/devtools/webconsole.properties";
@@ -20,6 +21,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "DebuggerPanel",
 XPCOMUtils.defineLazyModuleGetter(this, "StyleEditorPanel",
   "resource:///modules/devtools/StyleEditorPanel.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "InspectorPanel",
+  "resource:///modules/devtools/InspectorPanel.jsm");
+
 // Strings
 XPCOMUtils.defineLazyGetter(this, "webConsoleStrings",
   function() Services.strings.createBundle(webConsoleProps));
@@ -29,6 +33,9 @@ XPCOMUtils.defineLazyGetter(this, "debuggerStrings",
 
 XPCOMUtils.defineLazyGetter(this, "styleEditorStrings",
   function() Services.strings.createBundle(styleEditorProps));
+
+XPCOMUtils.defineLazyGetter(this, "inspectorStrings",
+  function() Services.strings.createBundle(inspectorProps));
 
 // Definitions
 let webConsoleDefinition = {
@@ -68,6 +75,24 @@ let debuggerDefinition = {
   }
 };
 
+let inspectorDefinition = {
+  id: "inspector",
+  accesskey: l10n("inspector.accesskey", inspectorStrings),
+  key: l10n("inspector.commandkey", inspectorStrings),
+  ordinal: 2,
+  modifiers: osString == "Darwin" ? "accel,alt" : "accel,shift",
+  icon: "chrome://browser/skin/devtools/tools-icons-small.png",
+  url: "chrome://browser/content/devtools/inspector/inspector.xul",
+  label: l10n("inspector.label", inspectorStrings),
+
+  isTargetSupported: function(target) {
+    return !target.isRemote;
+  },
+
+  build: function(iframeWindow, toolbox) {
+    return new InspectorPanel(iframeWindow, toolbox);
+  }
+};
 
 let styleEditorDefinition = {
   id: "styleeditor",
@@ -89,7 +114,7 @@ let styleEditorDefinition = {
 
 this.defaultTools = [
   styleEditorDefinition,
-  InspectorDefinition,
   webConsoleDefinition,
   debuggerDefinition,
+  inspectorDefinition,
 ];
