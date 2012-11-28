@@ -4,22 +4,26 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const Cc = Components.classes;
-const Cu = Components.utils;
-const Ci = Components.interfaces;
-const Cr = Components.results;
+const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
 
 this.EXPORTED_SYMBOLS = ["InspectorPanel"];
 
-Cu.import("resource://gre/modules/Services.jsm");
-Cu.import("resource:///modules/devtools/MarkupView.jsm");
-Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
-Cu.import("resource:///modules/devtools/gDevTools.jsm");
-Cu.import("resource:///modules/devtools/Selection.jsm");
-Cu.import("resource:///modules/devtools/Breadcrumbs.jsm");
-Cu.import("resource:///modules/devtools/Highlighter.jsm");
-Cu.import("resource:///modules/devtools/Sidebar.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "Services",
+  "resource://gre/modules/Services.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "MarkupView",
+  "resource://gre/modules/devtools/MarkupView.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "EventEmitter",
+  "resource:///modules/devtools/EventEmitter.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Selection",
+  "resource:///modules/devtools/Selection.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "HTMLBreadcrumbs",
+  "resource:///modules/devtools/Breadcrumbs.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Highlighter",
+  "resource:///modules/devtools/Highlighter.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "ToolSidebar",
+  "resource:///modules/devtools/Sidebar.jsm");
 
 const LAYOUT_CHANGE_TIMER = 250;
 
