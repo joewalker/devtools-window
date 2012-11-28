@@ -4,46 +4,19 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = [ "WebConsoleDefinition" ];
+this.EXPORTED_SYMBOLS = [ "WebConsolePanel" ];
 
-const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
+const Cu = Components.utils;
+const Ci = Components.interfaces;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "Services",
-                                  "resource://gre/modules/Services.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "WebConsoleUtils",
-                                  "resource://gre/modules/devtools/WebConsoleUtils.jsm");
-
-XPCOMUtils.defineLazyModuleGetter(this, "HUDService",
-                                  "resource:///modules/HUDService.jsm");
-
 XPCOMUtils.defineLazyModuleGetter(this, "EventEmitter",
-                                  "resource:///modules/devtools/EventEmitter.jsm");
-
-const STRINGS_URI = "chrome://browser/locale/devtools/webconsole.properties";
-let l10n = new WebConsoleUtils.l10n(STRINGS_URI);
-
-/**
- * The external API allowing us to be registered with DevTools.jsm
- */
-this.WebConsoleDefinition = {
-  id: "webconsole",
-  key: l10n.getStr("cmd.commandkey"),
-  accesskey: l10n.getStr("webConsoleCmd.accesskey"),
-  modifiers: Services.appinfo.OS == "Darwin" ? "accel,alt" : "accel,shift",
-  ordinal: 0,
-  icon: "chrome://browser/skin/devtools/webconsole-tool-icon.png",
-  url: "chrome://browser/content/devtools/webconsole.xul",
-  label: l10n.getStr("ToolboxWebconsole.label"),
-  isTargetSupported: function(target) {
-    return true;
-  },
-  build: function(iframeWindow, toolbox) {
-    return new WebConsolePanel(iframeWindow, toolbox);
-  }
-};
+  "resource:///modules/devtools/EventEmitter.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Services",
+  "resource://gre/modules/Services.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "HUDService",
+  "resource:///modules/HUDService.jsm");
 
 /**
  * A DevToolPanel that controls the Web Console.
@@ -99,4 +72,4 @@ WebConsolePanel.prototype = {
     this._isReady = true;
     this.emit("ready");
   },
-}
+};

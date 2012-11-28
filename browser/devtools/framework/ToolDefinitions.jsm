@@ -6,15 +6,41 @@
 
 this.EXPORTED_SYMBOLS = [ "defaultTools" ];
 
-Components.utils.import("resource:///modules/WebConsolePanel.jsm");
 Components.utils.import("resource:///modules/devtools/StyleEditorDefinition.jsm");
 Components.utils.import("resource:///modules/devtools/InspectorDefinition.jsm");
 const debuggerProps = "chrome://browser/locale/devtools/debugger.properties";
+const webConsoleProps = "chrome://browser/locale/devtools/webconsole.properties";
+// Panels
+XPCOMUtils.defineLazyModuleGetter(this, "WebConsolePanel",
+  "resource:///modules/WebConsolePanel.jsm");
+
 XPCOMUtils.defineLazyModuleGetter(this, "DebuggerPanel",
   "resource:///modules/devtools/DebuggerPanel.jsm");
 
+// Strings
+XPCOMUtils.defineLazyGetter(this, "webConsoleStrings",
+  function() Services.strings.createBundle(webConsoleProps));
+
 XPCOMUtils.defineLazyGetter(this, "debuggerStrings",
   function() Services.strings.createBundle(debuggerProps));
+
+// Definitions
+let webConsoleDefinition = {
+  id: "webconsole",
+  key: l10n("cmd.commandkey", webConsoleStrings),
+  accesskey: l10n("webConsoleCmd.accesskey", webConsoleStrings),
+  modifiers: Services.appinfo.OS == "Darwin" ? "accel,alt" : "accel,shift",
+  ordinal: 0,
+  icon: "chrome://browser/skin/devtools/webconsole-tool-icon.png",
+  url: "chrome://browser/content/devtools/webconsole.xul",
+  label: l10n("ToolboxWebconsole.label", webConsoleStrings),
+  isTargetSupported: function(target) {
+    return true;
+  },
+  build: function(iframeWindow, toolbox) {
+    return new WebConsolePanel(iframeWindow, toolbox);
+  }
+};
 
 let debuggerDefinition = {
   id: "jsdebugger",
@@ -39,7 +65,7 @@ let debuggerDefinition = {
 
 this.defaultTools = [
   StyleEditorDefinition,
-  WebConsoleDefinition,
   InspectorDefinition,
+  webConsoleDefinition,
   debuggerDefinition,
 ];
