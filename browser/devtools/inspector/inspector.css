@@ -2,10 +2,6 @@
   direction: ltr;
 }
 
-.devtools-toolbarbutton:not([label]) > .toolbarbutton-text {
-  display: none;
-}
-
 #inspector-sidebar {
   min-width: 250px;
 }

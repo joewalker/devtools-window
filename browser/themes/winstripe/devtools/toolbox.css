@@ -18,52 +18,47 @@
   list-style-image: url("chrome://browser/skin/devtools/dock-window.png");
 }
 
-.command-button {
-  margin: 0 10px;
-  width: 16px;
-  height: 32px;
-  background-repeat: no-repeat;
-  background-position: center center;
-}
-
 #command-button-responsive {
-  background-image: -moz-image-rect(url(chrome://browser/skin/devtools/command-responsivemode.png), 0, 16, 16, 0);
+  list-style-image: url(chrome://browser/skin/devtools/command-responsivemode.png);
+  -moz-image-region: rect(0px, 16px, 16px, 0px);
 }
 #command-button-responsive:hover {
-  background-image: -moz-image-rect(url(chrome://browser/skin/devtools/command-responsivemode.png), 0, 32, 16, 16);
+  -moz-image-region: rect(0px, 32px, 16px, 16px);
 }
 #command-button-responsive:hover:active {
-  background-image: -moz-image-rect(url(chrome://browser/skin/devtools/command-responsivemode.png), 0, 48, 16, 32);
+  -moz-image-region: rect(0px, 48px, 16px, 32px);
 }
-#command-button-responsive.toggled {
-  background-image: -moz-image-rect(url(chrome://browser/skin/devtools/command-responsivemode.png), 0, 64, 16, 48);
+#command-button-responsive[checked=true] {
+  -moz-image-region: rect(0px, 64px, 16px, 48px);
 }
 
 #command-button-tilt {
-  background-image: -moz-image-rect(url(chrome://browser/skin/devtools/command-tilt.png), 0, 16, 16, 0);
+  list-style-image: url(chrome://browser/skin/devtools/command-tilt.png);
+  -moz-image-region: rect(0px, 16px, 16px, 0px);
 }
 #command-button-tilt:hover {
-  background-image: -moz-image-rect(url(chrome://browser/skin/devtools/command-tilt.png), 0, 32, 16, 16);
+  -moz-image-region: rect(0px, 32px, 16px, 16px);
 }
 
 #command-button-tilt:hover:active {
-  background-image: -moz-image-rect(url(chrome://browser/skin/devtools/command-tilt.png), 0, 48, 16, 32);
+  -moz-image-region: rect(0px, 48px, 16px, 32px);
 }
 
-#command-button-tilt.toggled {
-  background-image: -moz-image-rect(url(chrome://browser/skin/devtools/command-tilt.png), 0, 64, 16, 48);
+#command-button-tilt[checked=true] {
+  -moz-image-region: rect(0px, 64px, 16px, 48px);
 }
 
 #command-button-scratchpad {
-  background-image: -moz-image-rect(url(chrome://browser/skin/devtools/command-scratchpad.png), 0, 16, 16, 0);
+  list-style-image: url(chrome://browser/skin/devtools/command-scratchpad.png);
+  -moz-image-region: rect(0px, 16px, 16px, 0px);
 }
 
 #command-button-scratchpad:hover {
-  background-image: -moz-image-rect(url(chrome://browser/skin/devtools/command-scratchpad.png), 0, 32, 16, 16);
+  -moz-image-region: rect(0px, 32px, 16px, 16px);
 }
 
 #command-button-scratchpad:hover:active {
-  background-image: -moz-image-rect(url(chrome://browser/skin/devtools/command-scratchpad.png), 0, 48, 16, 32);
+  -moz-image-region: rect(0px, 48px, 16px, 32px);
 }
 
 

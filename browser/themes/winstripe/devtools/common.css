@@ -47,6 +47,10 @@
   min-width: 32px;
 }
 
+.devtools-toolbarbutton:not([label]) > .toolbarbutton-text {
+  display: none;
+}
+
 .devtools-toolbarbutton:not([checked=true]):hover:active {
   background-color: hsla(210,18%,9%,.1);
   background-image: -moz-linear-gradient(hsla(209,13%,54%,.35), hsla(209,13%,54%,.1) 85%, hsla(209,13%,54%,.2));
