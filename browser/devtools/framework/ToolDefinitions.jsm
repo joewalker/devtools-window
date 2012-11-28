@@ -6,9 +6,9 @@
 
 this.EXPORTED_SYMBOLS = [ "defaultTools" ];
 
-Components.utils.import("resource:///modules/devtools/StyleEditorDefinition.jsm");
 Components.utils.import("resource:///modules/devtools/InspectorDefinition.jsm");
 const debuggerProps = "chrome://browser/locale/devtools/debugger.properties";
+const styleEditorProps = "chrome://browser/locale/devtools/styleeditor.properties";
 const webConsoleProps = "chrome://browser/locale/devtools/webconsole.properties";
 // Panels
 XPCOMUtils.defineLazyModuleGetter(this, "WebConsolePanel",
@@ -17,12 +17,18 @@ XPCOMUtils.defineLazyModuleGetter(this, "WebConsolePanel",
 XPCOMUtils.defineLazyModuleGetter(this, "DebuggerPanel",
   "resource:///modules/devtools/DebuggerPanel.jsm");
 
+XPCOMUtils.defineLazyModuleGetter(this, "StyleEditorPanel",
+  "resource:///modules/devtools/StyleEditorPanel.jsm");
+
 // Strings
 XPCOMUtils.defineLazyGetter(this, "webConsoleStrings",
   function() Services.strings.createBundle(webConsoleProps));
 
 XPCOMUtils.defineLazyGetter(this, "debuggerStrings",
   function() Services.strings.createBundle(debuggerProps));
+
+XPCOMUtils.defineLazyGetter(this, "styleEditorStrings",
+  function() Services.strings.createBundle(styleEditorProps));
 
 // Definitions
 let webConsoleDefinition = {
@@ -63,8 +69,26 @@ let debuggerDefinition = {
 };
 
 
+let styleEditorDefinition = {
+  id: "styleeditor",
+  key: l10n("open.commandkey", styleEditorStrings),
+  ordinal: 3,
+  accesskey: l10n("open.accesskey", styleEditorStrings),
+  modifiers: "shift",
+  label: l10n("ToolboxStyleEditor.label", styleEditorStrings),
+  url: "chrome://browser/content/styleeditor.xul",
+
+  isTargetSupported: function(target) {
+    return !target.isRemote && !target.isChrome;
+  },
+
+  build: function(iframeWindow, toolbox) {
+    return new StyleEditorPanel(iframeWindow, toolbox);
+  }
+};
+
 this.defaultTools = [
-  StyleEditorDefinition,
+  styleEditorDefinition,
   InspectorDefinition,
   webConsoleDefinition,
   debuggerDefinition,
