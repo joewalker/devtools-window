@@ -660,7 +660,7 @@ StyleEditor.prototype = {
     // Use a ref count to make sure we do not add it multiple times.. and remove
     // it only when all pending StyleEditor-generated transitions ended.
     if (!this._transitionRefCount) {
-      this._styleSheet.insertRule(TRANSITION_RULE, 0);
+      this.styleSheet.insertRule(TRANSITION_RULE, this.styleSheet.cssRules.length);
       content.documentElement.classList.add(TRANSITION_CLASS);
     }
 
@@ -682,7 +682,7 @@ StyleEditor.prototype = {
   {
     if (--this._transitionRefCount == 0) {
       this.contentDocument.documentElement.classList.remove(TRANSITION_CLASS);
-      this.styleSheet.deleteRule(0);
+      this.styleSheet.deleteRule(this.styleSheet.cssRules.length - 1);
     }
 
     this._triggerAction("Commit");
