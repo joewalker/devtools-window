@@ -18,6 +18,9 @@ XPCOMUtils.defineLazyModuleGetter(this, "Toolbox",
 XPCOMUtils.defineLazyModuleGetter(this, "TargetFactory",
   "resource:///modules/devtools/Target.jsm");
 
+var Q = {};
+Components.utils.import("resource://gre/modules/commonjs/promise/core.js", Q);
+
 const FORBIDDEN_IDS = new Set("toolbox", "");
 
 /**
@@ -127,6 +130,90 @@ DevTools.prototype = {
       }
     }
     return tools;
+  },
+
+  /**
+   * Show a Toolbox for a target (either by creating a new one, or if a toolbox
+   * already exists for the target, by bring to the front the existing one)
+   * If |toolId| is specified then the displayed toolbox will have the
+   * specified tool selected.
+   * If |hostType| is specified then the toolbox will be displayed using the
+   * specified HostType.
+   *
+   * @param {Target} target
+   *         The target the toolbox will debug
+   * @param {string} toolId
+   *        The id of the tool to show
+   * @param {Toolbox.HostType} hostType
+   *        The type of host (bottom, top, side)
+   *
+   * @return {Toolbox} toolbox
+   *        The toolbox that was opened
+   */
+  showToolbox: function(target, toolId, hostType) {
+    let deferred = Q.defer();
+
+    let toolbox = this._toolboxes.get(target);
+    if (toolbox) {
+      // Toolbox exists for target, we just need to point it in the right place
+
+      // This would be simple-simple if we had a toolbox.switchHost() and
+      // toolbox.showTool() which both returned promises:
+      //
+      // let outstanding = [ toolbox.switchHost(), toolbox.showTool() ];
+      // return Q.all(outstanding).then(function() {
+      //   return toolbox;
+      // });
+      //
+      // However instead ...
+
+      let outstandingHostChange = false;
+      let outstandingToolChange = false;
+      let maybeResolve = function() {
+        if (!outstandingHostChange && !outstandingToolChange) {
+          deferred.resolve(promise);
+        }
+      }
+
+      if (toolbox.hostType != hostType) {
+        outstandingHostChange = true;
+        toolbox.once("host-changed", maybeResolve);
+        toolbox.hostType = hostType;
+      }
+
+      if (toolbox.currentToolId != toolId) {
+        outstandingToolChange = true;
+        toolbox.once(toolId + "-selected", maybeResolve);
+        toolbox.selectTool(toolId);
+      }
+
+      // TODO: toolbox.focus();
+    }
+    else {
+      // No toolbox for target, create one
+
+      // TODO: I'd like to change the order of these parameters to match
+      toolbox = new Toolbox(target, hostType, toolId);
+
+      this._toolboxes.set(target, toolbox);
+
+      toolbox.once("destroyed", function() {
+        this._toolboxes.delete(target);
+        this._updateMenuCheckbox();
+        this.emit("toolbox-destroyed", target);
+      }.bind(this));
+
+      toolbox.once("ready", function() {
+        this.emit("toolbox-ready", toolbox);
+        this._updateMenuCheckbox();
+
+        deferred.resolve(toolbox);
+      }.bind(this));
+
+      toolbox.open();
+    }
+
+    return deferred.promise;
   },
 
   /**
