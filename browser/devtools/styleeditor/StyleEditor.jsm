@@ -809,7 +809,7 @@ StyleEditor.prototype = {
         }
       }
 
-      if (sheet.ownerNode) {
+      if (sheet.ownerNode && sheet.ownerNode.getAttribute) {
         // step 3: see <link charset="…">
         let linkCharset = sheet.ownerNode.getAttribute("charset");
         if (linkCharset != null) {
@@ -952,7 +952,7 @@ StyleEditor.prototype = {
   {
     let document = this.contentDocument;
     let parent = document.documentElement;
-    let style = document.createElement("style");
+    let style = document.createElementNS("http://www.w3.org/1999/xhtml", "style");
     style.setAttribute("type", "text/css");
     if (aText) {
       style.appendChild(document.createTextNode(aText));
