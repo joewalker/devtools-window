@@ -11,7 +11,7 @@ const Ci = Components.interfaces;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource:///modules/devtools/CssRuleView.jsm");
-Cu.import("resource:///modules/devtools/StyleEditorDefinition.jsm");
+Cu.import("resource:///modules/devtools/ToolDefinitions.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
                                   "resource:///modules/devtools/gDevTools.jsm");
@@ -61,7 +61,7 @@ this.RuleViewTool = function RVT_RuleViewTool(aInspector, aWindow, aIFrame)
     if (contentSheet)  {
       let target = this.inspector.target;
 
-      if (StyleEditorDefinition.isTargetSupported(target)) {
+      if (styleEditorDefinition.isTargetSupported(target)) {
         let toolbox = gDevTools.getToolboxForTarget(target);
 
         toolbox.once("styleeditor-selected", function SE_selected(id, styleEditor) {
