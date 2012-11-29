@@ -809,8 +809,8 @@ StyleEditor.prototype = {
         }
       }
 
+      // step 3: charset attribute of <link> or <style> element, if it exists
       if (sheet.ownerNode && sheet.ownerNode.getAttribute) {
-        // step 3: see <link charset="…">
         let linkCharset = sheet.ownerNode.getAttribute("charset");
         if (linkCharset != null) {
           return this._convertToUnicode(aString, linkCharset);
