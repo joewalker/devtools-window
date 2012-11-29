@@ -15,20 +15,12 @@ function test()
   gBrowser.selectedTab = gBrowser.addTab();
   gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
     gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
-    openToolbox();
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    gDevTools.showToolbox(target).then(testRegister);
   }, true);
 
   content.location = "data:text/html,test for dynamically registering and unregistering tools";
 }
-
-function openToolbox()
-{
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
-  toolbox = gDevTools.openToolbox(target);
-
-  toolbox.once("ready", testRegister);
-}
-
 
 function testRegister()
 {

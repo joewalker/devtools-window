@@ -230,7 +230,7 @@ DevTools.prototype = {
    * @return {Toolbox} toolbox
    *        The toolbox that was opened
    */
-  openToolbox: function DT_openToolbox(target, hostType, defaultToolId) {
+  _openToolbox: function DT_openToolbox(target, hostType, defaultToolId) {
     if (this._toolboxes.has(target)) {
       // only allow one toolbox per target
       return this._toolboxes.get(target);
@@ -284,7 +284,7 @@ DevTools.prototype = {
     if (tb) {
       tb.selectTool(toolId);
     } else {
-      tb = this.openToolbox(target, null, toolId);
+      tb = this._openToolbox(target, null, toolId);
     }
     return tb;
   },

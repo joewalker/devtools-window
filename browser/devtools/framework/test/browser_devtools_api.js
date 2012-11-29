@@ -61,7 +61,7 @@ function runTests(aTab) {
   gDevTools.once("toolbox-destroyed", onToolboxClosed);
 
   executeSoon(function() {
-    gDevTools.openToolbox(target, "bottom", toolId);
+    gDevTools.showToolbox(target, toolId);
   });
 }
 

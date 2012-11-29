@@ -15,30 +15,11 @@ function test()
   gBrowser.selectedTab = gBrowser.addTab();
   gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
     gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
-    openToolbox();
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    gDevTools.showToolbox(target).then(testReady);
   }, true);
 
   content.location = "data:text/html,test for dynamically registering and unregistering tools";
-}
-
-function openToolbox()
-{
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
-  gDevTools.toggleToolboxForTarget(target);
-
-  toolbox = gDevTools.getToolboxForTarget(target);
-
-  ok(!toolbox.isReady, "toolbox isReady isn't set yet");
-
-  try {
-    toolbox.selectTool("webconsole");
-    ok(false, "Should throw when selectTool() called before toolbox is ready");
-  }
-  catch(error) {
-    is(error.message, "Can't select tool, wait for toolbox 'ready' event")
-  }
-
-  toolbox.once("ready", testReady);
 }
 
 function testReady()

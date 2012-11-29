@@ -28,31 +28,29 @@ function test() {
       tools.set(id, false);
     }
 
-    let toolbox = gDevTools.openToolbox(target, undefined, firstTool);
+    gDevTools.showToolbox(target, firstTool).then(function(toolbox) {
+      // We add the event listeners
+      for (let [toolId] of tools) {
+        let id = toolId;
+        info("Registering listener for " + id);
+        tools.set(id, false);
+        toolbox.on(id + "-ready", function(event, panel) {
+          expectedCallbacksCount--;
+          info("Got event "  + event);
+          is(toolbox.getToolPanels().get(id), panel, "Got the right tool panel for " + id);
+          tools.set(id, true);
+          if (expectedCallbacksCount == 0) {
+            // "executeSoon" because we want to let a chance
+            // to falsy code to fire unexpected ready events.
+            executeSoon(theEnd);
+          }
+          if (expectedCallbacksCount < 0) {
+            ok(false, "we are receiving too many events");
+          }
+        });
+      }
 
-    // We add the event listeners
-    for (let [toolId] of tools) {
-      let id = toolId;
-      info("Registering listener for " + id);
-      tools.set(id, false);
-      toolbox.on(id + "-ready", function(event, panel) {
-        expectedCallbacksCount--;
-        info("Got event "  + event);
-        is(toolbox.getToolPanels().get(id), panel, "Got the right tool panel for " + id);
-        tools.set(id, true);
-        if (expectedCallbacksCount == 0) {
-          // "executeSoon" because we want to let a chance
-          // to falsy code to fire unexpected ready events.
-          executeSoon(theEnd);
-        }
-        if (expectedCallbacksCount < 0) {
-          ok(false, "we are receiving too many events");
-        }
-      });
-    }
-
-    toolbox.once("ready", function() {
-      // We open all the 
+      // We open all the tools
       for (let [id] of tools) {
         if (id != firstTool) {
           toolbox.selectTool(id);
