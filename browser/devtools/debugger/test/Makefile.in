@@ -12,7 +12,7 @@ include $(DEPTH)/config/autoconf.mk
 
 MOCHITEST_BROWSER_TESTS = \
 	browser_dbg_leaktest.js \
-	$(warning browser_dbg_createChrome.js disabled until issue 156 is fixed) \
+	browser_dbg_createChrome.js \
 	$(browser_dbg_debugger-tab-switch.js disabled until issues 106, 40 are fixed) \
 	$(browser_dbg_debugger-tab-switch-window.js disabled until issues 106, 40 are fixed) \
 	browser_dbg_debuggerstatement.js \

@@ -95,12 +95,6 @@ DebuggerPanel.prototype = {
   },
 
   destroy: function() {
-    delete this._toolbox;
-    delete this._target;
-    delete this._controller;
-    delete this._view;
-    delete this._bkp;
-    delete this.panelWin;
   },
 
   // DebuggerPanel API

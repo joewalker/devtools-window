@@ -571,8 +571,8 @@
                   <menuitem id="menu_devToolbar"
                             observes="devtoolsMenuBroadcaster_DevToolbar"
                             accesskey="&devToolbarMenu.accesskey;"/>
-                  <menuitem id="menu_remoteWebConsole"
-                            observes="devtoolsMenuBroadcaster_RemoteWebConsole"/>
+                  <menuitem id="menu_chromeDebugger"
+                            observes="devtoolsMenuBroadcaster_ChromeDebugger"/>
                   <menuitem id="menu_responsiveUI"
                             observes="devtoolsMenuBroadcaster_ResponsiveUI"
                             accesskey="&responsiveDesignTool.accesskey;"/>

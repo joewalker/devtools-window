@@ -152,7 +152,7 @@ let DebuggerController = {
 
     let client;
     // Remote debugging gets the debuggee from a RemoteTarget object.
-    if (this._target.isRemote) {
+    if (this._target && this._target.isRemote) {
       client = this.client = this._target.client;
 
       this._target.on("close", this._onTabDetached);
@@ -169,7 +169,9 @@ let DebuggerController = {
 
     // Content debugging can connect directly to the page.
     // TODO: convert this to use a TabTarget.
-    let transport = DebuggerServer.connectPipe();
+    let transport = window._isChromeDebugger
+      ? debuggerSocketConnect(Prefs.remoteHost, Prefs.remotePort)
+      : DebuggerServer.connectPipe();
     client = this.client = new DebuggerClient(transport);
 
     client.addListener("tabNavigated", this._onTabNavigated);

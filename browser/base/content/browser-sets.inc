@@ -91,7 +91,7 @@
     <command id="Tools:DevToolbox" oncommand="gDevTools.toggleToolboxCommand(gBrowser);"/>
     <command id="Tools:DevToolbar" oncommand="DeveloperToolbar.toggle();" disabled="true" hidden="true"/>
     <command id="Tools:DevToolbarFocus" oncommand="DeveloperToolbar.focusToggle();" disabled="true"/>
-    <command id="Tools:RemoteWebConsole" oncommand="HUDConsoleUI.toggleRemoteHUD();" disabled="true" hidden="true"/>
+    <command id="Tools:ChromeDebugger" oncommand="DebuggerUI.toggleChromeDebugger();" disabled="true" hidden="true"/>
     <command id="Tools:Scratchpad" oncommand="Scratchpad.openScratchpad();" disabled="true" hidden="true"/>
     <command id="Tools:ResponsiveUI" oncommand="ResponsiveUI.toggle();" disabled="true" hidden="true"/>
     <command id="Tools:Addons" oncommand="BrowserOpenAddonsMgr();"/>
@@ -181,10 +181,9 @@
                  type="checkbox" autocheck="false"
                  command="Tools:DevToolbar"
                  key="key_devToolbar"/>
-    <broadcaster id="devtoolsMenuBroadcaster_RemoteWebConsole"
-                 label="&remoteWebConsoleCmd.label;"
-                 type="checkbox" autocheck="false"
-                 command="Tools:RemoteWebConsole"/>
+    <broadcaster id="devtoolsMenuBroadcaster_ChromeDebugger"
+                 label="&chromeDebuggerMenu.label;"
+                 command="Tools:ChromeDebugger"/>
     <broadcaster id="devtoolsMenuBroadcaster_Scratchpad"
                  label="&scratchpad.label;"
                  command="Tools:Scratchpad"

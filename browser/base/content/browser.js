@@ -115,6 +115,12 @@ XPCOMUtils.defineLazyGetter(this, "DeveloperToolbar", function() {
   return new tmp.DeveloperToolbar(window, document.getElementById("developer-toolbar"));
 });
 
+XPCOMUtils.defineLazyGetter(this, "DebuggerUI", function() {
+  let tmp = {};
+  Cu.import("resource:///modules/devtools/DebuggerUI.jsm", tmp);
+  return new tmp.DebuggerUI(window);
+});
+
 XPCOMUtils.defineLazyModuleGetter(this, "Social",
   "resource:///modules/Social.jsm");
 
@@ -1407,6 +1413,16 @@ var gBrowserInit = {
       if (gPrefService.getBoolPref("devtools.toolbar.visible")) {
         DeveloperToolbar.show(false);
       }
+    }
+
+    // Enable Chrome Debugger?
+    let enabled = gPrefService.getBoolPref("devtools.chrome.enabled") &&
+                  gPrefService.getBoolPref("devtools.debugger.chrome-enabled") &&
+                  gPrefService.getBoolPref("devtools.debugger.remote-enabled");
+    if (enabled) {
+      let cmd = document.getElementById("Tools:ChromeDebugger");
+      cmd.removeAttribute("disabled");
+      cmd.removeAttribute("hidden");
     }
 
     // Enable Error Console?
