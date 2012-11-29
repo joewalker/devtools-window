@@ -354,12 +354,12 @@ BrowserTabActor.prototype = {
   // A constant prefix that will be used to form the actor ID by the server.
   actorPrefix: "tab",
 
-  grip: function BTA_grip() {
-    dbg_assert(!this.exited,
-               "grip() shouldn't be called on exited browser actor.");
-    dbg_assert(this.actorID,
-               "tab should have an actorID.");
-
+  /**
+   * Getter for the tab title.
+   * @return string
+   *         Tab title.
+   */
+  get tabTitle() {
     let title = this.browser.contentTitle;
     // If contentTitle is empty (e.g. on a not-yet-restored tab), but there is a
     // tabbrowser (i.e. desktop Firefox, but not Fennec), we can use the label
@@ -368,9 +368,18 @@ BrowserTabActor.prototype = {
       title = this._tabbrowser
                   ._getTabForContentWindow(this.browser.contentWindow).label;
     }
+    return title;
+  },
+
+  grip: function BTA_grip() {
+    dbg_assert(!this.exited,
+               "grip() shouldn't be called on exited browser actor.");
+    dbg_assert(this.actorID,
+               "tab should have an actorID.");
+
     let response = {
       actor: this.actorID,
-      title: title,
+      title: this.tabTitle,
       url: this.browser.currentURI.spec
     };
 
@@ -391,10 +400,6 @@ BrowserTabActor.prototype = {
    */
   disconnect: function BTA_disconnect() {
     this._detach();
-
-    if (this._progressListener) {
-      this._progressListener.destroy();
-    }
     this._extraActors = null;
   },
 
@@ -412,9 +417,6 @@ BrowserTabActor.prototype = {
                        type: "tabDetached" });
     }
 
-    if (this._progressListener) {
-      this._progressListener.destroy();
-    }
     this._browser = null;
     this._tabbrowser = null;
   },
@@ -480,6 +482,10 @@ BrowserTabActor.prototype = {
       return;
     }
 
+    if (this._progressListener) {
+      this._progressListener.destroy();
+    }
+
     this.browser.removeEventListener("DOMWindowCreated", this._onWindowCreated, true);
     this.browser.removeEventListener("pageshow", this._onWindowCreated, true);
 
@@ -489,7 +495,7 @@ BrowserTabActor.prototype = {
     this.conn.removeActorPool(this._tabPool);
     this._tabPool = null;
     if (this._tabActorPool) {
-      this.conn.removeActorPool(this._tabActorPool);
+      this.conn.removeActorPool(this._tabActorPool, true);
       this._tabActorPool = null;
     }
 
@@ -514,10 +520,6 @@ BrowserTabActor.prototype = {
     }
 
     this._detach();
-
-    if (this._progressListener) {
-      this._progressListener.destroy();
-    }
 
     return { type: "detached" };
   },
@@ -572,11 +574,6 @@ BrowserTabActor.prototype = {
         if (this.threadActor.dbg) {
           this.threadActor.dbg.enabled = true;
         }
-        if (this._progressListener) {
-          delete this._progressListener._needsTabNavigated;
-        }
-        this.conn.send({ from: this.actorID, type: "tabNavigated",
-                         url: this.browser.contentDocument.URL });
       }
     }
 
@@ -586,7 +583,26 @@ BrowserTabActor.prototype = {
         this.threadActor.findGlobals();
       }
     }
-  }
+  },
+
+  /**
+   * Tells if the window.console object is native or overwritten by script in
+   * the page.
+   *
+   * @param nsIDOMWindow aWindow
+   *        The window object you want to check.
+   * @return boolean
+   *         True if the window.console object is native, or false otherwise.
+   */
+  hasNativeConsoleAPI: function BTA_hasNativeConsoleAPI(aWindow) {
+    let isNative = false;
+    try {
+      let console = aWindow.wrappedJSObject.console;
+      isNative = "__mozillaConsole__" in console;
+    }
+    catch (ex) { }
+    return isNative;
+  },
 };
 
 /**
@@ -622,33 +638,45 @@ DebuggerProgressListener.prototype = {
     let isWindow = aFlag & Ci.nsIWebProgressListener.STATE_IS_WINDOW;
 
     // Skip non-interesting states.
-    if (isStart && isDocument && isRequest && isNetwork) {
+    if (!isWindow || !isNetwork ||
+        aProgress.DOMWindow != this._tabActor.browser.contentWindow) {
+      return;
+    }
+
+    if (isStart && aRequest instanceof Ci.nsIChannel) {
       // If the request is about to happen in a new window, we are not concerned
       // about the request.
-      if (aProgress.DOMWindow != this._tabActor.browser.contentWindow) {
-        return;
+
+      // Proceed normally only if the debuggee is not paused.
+      if (this._tabActor.threadActor.state == "paused") {
+        aRequest.suspend();
+        this._tabActor.threadActor.onResume();
+        this._tabActor.threadActor.dbg.enabled = false;
+        this._tabActor._pendingNavigation = aRequest;
       }
 
-      // If the debuggee is not paused, then proceed normally.
-      if (this._tabActor.threadActor.state != "paused") {
-        return;
-      }
-
-      aRequest.suspend();
-      this._tabActor.threadActor.onResume();
-      this._tabActor.threadActor.dbg.enabled = false;
-      this._tabActor._pendingNavigation = aRequest;
-      this._needsTabNavigated = true;
-    } else if (isStop && isWindow && isNetwork && this._needsTabNavigated) {
-      delete this._needsTabNavigated;
-      this._tabActor.threadActor.dbg.enabled = true;
       this._tabActor.conn.send({
         from: this._tabActor.actorID,
         type: "tabNavigated",
-        url: this._tabActor.browser.contentDocument.URL
+        url: aRequest.URI.spec,
+        title: "",
+        nativeConsoleAPI: true,
+        state: "start",
       });
+    } else if (isStop) {
+      if (this._tabActor.threadActor.state == "running") {
+        this._tabActor.threadActor.dbg.enabled = true;
+      }
 
-      this.destroy();
+      let window = this._tabActor.browser.contentWindow;
+      this._tabActor.conn.send({
+        from: this._tabActor.actorID,
+        type: "tabNavigated",
+        url: this._tabActor.browser.contentDocument.URL,
+        title: this._tabActor.tabTitle,
+        nativeConsoleAPI: this._tabActor.hasNativeConsoleAPI(window),
+        state: "stop",
+      });
     }
   },
 
@@ -657,7 +685,11 @@ DebuggerProgressListener.prototype = {
    */
   destroy: function DPL_destroy() {
     if (this._tabActor._tabbrowser.removeProgressListener) {
-      this._tabActor._tabbrowser.removeProgressListener(this);
+      try {
+        this._tabActor._tabbrowser.removeProgressListener(this);
+      } catch (ex) {
+        // This can throw during browser shutdown.
+      }
     }
     this._tabActor._progressListener = null;
     this._tabActor = null;
