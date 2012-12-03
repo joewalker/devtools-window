@@ -80,7 +80,13 @@ function test_focus_first()
       test_remove_tab();
     });
   }, false);
-  window.content.focus();
+
+  // We have opened a popup and now try to focus the main browser window. Of
+  // course, it is forbidden to do this too quickly as it would allow popup's to
+  // be opened without the user's knowledge. Delaying for 100ms is
+  // enough to work around this but we delay for 1000ms to be safe. A delay is
+  // probably not needed on slower computers.
+  setTimeout(window.content.focus, 1000);
 }
 
 function test_remove_tab()
