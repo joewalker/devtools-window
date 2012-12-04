@@ -12,6 +12,7 @@ const Ci = Components.interfaces;
 const PAGE_SIZE = 10;
 
 const PREVIEW_AREA = 700;
+const DEFAULT_MAX_CHILDREN = 100;
 
 this.EXPORTED_SYMBOLS = ["MarkupView"];
 
@@ -20,6 +21,7 @@ Cu.import("resource:///modules/devtools/CssRuleView.jsm");
 Cu.import("resource:///modules/devtools/Templater.jsm");
 Cu.import("resource:///modules/devtools/Undo.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 /**
  * Vocabulary for the purposes of this file:
@@ -45,6 +47,12 @@ this.MarkupView = function MarkupView(aInspector, aFrame, aControllerWindow)
   this._frame = aFrame;
   this.doc = this._frame.contentDocument;
   this._elt = this.doc.querySelector("#root");
+
+  try {
+    this.maxChildren = Services.prefs.getIntPref("devtools.markup.pagesize");
+  } catch(ex) {
+    this.maxChildren = DEFAULT_MAX_CHILDREN;
+  }
 
   this.undo = new UndoStack();
   this.undo.installController(aControllerWindow);
@@ -276,7 +284,8 @@ MarkupView.prototype = {
     }
 
     if (this._containers.has(aNode)) {
-      return this._containers.get(aNode);
+      let container = this._containers.get(aNode);
+      return container;
     }
 
     this._observer.observe(aNode, {
@@ -288,7 +297,6 @@ MarkupView.prototype = {
     let walker = documentWalker(aNode);
     let parent = walker.parentNode();
     if (parent) {
-      // Make sure parents of this node are imported too.
       var container = new MarkupContainer(this, aNode);
     } else {
       var container = new RootContainer(this, aNode);
@@ -301,6 +309,8 @@ MarkupView.prototype = {
     }
 
     this._containers.set(aNode, container);
+    // FIXME: set an expando to prevent the the wrapper from disappearing
+    aNode.__preserveHack = true;
     container.expanded = aExpand;
 
     container.childrenDirty = true;
@@ -340,10 +350,12 @@ MarkupView.prototype = {
    */
   showNode: function MT_showNode(aNode, centered)
   {
-    this.importNode(aNode);
+    let container = this.importNode(aNode);
+    this._updateChildren(container);
     let walker = documentWalker(aNode);
     let parent;
     while (parent = walker.parentNode()) {
+      this._updateChildren(this.getContainer(parent));
       this.expandNode(parent);
     }
     LayoutHelpers.scrollIntoViewIfNeeded(this._containers.get(aNode).editor.elt, centered);
@@ -422,7 +434,28 @@ MarkupView.prototype = {
       this._selectedContainer.selected = true;
     }
 
+    this._ensureSelectionVisible();
+    this._selectedContainer.focus();
+
     return true;
+  },
+
+  // Make sure that every parent of the selection is visible.
+  _ensureSelectionVisible: function MT_ensureSelectionVisible()
+  {
+    let node = this._selectedContainer.node;
+    let walker = documentWalker(node);
+    while (node) {
+      let container = this._containers.get(node);
+      let parent = walker.parentNode();
+      if (!container.elt.parentNode) {
+        let parentContainer = this._containers.get(parent);
+        parentContainer.childrenDirty = true;
+        this._updateChildren(parentContainer, node);
+      }
+
+      node = parent;
+    }
   },
 
   /**
@@ -450,7 +483,7 @@ MarkupView.prototype = {
    * Make sure all children of the given container's node are
    * imported and attached to the container in the right order.
    */
-  _updateChildren: function MT__updateChildren(aContainer)
+  _updateChildren: function MT__updateChildren(aContainer, aCentered)
   {
     if (!aContainer.childrenDirty) {
       return false;
@@ -460,26 +493,135 @@ MarkupView.prototype = {
     let treeWalker = documentWalker(aContainer.node);
     let child = treeWalker.firstChild();
     aContainer.hasChildren = !!child;
-    if (aContainer.expanded) {
-      aContainer.childrenDirty = false;
 
-      let lastContainer = null;
-      while (child) {
-        let container = this.importNode(child, false);
+    if (!aContainer.expanded) {
+      return;
+    }
 
-        // Make sure children are in the right order.
-        let before = lastContainer ? lastContainer.nextSibling : aContainer.children.firstChild;
-        aContainer.children.insertBefore(container.elt, before);
-        lastContainer = container.elt;
-        child = treeWalker.nextSibling();
+    aContainer.childrenDirty = false;
+
+    let children = this._getVisibleChildren(aContainer, aCentered);
+
+    let lastContainer = null;
+    for (child of children.children) {
+      let container = this.importNode(child, false);
+      let before = lastContainer ? lastContainer.nextSibling : aContainer.children.firstChild;
+      // Make sure children are in the right order.
+      aContainer.children.insertBefore(container.elt, before);
+      lastContainer = container.elt;
+    }
+
+    while (aContainer.children.lastChild != lastContainer) {
+      aContainer.children.removeChild(aContainer.children.lastChild);
+    }
+
+    if (!(children.hasFirst && children.hasLast)) {
+      let data = {
+        showing: this.strings.GetStringFromName("markupView.more.showing"),
+        showAll: this.strings.formatStringFromName(
+                  "markupView.more.showAll",
+                  [aContainer.node.children.length.toString()], 1),
+        eltAll: null // node will be created by the template
+      };
+      let options = {
+        stack: "markup-view.xhtml"
+      };
+
+      let loadMore = function() {
+        aContainer.maxChildren = -1;
+        aContainer.childrenDirty = true;
+        this._updateChildren(aContainer);
+      }.bind(this);
+
+      if (children.hasFirst) {
+        let span = this.template("more-nodes", data, options);
+        aContainer.children.insertBefore(span, aContainer.children.firstChild);
+        data.eltAll.addEventListener("click", loadMore, true);
       }
-
-      while (aContainer.children.lastChild != lastContainer) {
-        aContainer.children.removeChild(aContainer.children.lastChild);
+      if (children.hasLast) {
+        let span = this.template("more-nodes", data, options);
+        aContainer.children.appendChild(span);
+        data.eltAll.addEventListener("click", loadMore, true);
       }
     }
 
+    let containerChildren = aContainer.children;
+
     return true;
+  },
+
+  /**
+   * Return a list of the children to display for this container.
+   */
+  _getVisibleChildren: function MV__getVisibleChildren(aContainer, aCentered)
+  {
+    let maxChildren = aContainer.maxChildren || this.maxChildren;
+    if (maxChildren == -1) {
+      maxChildren = Number.MAX_VALUE;
+    }
+    let firstChild = documentWalker(aContainer.node).firstChild();
+    let lastChild = documentWalker(aContainer.node).lastChild();
+
+    if (!firstChild) {
+      // No children, we're done.
+      return { hasFirst: true, hasLast: true, children: [] };
+    }
+
+    // By default try to put the selected child in the middle of the list.
+    let start = aCentered || firstChild;
+
+    // Start by reading backward from the starting point....
+    let nodes = [];
+    let backwardWalker = documentWalker(start);
+    if (backwardWalker.previousSibling()) {
+      let backwardCount = Math.floor(maxChildren / 2);
+      let backwardNodes = this._readBackward(backwardWalker, backwardCount);
+      nodes = backwardNodes;
+    }
+
+    // Then read forward by any slack left in the max children...
+    let forwardWalker = documentWalker(start);
+    let forwardCount = maxChildren - nodes.length;
+    nodes = nodes.concat(this._readForward(forwardWalker, forwardCount));
+
+    // If there's any room left, it means we've run all the way to the end.
+    // In that case, there might still be more items at the front.
+    let remaining = maxChildren - nodes.length;
+    if (remaining > 0 && nodes[0] != firstChild) {
+      let firstNodes = this._readBackward(backwardWalker, remaining);
+
+      // Then put it all back together.
+      nodes = firstNodes.concat(nodes);
+    }
+
+    return {
+      hasFirst: nodes[0] == firstChild,
+      hasLast: nodes[nodes.length - 1] == lastChild,
+      children: nodes
+    };
+  },
+
+  _readForward: function MV__readForward(aWalker, aCount)
+  {
+    let ret = [];
+    let node = aWalker.currentNode;
+    do {
+      ret.push(node);
+      node = aWalker.nextSibling();
+    } while (node && --aCount);
+    return ret;
+  },
+
+  _readBackward: function MV__readBackward(aWalker, aCount)
+  {
+    let ret = [];
+    let node = aWalker.currentNode;
+    do {
+      ret.push(node);
+      node = aWalker.previousSibling();
+    } while(node && --aCount);
+    ret.reverse();
+    return ret;
   },
 
   /**
@@ -629,7 +771,6 @@ function MarkupContainer(aMarkupView, aNode)
   this.children = null;
   let options = { stack: "markup-view.xhtml" };
   this.markup.template("container", this, options);
-
   this.elt.container = this;
 
   this.expander.addEventListener("click", function() {
@@ -743,7 +884,7 @@ MarkupContainer.prototype = {
     if (focusable) {
       focusable.focus();
     }
-  }
+  },
 }
 
 /**
@@ -1269,3 +1410,8 @@ function whitespaceTextFilter(aNode)
       return Ci.nsIDOMNodeFilter.FILTER_ACCEPT;
     }
 }
+
+XPCOMUtils.defineLazyGetter(MarkupView.prototype, "strings", function () {
+  return Services.strings.createBundle(
+          "chrome://browser/locale/devtools/inspector.properties");
+});
