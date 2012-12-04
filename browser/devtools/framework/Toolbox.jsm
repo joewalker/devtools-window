@@ -8,6 +8,7 @@ const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/commonjs/promise/core.js");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 Cu.import("resource:///modules/devtools/gDevTools.jsm");
 
@@ -103,6 +104,22 @@ Toolbox.prototype = {
       panels.set(key, value);
     }
     return panels;
+  },
+
+  /**
+   * Access the panel for a given tool
+   */
+  getPanel: function TBOX_getPanel(id) {
+    return this.getToolPanels().get(id);
+  },
+
+  /**
+   * This is a shortcut for getPanel(currentToolId) because it is much more
+   * likely that we're going to want to get the panel that we've just made
+   * visible
+   */
+  getCurrentPanel: function TBOX_getCurrentPanel() {
+    return this.getToolPanels().get(this.currentToolId);
   },
 
   /**
