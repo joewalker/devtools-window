@@ -159,12 +159,20 @@ Toolbox.prototype = {
    * Open the toolbox
    */
   open: function TBOX_open() {
+    let deferred = Promise.defer();
+
     this._host.once("ready", function(event, iframe) {
       iframe.addEventListener("DOMContentLoaded", this._onLoad, true);
       iframe.setAttribute("src", this._URL);
     }.bind(this));
 
+    this.once("ready", function() {
+      deferred.resolve();
+    });
+
     this._host.open();
+
+    return deferred.promise;
   },
 
   /**
@@ -292,6 +300,8 @@ Toolbox.prototype = {
    *        The id of the tool to switch to
    */
   selectTool: function TBOX_selectTool(id) {
+    let deferred = Promise.defer();
+
     if (!this.isReady) {
       throw new Error("Can't select tool, wait for toolbox 'ready' event");
     }
@@ -340,6 +350,7 @@ Toolbox.prototype = {
           this.emit("select", id);
           this.emit(id + "-selected", panel);
           gDevTools.emit(id + "-ready", this, panel);
+          deferred.resolve(panel);
         }.bind(this);
 
         if (panel.isReady) {
@@ -357,12 +368,15 @@ Toolbox.prototype = {
       if (panel) {
         this.emit("select", id);
         this.emit(id + "-selected", panel);
+        deferred.resolve(panel);
       }
     }
 
     Services.prefs.setCharPref(this._prefs.LAST_TOOL, id);
 
     this._currentToolId = id;
+
+    return deferred.promise;
   },
 
   /**

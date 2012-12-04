@@ -11,15 +11,14 @@ const Ci = Components.interfaces;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/commonjs/promise/core.js");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 Cu.import("resource:///modules/devtools/ToolDefinitions.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "Toolbox",
   "resource:///modules/devtools/Toolbox.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "TargetFactory",
   "resource:///modules/devtools/Target.jsm");
-
-var Q = {};
-Components.utils.import("resource://gre/modules/commonjs/promise/core.js", Q);
+Cu.import("resource:///modules/devtools/Console.jsm");
 
 const FORBIDDEN_IDS = new Set("toolbox", "");
 
@@ -151,7 +150,6 @@ DevTools.prototype = {
    *        The toolbox that was opened
    */
   showToolbox: function(target, toolId, hostType) {
-    let deferred = Q.defer();
 
     let toolbox = this._toolboxes.get(target);
     if (toolbox) {
@@ -161,12 +159,13 @@ DevTools.prototype = {
       // toolbox.showTool() which both returned promises:
       //
       // let outstanding = [ toolbox.switchHost(), toolbox.showTool() ];
-      // return Q.all(outstanding).then(function() {
+      // return Promise.all(outstanding).then(function() {
       //   return toolbox;
       // });
       //
       // However instead ...
 
+      let deferred = Promise.defer();
       let outstandingHostChange = false;
       let outstandingToolChange = false;
       let maybeResolve = function() {
@@ -175,19 +174,22 @@ DevTools.prototype = {
         }
       }
 
-      if (toolbox.hostType != hostType) {
+      if (hostType != null && toolbox.hostType != hostType) {
         outstandingHostChange = true;
         toolbox.once("host-changed", maybeResolve);
         toolbox.hostType = hostType;
       }
 
-      if (toolbox.currentToolId != toolId) {
+      if (toolId != null && toolbox.currentToolId != toolId) {
         outstandingToolChange = true;
         toolbox.once(toolId + "-selected", maybeResolve);
         toolbox.selectTool(toolId);
       }
 
       // TODO: toolbox.focus();
+
+      maybeResolve();
+      return deferred.promise;
     }
     else {
       // No toolbox for target, create one
@@ -203,17 +205,13 @@ DevTools.prototype = {
         this.emit("toolbox-destroyed", target);
       }.bind(this));
 
-      toolbox.once("ready", function() {
+      return toolbox.open().then(function() {
         this.emit("toolbox-ready", toolbox);
         this._updateMenuCheckbox();
 
-        deferred.resolve(toolbox);
+        return toolbox;
       }.bind(this));
-
-      toolbox.open();
     }
-
-    return deferred.promise;
   },
 
   /**
@@ -268,7 +266,7 @@ DevTools.prototype = {
 
   /**
    * Open the toolbox for a specific target (not tab).
-   * FIXME: We should probably merge this function and openToolbox
+   * FIXME: We should probably merge this function and _openToolbox
    *
    * @param  {Target} target
    *         The target that the toolbox should be debugging
@@ -278,7 +276,7 @@ DevTools.prototype = {
    * @return {Toolbox} toolbox
    *         The toolbox that has been opened
    */
-  openToolboxForTab: function DT_openToolboxForTab(target, toolId) {
+  _openToolboxForTab: function DT_openToolboxForTab(target, toolId) {
     let tb = this.getToolboxForTarget(target);
 
     if (tb) {
@@ -313,7 +311,7 @@ DevTools.prototype = {
     if (tb /* FIXME: && tool is showing */ ) {
       tb.destroy();
     } else {
-      this.openToolboxForTab(target, toolId);
+      this._openToolboxForTab(target, toolId);
     }
   },
 
