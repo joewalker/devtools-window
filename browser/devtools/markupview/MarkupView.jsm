@@ -77,7 +77,7 @@ this.MarkupView = function MarkupView(aInspector, aFrame, aControllerWindow)
 MarkupView.prototype = {
   _selectedContainer: null,
 
-  template: function MT_template(aName, aDest, aOptions)
+  template: function MT_template(aName, aDest, aOptions={stack: "markup-view.xhtml"})
   {
     let node = this.doc.getElementById("template-" + aName).cloneNode(true);
     node.removeAttribute("id");
@@ -520,9 +520,6 @@ MarkupView.prototype = {
                   [aContainer.node.children.length.toString()], 1),
         eltAll: null // node will be created by the template
       };
-      let options = {
-        stack: "markup-view.xhtml"
-      };
 
       let loadMore = function() {
         aContainer.maxChildren = -1;
@@ -531,13 +528,13 @@ MarkupView.prototype = {
       }.bind(this);
 
       if (children.hasFirst) {
-        let span = this.template("more-nodes", data, options);
-        aContainer.children.insertBefore(span, aContainer.children.firstChild);
+        let span = this.template("more-nodes", data);
+        fragment.insertBefore(span, fragment.firstChild);
         data.eltAll.addEventListener("click", loadMore, true);
       }
       if (children.hasLast) {
-        let span = this.template("more-nodes", data, options);
-        aContainer.children.appendChild(span);
+        let span = this.template("more-nodes", data);
+        fragment.appendChild(span);
         data.eltAll.addEventListener("click", loadMore, true);
       }
     }
@@ -766,8 +763,7 @@ function MarkupContainer(aMarkupView, aNode)
   this.expander = null;
   this.codeBox = null;
   this.children = null;
-  let options = { stack: "markup-view.xhtml" };
-  this.markup.template("container", this, options);
+  this.markup.template("container", this);
   this.elt.container = this;
 
   this.expander.addEventListener("click", function() {
@@ -988,13 +984,12 @@ function ElementEditor(aContainer, aNode)
   this.attrList = null;
   this.newAttr = null;
   this.closeElt = null;
-  let options = { stack: "markup-view.xhtml" };
 
   // Create the main editor
-  this.template("element", this, options);
+  this.template("element", this);
 
   // Create the closing tag
-  this.template("elementClose", this, options);
+  this.template("elementClose", this);
 
   // Make the tag name editable (unless this is a document element)
   if (aNode != aNode.ownerDocument.documentElement) {
@@ -1074,8 +1069,7 @@ ElementEditor.prototype = {
       let data = {
         attrName: aAttr.name,
       };
-      let options = { stack: "markup-view.xhtml" };
-      this.template("attribute", data, options);
+      this.template("attribute", data);
       var {attr, inner, name, val} = data;
 
       // Figure out where we should place the attribute.
