@@ -358,9 +358,9 @@ RemoteTarget.prototype = {
 
   get chrome() this._chrome,
 
-  get name() this._form._title,
+  get name() this._form.title,
 
-  get url() this._form._url,
+  get url() this._form.url,
 
   get client() this._client,
 

@@ -359,7 +359,7 @@ BrowserTabActor.prototype = {
    * @return string
    *         Tab title.
    */
-  get tabTitle() {
+  get title() {
     let title = this.browser.contentTitle;
     // If contentTitle is empty (e.g. on a not-yet-restored tab), but there is a
     // tabbrowser (i.e. desktop Firefox, but not Fennec), we can use the label
@@ -379,7 +379,7 @@ BrowserTabActor.prototype = {
 
     let response = {
       actor: this.actorID,
-      title: this.tabTitle,
+      title: this.title,
       url: this.browser.currentURI.spec
     };
 
@@ -673,7 +673,7 @@ DebuggerProgressListener.prototype = {
         from: this._tabActor.actorID,
         type: "tabNavigated",
         url: this._tabActor.browser.contentDocument.URL,
-        title: this._tabActor.tabTitle,
+        title: this._tabActor.title,
         nativeConsoleAPI: this._tabActor.hasNativeConsoleAPI(window),
         state: "stop",
       });

@@ -4092,20 +4092,21 @@ WebConsoleConnectionProxy.prototype = {
     client.addListener("tabNavigated", this._onTabNavigated);
 
     if (this.target.isRemote) {
-      this._consoleActor = this.target.form.consoleActor;
       if (!this.target.chrome) {
-        this.owner.onLocationChange(this.target.url, this.target.name);
+        // target.form is a TabActor grip
+        this._attachTab(this.target.form);
       }
-
-      let listeners = ["PageError", "ConsoleAPI", "NetworkActivity",
-                       "FileActivity"];
-      this.client.attachConsole(this._consoleActor, listeners,
-                                this._onAttachConsole.bind(this, aCallback));
-      return;
+      else {
+        // target.form is a RootActor grip
+        this._consoleActor = this.target.form.consoleActor;
+        this._attachConsole(aCallback);
+      }
     }
-    client.connect(function(aType, aTraits) {
-      client.listTabs(this._onListTabs.bind(this, aCallback));
-    }.bind(this));
+    else {
+      client.connect(function(aType, aTraits) {
+        client.listTabs(this._onListTabs.bind(this, aCallback));
+      }.bind(this));
+    }
   },
 
   /**
@@ -4119,19 +4120,20 @@ WebConsoleConnectionProxy.prototype = {
    */
   _onListTabs: function WCCP__onListTabs(aCallback, aResponse)
   {
-    let selectedTab = aResponse.tabs[aResponse.selected];
-    if (selectedTab) {
-      this._consoleActor = selectedTab.consoleActor;
-      this._tabActor = selectedTab.actor;
-      this.owner.onLocationChange(selectedTab.url, selectedTab.title);
-    }
-    else {
-      this._consoleActor = aResponse.consoleActor;
-      this._tabActor = aResponse.actor;
+    if (aResponse.error) {
+      Cu.reportError("listTabs failed: " + aResponse.error + " " +
+                     aResponse.message);
+      return;
     }
 
-    this.owner._resetConnectionTimeout();
+    this._attachTab(aResponse.tabs[aResponse.selected], aCallback);
+  },
 
+  _attachTab: function WCCP__attachTab(aTab, aCallback)
+  {
+    this._consoleActor = aTab.consoleActor;
+    this._tabActor = aTab.actor;
+    this.owner.onLocationChange(aTab.url, aTab.title);
     this.client.attachTab(this._tabActor,
                           this._onAttachTab.bind(this, aCallback));
   },
@@ -4156,7 +4158,11 @@ WebConsoleConnectionProxy.prototype = {
     }
 
     this.tabClient = aTabClient;
+    this._attachConsole(aCallback);
+  },
 
+  _attachConsole: function WCCP__attachConsole(aCallback)
+  {
     let listeners = ["PageError", "ConsoleAPI", "NetworkActivity",
                      "FileActivity"];
     this.client.attachConsole(this._consoleActor, listeners,
@@ -4369,7 +4375,8 @@ WebConsoleConnectionProxy.prototype = {
     };
 
     let timer = null;
-    if (aOnDisconnect) {
+    let remoteTarget = this.target.isRemote;
+    if (aOnDisconnect && !remoteTarget) {
       timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
       timer.initWithCallback(onDisconnect, 1500, Ci.nsITimer.TYPE_ONE_SHOT);
     }
@@ -4381,9 +4388,18 @@ WebConsoleConnectionProxy.prototype = {
     this.client.removeListener("fileActivity", this._onFileActivity);
     this.client.removeListener("tabNavigated", this._onTabNavigated);
 
+    let client = this.client;
+
+    this.client = null;
+    this.webConsoleClient = null;
+    this.tabClient = null;
+    this.target = null;
+    this.connected = false;
+    this.owner = null;
+
     try {
-      if (!this.target.isRemote) {
-        this.client.close(onDisconnect);
+      if (!remoteTarget) {
+        client.close(onDisconnect);
       }
     }
     catch (ex) {
@@ -4392,12 +4408,9 @@ WebConsoleConnectionProxy.prototype = {
       onDisconnect();
     }
 
-    this.client = null;
-    this.webConsoleClient = null;
-    this.tabClient = null;
-    this.target = null;
-    this.connected = false;
-    this.owner = null;
+    if (remoteTarget) {
+      onDisconnect();
+    }
   },
 };
 
