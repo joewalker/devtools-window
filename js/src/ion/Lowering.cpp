@@ -10,6 +10,7 @@
 #include "MIR.h"
 #include "MIRGraph.h"
 #include "IonSpewer.h"
+#include "RangeAnalysis.h"
 #include "jsanalyze.h"
 #include "jsbool.h"
 #include "jsnum.h"
@@ -764,19 +765,19 @@ LIRGenerator::visitPow(MPow *ins)
         // it will never get the same register.
         LPowI *lir = new LPowI(useRegisterAtStart(input), useFixed(power, CallTempReg1),
                                tempFixed(CallTempReg0));
-        return defineFixed(lir, ins, LAllocation(AnyRegister(ReturnFloatReg)));
+        return defineVMReturn(lir, ins);
     }
 
     LPowD *lir = new LPowD(useRegisterAtStart(input), useRegisterAtStart(power),
                            tempFixed(CallTempReg0));
-    return defineFixed(lir, ins, LAllocation(AnyRegister(ReturnFloatReg)));
+    return defineVMReturn(lir, ins);
 }
 
 bool
 LIRGenerator::visitRandom(MRandom *ins)
 {
     LRandom *lir = new LRandom(tempFixed(CallTempReg0), tempFixed(CallTempReg1));
-    return defineFixed(lir, ins, LAllocation(AnyRegister(ReturnFloatReg)));
+    return defineVMReturn(lir, ins);
 }
 
 bool
@@ -788,7 +789,7 @@ LIRGenerator::visitMathFunction(MMathFunction *ins)
     // Note: useRegisterAtStart is safe here, the temp is not a FP register.
     LMathFunctionD *lir = new LMathFunctionD(useRegisterAtStart(ins->input()),
                                              tempFixed(CallTempReg0));
-    return defineFixed(lir, ins, LAllocation(AnyRegister(ReturnFloatReg)));
+    return defineVMReturn(lir, ins);
 }
 
 bool
@@ -908,7 +909,7 @@ LIRGenerator::visitMod(MMod *ins)
         // Note: useRegisterAtStart is safe here, the temp is not a FP register.
         LModD *lir = new LModD(useRegisterAtStart(ins->lhs()), useRegisterAtStart(ins->rhs()),
                                tempFixed(CallTempReg0));
-        return defineFixed(lir, ins, LAllocation(AnyRegister(ReturnFloatReg)));
+        return defineVMReturn(lir, ins);
     }
 
     return lowerBinaryV(JSOP_MOD, ins);
@@ -1926,20 +1927,32 @@ LIRGenerator::visitIn(MIn *ins)
 bool
 LIRGenerator::visitInstanceOf(MInstanceOf *ins)
 {
-    MDefinition *lhs = ins->lhs();
-    MDefinition *rhs = ins->rhs();
+    MDefinition *lhs = ins->getOperand(0);
 
     JS_ASSERT(lhs->type() == MIRType_Value || lhs->type() == MIRType_Object);
-    JS_ASSERT(rhs->type() == MIRType_Object);
 
-    // InstanceOf with non-object will always return false
     if (lhs->type() == MIRType_Object) {
-        LInstanceOfO *lir = new LInstanceOfO(useRegister(lhs), useRegister(rhs), temp(), temp());
+        LInstanceOfO *lir = new LInstanceOfO(useRegister(lhs));
         return define(lir, ins) && assignSafepoint(lir, ins);
     }
 
-    LInstanceOfV *lir = new LInstanceOfV(useRegister(rhs), temp(), temp());
+    LInstanceOfV *lir = new LInstanceOfV();
     return useBox(lir, LInstanceOfV::LHS, lhs) && define(lir, ins) && assignSafepoint(lir, ins);
+}
+
+bool
+LIRGenerator::visitCallInstanceOf(MCallInstanceOf *ins)
+{
+    MDefinition *lhs = ins->lhs();
+    MDefinition *rhs = ins->rhs();
+
+    JS_ASSERT(lhs->type() == MIRType_Value);
+    JS_ASSERT(rhs->type() == MIRType_Object);
+
+    LCallInstanceOf *lir = new LCallInstanceOf(useRegisterAtStart(rhs));
+    if (!useBoxAtStart(lir, LCallInstanceOf::LHS, lhs))
+        return false;
+    return defineVMReturn(lir, ins) && assignSafepoint(lir, ins);
 }
 
 bool

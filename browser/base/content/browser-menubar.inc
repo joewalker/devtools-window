@@ -505,7 +505,8 @@
                         accesskey="&addons.accesskey;"
                         key="key_openAddons"
                         command="Tools:Addons"/>
-              <menu id="menu_socialAmbientMenu">
+              <menu id="menu_socialAmbientMenu"
+                    observes="socialActiveBroadcaster">
                 <menupopup id="menu_social-statusarea-popup">
                   <menuitem class="social-statusarea-user menuitem-iconic" pack="start" align="center"
                             observes="socialBroadcaster_userDetails"
@@ -534,6 +535,12 @@
                             command="Social:ToggleNotifications"
                             label="&social.toggleNotifications.label;"
                             accesskey="&social.toggleNotifications.accesskey;"/>
+                  <menuitem id="menu_focusChatBar"
+                            label="&social.chatBar.label;"
+                            accesskey="&social.chatBar.accesskey;"
+                            key="focusChatBar"
+                            command="Social:FocusChat"
+                            class="show-only-for-keyboard"/>
                   <menuseparator class="social-statusarea-separator"/>
                   <menuitem class="social-toggle-menuitem" command="Social:Toggle"/>
                   <menuitem class="social-remove-menuitem" command="Social:Remove"/>
@@ -564,8 +571,8 @@
                   <menuitem id="menu_devToolbar"
                             observes="devtoolsMenuBroadcaster_DevToolbar"
                             accesskey="&devToolbarMenu.accesskey;"/>
-                  <menuitem id="menu_remoteWebConsole"
-                            observes="devtoolsMenuBroadcaster_RemoteWebConsole"/>
+                  <menuitem id="menu_chromeDebugger"
+                            observes="devtoolsMenuBroadcaster_ChromeDebugger"/>
                   <menuitem id="menu_responsiveUI"
                             observes="devtoolsMenuBroadcaster_ResponsiveUI"
                             accesskey="&responsiveDesignTool.accesskey;"/>

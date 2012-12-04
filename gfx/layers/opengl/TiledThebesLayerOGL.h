@@ -80,7 +80,9 @@ public:
 
   TiledTexture GetPlaceholderTile() const { return TiledTexture(); }
 
-  const gfxSize& GetResolution() { return mResolution; }
+  // Stores the absolute resolution of the containing frame, calculated
+  // by the sum of the resolutions of all parent layers' FrameMetrics.
+  const gfxSize& GetFrameResolution() { return mFrameResolution; }
 
 protected:
   TiledTexture ValidateTile(TiledTexture aTile,
@@ -96,7 +98,7 @@ protected:
 private:
   nsRefPtr<gl::GLContext> mContext;
   const BasicTiledLayerBuffer* mMainMemoryTiledBuffer;
-  gfxSize mResolution;
+  gfxSize mFrameResolution;
 
   void GetFormatAndTileForImageFormat(gfxASurface::gfxImageFormat aFormat,
                                       GLenum& aOutFormat,
@@ -110,6 +112,9 @@ class TiledThebesLayerOGL : public ShadowThebesLayer,
 public:
   TiledThebesLayerOGL(LayerManagerOGL *aManager);
   virtual ~TiledThebesLayerOGL();
+
+  // Layer implementation
+  const nsIntRegion& GetValidLowPrecisionRegion() const { return mLowPrecisionVideoMemoryTiledBuffer.GetValidRegion(); }
 
   // LayerOGL impl
   void Destroy() {}
@@ -129,6 +134,7 @@ public:
   }
   void PaintedTiledLayerBuffer(const BasicTiledLayerBuffer* mTiledBuffer);
   void ProcessUploadQueue();
+  void ProcessLowPrecisionUploadQueue();
 
   void MemoryPressure();
 
@@ -142,10 +148,20 @@ public:
                   Layer* aMaskLayer);
 
 private:
+  void RenderLayerBuffer(TiledLayerBufferOGL& aLayerBuffer,
+                         const nsIntRegion& aValidRegion,
+                         const nsIntPoint& aOffset,
+                         const nsIntRegion& aMaskRegion);
+
   nsIntRegion                  mRegionToUpload;
+  nsIntRegion                  mLowPrecisionRegionToUpload;
   BasicTiledLayerBuffer        mMainMemoryTiledBuffer;
+  BasicTiledLayerBuffer        mLowPrecisionMainMemoryTiledBuffer;
   TiledLayerBufferOGL          mVideoMemoryTiledBuffer;
+  TiledLayerBufferOGL          mLowPrecisionVideoMemoryTiledBuffer;
   ReusableTileStoreOGL*        mReusableTileStore;
+  bool                         mPendingUpload : 1;
+  bool                         mPendingLowPrecisionUpload : 1;
 };
 
 } // layers

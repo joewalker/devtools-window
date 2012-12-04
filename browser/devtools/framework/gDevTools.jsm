@@ -9,11 +9,14 @@ this.EXPORTED_SYMBOLS = [ "gDevTools", "DevTools", "DevToolsXULCommands" ];
 const Cu = Components.utils;
 const Ci = Components.interfaces;
 
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 Cu.import("resource:///modules/devtools/ToolDefinitions.jsm");
-Cu.import("resource:///modules/devtools/Toolbox.jsm");
-Cu.import("resource:///modules/devtools/Target.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "Toolbox",
+  "resource:///modules/devtools/Toolbox.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "TargetFactory",
+  "resource:///modules/devtools/Target.jsm");
 
 const FORBIDDEN_IDS = new Set("toolbox", "");
 

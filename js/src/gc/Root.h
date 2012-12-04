@@ -83,7 +83,10 @@ template <typename T> class MutableHandle;
 
 JS_FRIEND_API(void) EnterAssertNoGCScope();
 JS_FRIEND_API(void) LeaveAssertNoGCScope();
+
+/* These are exposing internal state of the GC for inlining purposes. */
 JS_FRIEND_API(bool) InNoGCScope();
+JS_FRIEND_API(bool) isGCEnabled();
 
 /*
  * Handle provides an implicit constructor for NullPtr so that, given:
@@ -543,6 +546,9 @@ class Rooted : public RootedBase<T>
     Rooted(JSRuntime *rt
            MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : ptr(RootMethods<T>::initial())
+#if defined(JSGC_ROOT_ANALYSIS)
+      , scanned(false)
+#endif
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
         init(rt);
@@ -551,6 +557,9 @@ class Rooted : public RootedBase<T>
     Rooted(JSRuntime *rt, T initial
            MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : ptr(initial)
+#if defined(JSGC_ROOT_ANALYSIS)
+      , scanned(false)
+#endif
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
         init(rt);
@@ -559,6 +568,9 @@ class Rooted : public RootedBase<T>
     Rooted(JSContext *cx
            MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : ptr(RootMethods<T>::initial())
+#if defined(JSGC_ROOT_ANALYSIS)
+      , scanned(false)
+#endif
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
         init(cx);
@@ -567,6 +579,9 @@ class Rooted : public RootedBase<T>
     Rooted(JSContext *cx, T initial
            MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : ptr(initial)
+#if defined(JSGC_ROOT_ANALYSIS)
+      , scanned(false)
+#endif
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
         init(cx);
@@ -592,6 +607,9 @@ class Rooted : public RootedBase<T>
     Rooted(JSContext *cx, const Return<S> &initial
            MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : ptr(initial.ptr_)
+#if defined(JSGC_ROOT_ANALYSIS)
+      , scanned(false)
+#endif
     {
         MOZ_GUARD_OBJECT_NOTIFIER_INIT;
         init(cx);
@@ -664,6 +682,12 @@ class Rooted : public RootedBase<T>
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 
     Rooted(const Rooted &) MOZ_DELETE;
+
+#if defined(JSGC_ROOT_ANALYSIS)
+  public:
+    /* Has the rooting analysis ever scanned this Rooted's stack location? */
+    bool scanned;
+#endif
 };
 
 #if !(defined(JSGC_ROOT_ANALYSIS) || defined(JSGC_USE_EXACT_ROOTING))
@@ -804,7 +828,7 @@ public:
 JS_ALWAYS_INLINE void
 AssertCanGC()
 {
-    JS_ASSERT(!InNoGCScope());
+    JS_ASSERT_IF(isGCEnabled(), !InNoGCScope());
 }
 
 #if defined(DEBUG) && defined(JS_GC_ZEAL) && defined(JSGC_ROOT_ANALYSIS) && !defined(JS_THREADSAFE)

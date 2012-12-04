@@ -2366,7 +2366,7 @@ js_CreateThisForFunctionWithProto(JSContext *cx, HandleObject callee, JSObject *
     }
 
     if (res && cx->typeInferenceEnabled()) {
-        RootedScript script(cx, callee->toFunction()->script());
+        RootedScript script(cx, callee->toFunction()->nonLazyScript());
         TypeScript::SetThis(cx, script, types::Type::ObjectType(res));
     }
 
@@ -2397,7 +2397,7 @@ js_CreateThisForFunction(JSContext *cx, HandleObject callee, bool newType)
         if (!JSObject::setSingletonType(cx, nobj))
             return NULL;
 
-        RootedScript calleeScript(cx, callee->toFunction()->script());
+        RootedScript calleeScript(cx, callee->toFunction()->nonLazyScript());
         TypeScript::SetThis(cx, calleeScript, types::Type::ObjectType(nobj));
 
         return nobj;
@@ -2935,7 +2935,9 @@ JSObject::swap(JSContext *cx, JSObject *other_)
     TradeGutsReserved reserved(cx);
     if (!ReserveForTradeGuts(cx, this, other, reserved))
         return false;
+    unsigned r = NotifyGCPreSwap(this, other);
     TradeGuts(cx, this, other, reserved);
+    NotifyGCPostSwap(this, other, r);
     return true;
 }
 
@@ -5240,7 +5242,7 @@ dumpValue(const Value &v)
             fputs("<unnamed function", stderr);
         }
         if (fun->hasScript()) {
-            JSScript *script = fun->script().get(nogc);
+            JSScript *script = fun->nonLazyScript().get(nogc);
             fprintf(stderr, " (%s:%u)",
                     script->filename ? script->filename : "", script->lineno);
         }

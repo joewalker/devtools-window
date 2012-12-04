@@ -26,7 +26,6 @@
 #include "jsprototypes.h"
 #include "jsutil.h"
 #include "prmjtime.h"
-#include "vm/threadpool.h"
 
 #include "ds/LifoAlloc.h"
 #include "gc/Statistics.h"
@@ -34,6 +33,7 @@
 #include "js/Vector.h"
 #include "vm/Stack.h"
 #include "vm/SPSProfiler.h"
+#include "vm/ThreadPool.h"
 
 #include "ion/PcScriptCache.h"
 
@@ -98,7 +98,6 @@ class IonActivation;
 
 class WeakMapBase;
 class InterpreterFrames;
-class DebugScopes;
 class WorkerThreadState;
 
 /*
@@ -435,6 +434,16 @@ class PerThreadData : public js::PerThreadDataFriendFields
     int                 gcAssertNoGCDepth;
 #endif
 
+    /*
+     * When this flag is non-zero, any attempt to GC will be skipped. It is used
+     * to suppress GC when reporting an OOM (see js_ReportOutOfMemory) and in
+     * debugging facilities that cannot tolerate a GC and would rather OOM
+     * immediately, such as utilities exposed to GDB. Setting this flag is
+     * extremely dangerous and should only be used when in an OOM situation or
+     * in non-exposed debugging facilities.
+     */
+    int32_t             suppressGC;
+
     PerThreadData(JSRuntime *runtime);
 
     bool associatedWith(const JSRuntime *rt) { return runtime_ == rt; }
@@ -550,7 +559,7 @@ struct JSRuntime : js::RuntimeFriendFields
     bool cloneSelfHostedFunctionScript(JSContext *cx, js::Handle<js::PropertyName*> name,
                                        js::Handle<JSFunction*> targetFun);
     bool cloneSelfHostedValue(JSContext *cx, js::Handle<js::PropertyName*> name,
-                              js::HandleObject holder, js::MutableHandleValue vp);
+                              js::MutableHandleValue vp);
 
     /* Base address of the native stack for the current thread. */
     uintptr_t           nativeStackBase;
@@ -647,7 +656,6 @@ struct JSRuntime : js::RuntimeFriendFields
      */
     volatile uintptr_t  gcIsNeeded;
 
-    js::WeakMapBase     *gcWeakMapList;
     js::gcstats::Statistics gcStats;
 
     /* Incremented on every GC slice. */
@@ -691,14 +699,22 @@ struct JSRuntime : js::RuntimeFriendFields
     /* Whether any sweeping will take place in the separate GC helper thread. */
     bool                gcSweepOnBackgroundThread;
 
-    /* List head of compartments being swept. */
+    /* Whether any black->gray edges were found during marking. */
+    bool                gcFoundBlackGrayEdges;
+
+    /* List head of compartments to be swept in the background. */
     JSCompartment       *gcSweepingCompartments;
+
+    /* Index of current compartment group (for stats). */
+    unsigned            gcCompartmentGroupIndex;
 
     /*
      * Incremental sweep state.
      */
+    JSCompartment       *gcRemainingCompartmentGroups;
+    JSCompartment       *gcCompartmentGroup;
     int                 gcSweepPhase;
-    ptrdiff_t           gcSweepCompartmentIndex;
+    JSCompartment       *gcSweepCompartment;
     int                 gcSweepKindIndex;
 
     /*
@@ -749,17 +765,11 @@ struct JSRuntime : js::RuntimeFriendFields
 
     bool                gcPoke;
 
-    enum HeapState {
-        Idle,       // doing nothing with the GC heap
-        Tracing,    // tracing the GC heap without collecting, e.g. IterateCompartments()
-        Collecting  // doing a GC of the heap
-    };
+    js::HeapState       heapState;
 
-    HeapState           heapState;
+    bool isHeapBusy() { return heapState != js::Idle; }
 
-    bool isHeapBusy() { return heapState != Idle; }
-
-    bool isHeapCollecting() { return heapState == Collecting; }
+    bool isHeapCollecting() { return heapState == js::Collecting; }
 
     /*
      * These options control the zealousness of the GC. The fundamental values
@@ -894,12 +904,6 @@ struct JSRuntime : js::RuntimeFriendFields
      */
     JSCList             onNewGlobalObjectWatchers;
 
-    /* Bookkeeping information for debug scope objects. */
-    js::DebugScopes     *debugScopes;
-
-    /* Linked list of live array buffers with >1 view */
-    JSObject            *liveArrayBuffers;
-
     /* Client opaque pointers */
     void                *data;
 
@@ -1000,13 +1004,6 @@ struct JSRuntime : js::RuntimeFriendFields
 #ifdef DEBUG
     size_t              noGCOrAllocationCheck;
 #endif
-
-    /*
-     * To ensure that cx->malloc does not cause a GC, we set this flag during
-     * OOM reporting (in js_ReportOutOfMemory). If a GC is requested while
-     * reporting the OOM, we ignore it.
-     */
-    int32_t             inOOMReport;
 
     bool                jitHardening;
 
@@ -1176,13 +1173,32 @@ struct JSRuntime : js::RuntimeFriendFields
     size_t sizeOfExplicitNonHeap();
 
   private:
+
     JSUseHelperThreads useHelperThreads_;
+    int32_t requestedHelperThreadCount;
+
   public:
+
     bool useHelperThreads() const {
 #ifdef JS_THREADSAFE
         return useHelperThreads_ == JS_USE_HELPER_THREADS;
 #else
         return false;
+#endif
+    }
+
+    void requestHelperThreadCount(size_t count) {
+        requestedHelperThreadCount = count;
+    }
+
+    /* Number of helper threads which should be created for this runtime. */
+    size_t helperThreadCount() const {
+#ifdef JS_THREADSAFE
+        if (requestedHelperThreadCount < 0)
+            return js::GetCPUCount() - 1;
+        return requestedHelperThreadCount;
+#else
+        return 0;
 #endif
     }
 };

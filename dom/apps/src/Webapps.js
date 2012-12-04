@@ -134,9 +134,9 @@ WebappsRegistry.prototype = {
                                                             etag: etag,
                                                             receipts: receipts,
                                                             categories: categories },
-                                                            from: installURL,
-                                                            oid: this._id,
-                                                            requestID: requestID });
+                                                     from: installURL,
+                                                     oid: this._id,
+                                                     requestID: requestID });
         }
       } else {
         Services.DOMRequest.fireError(request, "MANIFEST_URL_ERROR");
@@ -540,6 +540,7 @@ WebappsApplication.prototype = {
           this.installState = msg.installState;
           if (this.installState == "installed") {
             this._downloadError = null;
+            this.downloading = false;
             this._fireEvent("downloadsuccess", this._ondownloadsuccess);
             this._fireEvent("downloadapplied", this._ondownloadapplied);
           } else {
@@ -572,9 +573,13 @@ WebappsApplication.prototype = {
           switch(msg.type) {
             case "error":
               this._downloadError = msg.error;
+              this.downloading = msg.app.downloading;
+              this.installState = msg.app.installState;
               this._fireEvent("downloaderror", this._ondownloaderror);
               break;
             case "progress":
+              this.downloading = msg.app.downloading;
+              this.installState = msg.app.installState;
               this.progress = msg.progress;
               this._fireEvent("downloadprogress", this._onprogress);
               break;
@@ -607,6 +612,7 @@ WebappsApplication.prototype = {
               this.downloadAvailable = app.downloadAvailable;
               this.readyToApplyDownload = app.readyToApplyDownload;
               this.updateTime = app.updateTime;
+              this._manifest = msg.manifest;
               this._fireEvent("downloadsuccess", this._ondownloadsuccess);
               break;
             case "applied":

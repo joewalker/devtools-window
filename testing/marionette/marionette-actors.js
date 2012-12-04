@@ -444,6 +444,7 @@ MarionetteDriverActor.prototype = {
    *
    */
   newSession: function MDA_newSession() {
+    this.scriptTimeout = 10000;
 
     function waitForWindow() {
       let checkTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
@@ -685,7 +686,8 @@ MarionetteDriverActor.prototype = {
     if (this.context == "content") {
       this.sendAsync("executeScript", {value: aRequest.value,
                                        args: aRequest.args,
-                                       newSandbox:aRequest.newSandbox});
+                                       newSandbox: aRequest.newSandbox,
+                                       timeout: this.scriptTimeout});
       return;
     }
 
@@ -732,7 +734,7 @@ MarionetteDriverActor.prototype = {
     }
     else {
       this.scriptTimeout = timeout;
-      this.sendAsync("setScriptTimeout", {value: timeout});
+      this.sendOk();
     }
   },
 
@@ -760,10 +762,11 @@ MarionetteDriverActor.prototype = {
       }
     }
     else {
-      this.sendAsync("executeJSScript", { value:aRequest.value,
-                                          args:aRequest.args,
-                                          newSandbox:aRequest.newSandbox,
-                                          timeout:aRequest.timeout });
+      this.sendAsync("executeJSScript", { value: aRequest.value,
+                                          args: aRequest.args,
+                                          newSandbox: aRequest.newSandbox,
+                                          async: aRequest.async,
+                                          timeout: this.scriptTimeout });
    }
   },
 
@@ -794,7 +797,8 @@ MarionetteDriverActor.prototype = {
       this.sendAsync("executeAsyncScript", {value: aRequest.value,
                                             args: aRequest.args,
                                             id: this.command_id,
-                                            newSandbox: aRequest.newSandbox});
+                                            newSandbox: aRequest.newSandbox,
+                                            timeout: this.scriptTimeout});
       return;
     }
 
@@ -1685,8 +1689,11 @@ MarionetteDriverActor.prototype = {
           // we'll acknowledge the switchToFrame message here.
           // XXX: Should have a better way of determining that this message
           // is from a remote frame.
-          this.sendOk();
           this.currentRemoteFrame.targetFrameId = this.generateFrameId(message.json.value);
+          this.sendAsync(
+              "setState",
+              {scriptTimeout: this.scriptTimeout,
+               searchTimeout: this.curBrowser.elementManager.searchTimeout});
         }
 
         let browserType;

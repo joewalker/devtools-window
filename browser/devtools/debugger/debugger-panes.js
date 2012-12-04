@@ -51,8 +51,7 @@ create({ constructor: StackFramesView, proto: MenuContainer.prototype }, {
    * @param number aDepth
    *        The frame depth specified by the debugger.
    */
-  addFrame:
-  function DVSF_addFrame(aFrameName, aFrameDetails, aDepth) {
+  addFrame: function DVSF_addFrame(aFrameName, aFrameDetails, aDepth) {
     // Stackframes are UI elements which benefit from visible panes.
     DebuggerView.showPanesSoon();
 
@@ -945,6 +944,8 @@ create({ constructor: BreakpointsView, proto: MenuContainer.prototype }, {
 function WatchExpressionsView() {
   dumpn("WatchExpressionsView was instantiated");
   MenuContainer.call(this);
+  this.switchExpression = this.switchExpression.bind(this);
+  this.deleteExpression = this.deleteExpression.bind(this);
   this._createItemView = this._createItemView.bind(this);
   this._onClick = this._onClick.bind(this);
   this._onClose = this._onClose.bind(this);
@@ -963,6 +964,7 @@ create({ constructor: WatchExpressionsView, proto: MenuContainer.prototype }, {
     this._container = new StackList(document.getElementById("expressions"));
     this._variables = document.getElementById("variables");
 
+    this._container.setAttribute("context", "debuggerWatchExpressionsContextMenu");
     this._container.permaText = L10N.getStr("addWatchExpressionText");
     this._container.itemFactory = this._createItemView;
     this._container.addEventListener("click", this._onClick, false);
@@ -1028,9 +1030,52 @@ create({ constructor: WatchExpressionsView, proto: MenuContainer.prototype }, {
    * @param number aIndex
    *        The index used to identify the watch expression.
    */
-  removeExpression: function DVWE_removeExpression(aIndex) {
+  removeExpressionAt: function DVWE_removeExpressionAt(aIndex) {
     this.remove(this._cache[aIndex]);
     this._cache.splice(aIndex, 1);
+  },
+
+  /**
+   * Changes the watch expression corresponding to the specified variable item.
+   *
+   * @param Variable aVar
+   *        The variable representing the watch expression evaluation.
+   * @param string aExpression
+   *        The new watch expression text.
+   */
+  switchExpression: function DVWE_switchExpression(aVar, aExpression) {
+    let expressionItem =
+      [i for (i of this._cache) if (i.attachment.expression == aVar.name)][0];
+
+    // Remove the watch expression if it's going to be a duplicate.
+    if (!aExpression || this.getExpressions().indexOf(aExpression) != -1) {
+      this.deleteExpression(aVar);
+      return;
+    }
+
+    // Save the watch expression code string.
+    expressionItem.attachment.expression = aExpression;
+    expressionItem.target.inputNode.value = aExpression;
+
+    // Synchronize with the controller's watch expressions store.
+    DebuggerController.StackFrames.syncWatchExpressions();
+  },
+
+  /**
+   * Removes the watch expression corresponding to the specified variable item.
+   *
+   * @param Variable aVar
+   *        The variable representing the watch expression evaluation.
+   */
+  deleteExpression: function DVWE_deleteExpression(aVar) {
+    let expressionItem =
+      [i for (i of this._cache) if (i.attachment.expression == aVar.name)][0];
+
+    // Remove the watch expression at its respective index.
+    this.removeExpressionAt(this._cache.indexOf(expressionItem));
+
+    // Synchronize with the controller's watch expressions store.
+    DebuggerController.StackFrames.syncWatchExpressions();
   },
 
   /**
@@ -1086,9 +1131,35 @@ create({ constructor: WatchExpressionsView, proto: MenuContainer.prototype }, {
   },
 
   /**
+   * Called when the add watch expression key sequence was pressed.
+   */
+  _onCmdAddExpression: function BP__onCmdAddExpression(aText) {
+    // Only add a new expression if there's no pending input.
+    if (this.getExpressions().indexOf("") == -1) {
+      this.addExpression(aText || DebuggerView.editor.getSelectedText());
+    }
+  },
+
+  /**
+   * Called when the remove all watch expressions key sequence was pressed.
+   */
+  _onCmdRemoveAllExpressions: function BP__onCmdRemoveAllExpressions() {
+    // Empty the view of all the watch expressions and clear the cache.
+    this.empty();
+    this._cache = [];
+
+    // Synchronize with the controller's watch expressions store.
+    DebuggerController.StackFrames.syncWatchExpressions();
+  },
+
+  /**
    * The click listener for this container.
    */
   _onClick: function DVWE__onClick(e) {
+    if (e.button != 0) {
+      // Only allow left-click to trigger this event.
+      return;
+    }
     let expressionItem = this.getItemForElement(e.target);
     if (!expressionItem) {
       // The container is empty or we didn't click on an actual item.
@@ -1101,7 +1172,7 @@ create({ constructor: WatchExpressionsView, proto: MenuContainer.prototype }, {
    */
   _onClose: function DVWE__onClose(e) {
     let expressionItem = this.getItemForElement(e.target);
-    this.removeExpression(this._cache.indexOf(expressionItem));
+    this.removeExpressionAt(this._cache.indexOf(expressionItem));
 
     // Synchronize with the controller's watch expressions store.
     DebuggerController.StackFrames.syncWatchExpressions();
@@ -1116,15 +1187,15 @@ create({ constructor: WatchExpressionsView, proto: MenuContainer.prototype }, {
   _onBlur: function DVWE__onBlur({ target: textbox }) {
     let expressionItem = this.getItemForElement(textbox);
     let oldExpression = expressionItem.attachment.expression;
-    let newExpression = textbox.value;
+    let newExpression = textbox.value.trim();
 
     // Remove the watch expression if it's empty.
     if (!newExpression) {
-      this.removeExpression(this._cache.indexOf(expressionItem));
+      this.removeExpressionAt(this._cache.indexOf(expressionItem));
     }
     // Remove the watch expression if it's a duplicate.
     else if (!oldExpression && this.getExpressions().indexOf(newExpression) != -1) {
-      this.removeExpression(this._cache.indexOf(expressionItem));
+      this.removeExpressionAt(this._cache.indexOf(expressionItem));
     }
     // Expression is eligible.
     else {

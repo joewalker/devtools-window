@@ -169,6 +169,7 @@
 #include "nsSandboxFlags.h"
 #include "nsSVGFeatures.h"
 #include "MediaDecoder.h"
+#include "DecoderTraits.h"
 
 #include "nsWrapperCacheInlines.h"
 
@@ -207,7 +208,6 @@ nsIContentPolicy *nsContentUtils::sContentPolicyService;
 bool nsContentUtils::sTriedToGetContentPolicy = false;
 nsILineBreaker *nsContentUtils::sLineBreaker;
 nsIWordBreaker *nsContentUtils::sWordBreaker;
-uint32_t nsContentUtils::sJSGCThingRootCount;
 #ifdef IBMBIDI
 nsIBidiKeyboard *nsContentUtils::sBidiKeyboard = nullptr;
 #endif
@@ -4518,28 +4518,18 @@ nsContentUtils::HoldJSObjects(void* aScriptObjectHolder,
 {
   NS_ENSURE_TRUE(sXPConnect, NS_ERROR_UNEXPECTED);
 
-  nsresult rv = sXPConnect->AddJSHolder(aScriptObjectHolder, aTracer);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  if (sJSGCThingRootCount++ == 0) {
-    nsLayoutStatics::AddRef();
-  }
-  NS_LOG_ADDREF(sXPConnect, sJSGCThingRootCount, "HoldJSObjects",
-                sizeof(void*));
-
-  return NS_OK;
+  return sXPConnect->AddJSHolder(aScriptObjectHolder, aTracer);
 }
 
 /* static */
 nsresult
 nsContentUtils::DropJSObjects(void* aScriptObjectHolder)
 {
-  NS_LOG_RELEASE(sXPConnect, sJSGCThingRootCount - 1, "HoldJSObjects");
-  nsresult rv = sXPConnect->RemoveJSHolder(aScriptObjectHolder);
-  if (--sJSGCThingRootCount == 0) {
-    nsLayoutStatics::Release();
+  if (!sXPConnect) {
+    return NS_OK;
   }
-  return rv;
+
+  return sXPConnect->RemoveJSHolder(aScriptObjectHolder);
 }
 
 #ifdef DEBUG
@@ -6591,7 +6581,7 @@ nsContentUtils::FindInternalContentViewer(const char* aType,
 
 #ifdef MOZ_MEDIA
 #ifdef MOZ_OGG
-  if (nsHTMLMediaElement::IsOggType(nsDependentCString(aType))) {
+  if (DecoderTraits::IsOggType(nsDependentCString(aType))) {
     docFactory = do_GetService("@mozilla.org/content/document-loader-factory;1");
     if (docFactory && aLoaderType) {
       *aLoaderType = TYPE_CONTENT;
@@ -6601,7 +6591,7 @@ nsContentUtils::FindInternalContentViewer(const char* aType,
 #endif
 
 #ifdef MOZ_WEBM
-  if (nsHTMLMediaElement::IsWebMType(nsDependentCString(aType))) {
+  if (DecoderTraits::IsWebMType(nsDependentCString(aType))) {
     docFactory = do_GetService("@mozilla.org/content/document-loader-factory;1");
     if (docFactory && aLoaderType) {
       *aLoaderType = TYPE_CONTENT;
@@ -6611,7 +6601,7 @@ nsContentUtils::FindInternalContentViewer(const char* aType,
 #endif
 
 #ifdef MOZ_GSTREAMER
-  if (nsHTMLMediaElement::IsGStreamerSupportedType(nsDependentCString(aType))) {
+  if (DecoderTraits::IsGStreamerSupportedType(nsDependentCString(aType))) {
     docFactory = do_GetService("@mozilla.org/content/document-loader-factory;1");
     if (docFactory && aLoaderType) {
       *aLoaderType = TYPE_CONTENT;
@@ -6622,7 +6612,7 @@ nsContentUtils::FindInternalContentViewer(const char* aType,
 
 #ifdef MOZ_MEDIA_PLUGINS
   if (mozilla::MediaDecoder::IsMediaPluginsEnabled() &&
-      nsHTMLMediaElement::IsMediaPluginsType(nsDependentCString(aType))) {
+      DecoderTraits::IsMediaPluginsType(nsDependentCString(aType))) {
     docFactory = do_GetService("@mozilla.org/content/document-loader-factory;1");
     if (docFactory && aLoaderType) {
       *aLoaderType = TYPE_CONTENT;
@@ -6876,9 +6866,8 @@ nsContentUtils::ReleaseWrapper(void* aScriptObjectHolder,
     if (aCache->IsDOMBinding() && obj) {
       xpc::GetObjectScope(obj)->RemoveDOMExpandoObject(obj);
     }
-    DropJSObjects(aScriptObjectHolder);
-
     aCache->SetPreservingWrapper(false);
+    DropJSObjects(aScriptObjectHolder);
   }
 }
 

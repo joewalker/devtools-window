@@ -31,7 +31,7 @@ gcli.addCommand({
 gcli.addCommand({
   name: 'resize toggle',
   buttonId: "command-button-responsive",
-  buttonClass: "command-button",
+  buttonClass: "command-button devtools-toolbarbutton",
   description: gcli.lookup('resizeModeToggleDesc'),
   manual: gcli.lookup('resizeModeManual'),
   exec: gcli_cmd_resize

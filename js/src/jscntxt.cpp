@@ -431,7 +431,7 @@ JSRuntime::cloneSelfHostedFunctionScript(JSContext *cx, Handle<PropertyName*> na
         return false;
 
     RootedFunction sourceFun(cx, funVal.toObject().toFunction());
-    Rooted<JSScript*> sourceScript(cx, sourceFun->script());
+    Rooted<JSScript*> sourceScript(cx, sourceFun->nonLazyScript());
     JS_ASSERT(!sourceScript->enclosingStaticScope());
     RawScript cscript = CloneScript(cx, NullPtr(), targetFun, sourceScript);
     if (!cscript)
@@ -444,8 +444,7 @@ JSRuntime::cloneSelfHostedFunctionScript(JSContext *cx, Handle<PropertyName*> na
 }
 
 bool
-JSRuntime::cloneSelfHostedValue(JSContext *cx, Handle<PropertyName*> name, HandleObject holder,
-                                MutableHandleValue vp)
+JSRuntime::cloneSelfHostedValue(JSContext *cx, Handle<PropertyName*> name, MutableHandleValue vp)
 {
     RootedValue funVal(cx);
     if (!getUnclonedSelfHostedValue(cx, name, &funVal))
@@ -458,15 +457,15 @@ JSRuntime::cloneSelfHostedValue(JSContext *cx, Handle<PropertyName*> name, Handl
      */
     if (cx->global() == selfHostedGlobal_) {
         vp.set(funVal);
-    } else if (funVal.toObject().isFunction()){
+    } else if (funVal.isObject() && funVal.toObject().isFunction()) {
         RootedFunction fun(cx, funVal.toObject().toFunction());
         RootedObject clone(cx, CloneFunctionObject(cx, fun, cx->global(), fun->getAllocKind()));
         if (!clone)
             return false;
         vp.set(ObjectValue(*clone));
+    } else {
+        vp.set(UndefinedValue());
     }
-    DebugOnly<bool> ok = JS_DefinePropertyById(cx, holder, NameToId(name), vp, NULL, NULL, 0);
-    JS_ASSERT(ok);
     return true;
 }
 
@@ -702,9 +701,8 @@ js_ReportOutOfMemory(JSContext *cx)
      */
     cx->clearPendingException();
     if (onError) {
-        ++cx->runtime->inOOMReport;
+        AutoSuppressGC suppressGC(cx);
         onError(cx, msg, &report);
-        --cx->runtime->inOOMReport;
     }
 }
 

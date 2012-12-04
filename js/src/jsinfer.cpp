@@ -456,6 +456,30 @@ StackTypeSet::make(JSContext *cx, const char *name)
     return res;
 }
 
+const TypeSet *
+TypeSet::clone(LifoAlloc *alloc) const
+{
+    unsigned objectCount = baseObjectCount();
+    unsigned capacity = (objectCount >= 2) ? HashSetCapacity(objectCount) : 0;
+
+    TypeSet *res = alloc->new_<TypeSet>();
+    if (!res)
+        return NULL;
+
+    TypeObjectKey **newSet;
+    if (capacity) {
+        newSet = alloc->newArray<TypeObjectKey*>(capacity);
+        if (!newSet)
+            return NULL;
+        PodCopy(newSet, objectSet, capacity);
+    }
+
+    res->flags = this->flags;
+    res->objectSet = capacity ? newSet : this->objectSet;
+
+    return res;
+}
+
 /////////////////////////////////////////////////////////////////////
 // TypeSet constraints
 /////////////////////////////////////////////////////////////////////
@@ -1320,13 +1344,9 @@ TypeConstraintCall::newType(JSContext *cx, TypeSet *source, Type type)
         return;
     }
 
-    if (callee->isInterpretedLazy()) {
-        RootedFunction fun(cx, callee);
-        if (!InitializeLazyFunctionScript(cx, fun))
-            return;
-    }
-
-    RootedScript calleeScript(cx, callee->script());
+    RootedScript calleeScript(cx, callee->getOrCreateScript(cx));
+    if (!calleeScript)
+        return;
     if (!calleeScript->ensureHasTypes(cx))
         return;
 
@@ -1403,16 +1423,10 @@ TypeConstraintPropagateThis::newType(JSContext *cx, TypeSet *source, Type type)
         return;
     }
 
-    if (callee->isInterpretedLazy()) {
-        RootedFunction fun(cx, callee);
-        if (!InitializeLazyFunctionScript(cx, fun))
-            return;
-    }
-
-    if (!callee->script()->ensureHasTypes(cx))
+    if (!(callee->getOrCreateScript(cx).unsafeGet() && callee->nonLazyScript()->ensureHasTypes(cx)))
         return;
 
-    TypeSet *thisTypes = TypeScript::ThisTypes(callee->script().unsafeGet());
+    TypeSet *thisTypes = TypeScript::ThisTypes(callee->nonLazyScript().unsafeGet());
     if (this->types)
         this->types->addSubset(cx, thisTypes);
     else
@@ -2018,7 +2032,7 @@ JITCodeHasCheck(HandleScript script, jsbytecode *pc, RecompileKind kind)
     }
 #endif
 
-    if (script->hasAnyIonScript())
+    if (script->hasAnyIonScript() || script->isIonCompilingOffThread())
         return false;
 
     return true;
@@ -3396,7 +3410,7 @@ TypeObject::setFlags(JSContext *cx, TypeObjectFlags flags)
     if (singleton) {
         /* Make sure flags are consistent with persistent object state. */
         JS_ASSERT_IF(flags & OBJECT_FLAG_UNINLINEABLE,
-                     interpretedFunction->script()->uninlineable);
+                     interpretedFunction->nonLazyScript()->uninlineable);
         JS_ASSERT_IF(flags & OBJECT_FLAG_ITERATED,
                      singleton->lastProperty()->hasObjectFlag(BaseShape::ITERATED_SINGLETON));
     }
@@ -4636,7 +4650,7 @@ AnalyzeNewScriptProperties(JSContext *cx, TypeObject *type, JSFunction *fun,
         return false;
     }
 
-    RootedScript script(cx, fun->script());
+    RootedScript script(cx, fun->nonLazyScript());
     if (!script->ensureRanAnalysis(cx) || !script->ensureRanInference(cx)) {
         pbaseobj.set(NULL);
         cx->compartment->types.setPendingNukeTypes(cx);
@@ -4774,7 +4788,7 @@ AnalyzePoppedThis(JSContext *cx, Vector<SSAUseChain *> *pendingPoppedThis,
                   TypeObject *type, JSFunction *fun, MutableHandleObject pbaseobj,
                   Vector<TypeNewScript::Initializer> *initializerList)
 {
-    RootedScript script(cx, fun->script());
+    RootedScript script(cx, fun->nonLazyScript());
     ScriptAnalysis *analysis = script->analysis();
 
     while (!pendingPoppedThis->empty()) {
@@ -5219,7 +5233,7 @@ types::TypeMonitorCallSlow(JSContext *cx, HandleObject callee, const CallArgs &a
                            bool constructing)
 {
     unsigned nargs = callee->toFunction()->nargs;
-    RootedScript script(cx, callee->toFunction()->script());
+    RootedScript script(cx, callee->toFunction()->nonLazyScript());
 
     if (!constructing)
         TypeScript::SetThis(cx, script, args.thisv());
@@ -5243,9 +5257,9 @@ IsAboutToBeFinalized(TypeObjectKey *key)
 {
     /* Mask out the low bit indicating whether this is a type or JS object. */
     gc::Cell *tmp = reinterpret_cast<gc::Cell *>(uintptr_t(key) & ~1);
-    bool isMarked = IsCellMarked(&tmp);
+    bool isAboutToBeFinalized = IsCellAboutToBeFinalized(&tmp);
     JS_ASSERT(tmp == reinterpret_cast<gc::Cell *>(uintptr_t(key) & ~1));
-    return !isMarked;
+    return isAboutToBeFinalized;
 }
 
 void
@@ -5545,8 +5559,8 @@ JSScript::makeAnalysis(JSContext *cx)
 /* static */ bool
 JSFunction::setTypeForScriptedFunction(JSContext *cx, HandleFunction fun, bool singleton)
 {
-    JS_ASSERT(fun->script().unsafeGet());
-    JS_ASSERT(fun->script()->function() == fun);
+    JS_ASSERT(fun->nonLazyScript().unsafeGet());
+    JS_ASSERT(fun->nonLazyScript()->function() == fun);
 
     if (!cx->typeInferenceEnabled())
         return true;
@@ -5653,8 +5667,6 @@ JSObject::splicePrototype(JSContext *cx, Handle<TaggedProto> proto)
     Rooted<TypeObject*> protoType(cx, NULL);
     if (proto.isObject()) {
         protoType = proto.toObject()->getType(cx);
-        if (!proto.toObject()->getNewType(cx))
-            return false;
     }
 
     if (!cx->typeInferenceEnabled()) {
@@ -5696,8 +5708,7 @@ JSObject::makeLazyType(JSContext *cx)
     RootedObject self(cx, this);
     /* De-lazification of functions can GC, so we need to do it up here. */
     if (self->isFunction() && self->toFunction()->isInterpretedLazy()) {
-        RootedFunction fun(cx, self->toFunction());
-        if (!InitializeLazyFunctionScript(cx, fun))
+        if (!self->toFunction()->getOrCreateScript(cx).unsafeGet())
             return NULL;
     }
     JSProtoKey key = JSCLASS_CACHED_PROTO_KEY(getClass());
@@ -5724,7 +5735,7 @@ JSObject::makeLazyType(JSContext *cx)
 
     if (self->isFunction() && self->toFunction()->isInterpreted()) {
         type->interpretedFunction = self->toFunction();
-        if (type->interpretedFunction->script()->uninlineable)
+        if (type->interpretedFunction->nonLazyScript()->uninlineable)
             type->flags |= OBJECT_FLAG_UNINLINEABLE;
     }
 
@@ -5944,6 +5955,7 @@ void
 TypeSet::sweep(JSCompartment *compartment)
 {
     JS_ASSERT(!purged());
+    JS_ASSERT(compartment->isGCSweeping());
 
     /*
      * Purge references to type objects that are no longer live. Type sets hold
@@ -6022,13 +6034,14 @@ TypeObject::sweep(FreeOp *fop)
         return;
     }
 
+    JSCompartment *compartment = this->compartment();
+    JS_ASSERT(compartment->isGCSweeping());
+
     if (!isMarked()) {
         if (newScript)
             fop->free_(newScript);
         return;
     }
-
-    JSCompartment *compartment = this->compartment();
 
     /*
      * Properties were allocated from the old arena, and need to be copied over
@@ -6106,6 +6119,7 @@ struct SweepTypeObjectOp
 void
 SweepTypeObjects(FreeOp *fop, JSCompartment *compartment)
 {
+    JS_ASSERT(compartment->isGCSweeping());
     SweepTypeObjectOp op(fop);
     gc::ForEachArenaAndCell(compartment, gc::FINALIZE_TYPE_OBJECT, gc::EmptyArenaOp, op);
 }
@@ -6114,6 +6128,7 @@ void
 TypeCompartment::sweep(FreeOp *fop)
 {
     JSCompartment *compartment = this->compartment();
+    JS_ASSERT(compartment->isGCSweeping());
 
     SweepTypeObjects(fop, compartment);
 
@@ -6130,13 +6145,23 @@ TypeCompartment::sweep(FreeOp *fop)
             JS_ASSERT(!key.type.isSingleObject());
 
             bool remove = false;
-            if (key.type.isTypeObject() && !key.type.typeObject()->isMarked())
-                remove = true;
-            if (!obj->isMarked())
+            TypeObject *typeObject = NULL;
+            if (key.type.isTypeObject()) {
+                typeObject = key.type.typeObject();
+                if (IsTypeObjectAboutToBeFinalized(&typeObject))
+                    remove = true;
+            }
+            if (IsTypeObjectAboutToBeFinalized(e.front().value.unsafeGet()))
                 remove = true;
 
-            if (remove)
+            if (remove) {
                 e.removeFront();
+            } else if (typeObject && typeObject != key.type.typeObject()) {
+                ArrayTableKey newKey;
+                newKey.type = Type::ObjectType(typeObject);
+                newKey.proto = key.proto;
+                e.rekeyFront(newKey);
+            }
         }
     }
 
@@ -6147,18 +6172,24 @@ TypeCompartment::sweep(FreeOp *fop)
             JS_ASSERT(uintptr_t(entry.object->proto.get()) == key.proto.toWord());
 
             bool remove = false;
-            if (!IsTypeObjectMarked(entry.object.unsafeGet()))
+            if (IsTypeObjectAboutToBeFinalized(entry.object.unsafeGet()))
                 remove = true;
             for (unsigned i = 0; !remove && i < key.nslots; i++) {
                 if (JSID_IS_STRING(key.ids[i])) {
                     JSString *str = JSID_TO_STRING(key.ids[i]);
-                    if (!IsStringMarked(&str))
+                    if (IsStringAboutToBeFinalized(&str))
                         remove = true;
                     JS_ASSERT(AtomToId((JSAtom *)str) == key.ids[i]);
                 }
                 JS_ASSERT(!entry.types[i].isSingleObject());
-                if (entry.types[i].isTypeObject() && !entry.types[i].typeObject()->isMarked())
-                    remove = true;
+                TypeObject *typeObject = NULL;
+                if (entry.types[i].isTypeObject()) {
+                    typeObject = entry.types[i].typeObject();
+                    if (IsTypeObjectAboutToBeFinalized(&typeObject))
+                        remove = true;
+                    else if (typeObject != entry.types[i].typeObject())
+                        entry.types[i] = Type::ObjectType(typeObject);
+                }
             }
 
             if (remove) {
@@ -6172,9 +6203,9 @@ TypeCompartment::sweep(FreeOp *fop)
     if (allocationSiteTable) {
         for (AllocationSiteTable::Enum e(*allocationSiteTable); !e.empty(); e.popFront()) {
             AllocationSiteKey key = e.front().key;
-            bool keyMarked = IsScriptMarked(&key.script);
-            bool valMarked = IsTypeObjectMarked(e.front().value.unsafeGet());
-            if (!keyMarked || !valMarked)
+            bool keyDying = IsScriptAboutToBeFinalized(&key.script);
+            bool valDying = IsTypeObjectAboutToBeFinalized(e.front().value.unsafeGet());
+            if (keyDying || valDying)
                 e.removeFront();
             else if (key.script != e.front().key.script)
                 e.rekeyFront(key);
@@ -6233,11 +6264,16 @@ TypeCompartment::sweepCompilerOutputs(FreeOp *fop, bool discardConstraints)
 void
 JSCompartment::sweepNewTypeObjectTable(TypeObjectSet &table)
 {
+    gcstats::AutoPhase ap(rt->gcStats, gcstats::PHASE_SWEEP_TABLES_TYPE_OBJECT);
+
+    JS_ASSERT(isGCSweeping());
     if (table.initialized()) {
         for (TypeObjectSet::Enum e(table); !e.empty(); e.popFront()) {
             TypeObject *type = e.front();
-            if (!type->isMarked())
+            if (IsTypeObjectAboutToBeFinalized(&type))
                 e.removeFront();
+            else if (type != e.front())
+                e.rekeyFront(TaggedProto(type->proto), type);
         }
     }
 }
@@ -6261,6 +6297,7 @@ TypeCompartment::~TypeCompartment()
 TypeScript::Sweep(FreeOp *fop, RawScript script)
 {
     JSCompartment *compartment = script->compartment();
+    JS_ASSERT(compartment->isGCSweeping());
     JS_ASSERT(compartment->types.inferenceEnabled);
 
     unsigned num = NumTypeSets(script);

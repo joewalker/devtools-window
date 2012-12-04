@@ -17,7 +17,7 @@ Cu.import("resource://gre/modules/PluralForm.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource:///modules/devtools/CssLogic.jsm");
 Cu.import("resource:///modules/devtools/Templater.jsm");
-Cu.import("resource:///modules/devtools/StyleEditorDefinition.jsm");
+Cu.import("resource:///modules/devtools/ToolDefinitions.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
                                   "resource:///modules/devtools/gDevTools.jsm");
@@ -1256,7 +1256,7 @@ SelectorView.prototype = {
     if (contentSheet) {
       let target = inspector.target;
 
-      if (StyleEditorDefinition.isTargetSupported(target)) {
+      if (styleEditorDefinition.isTargetSupported(target)) {
         let toolbox = gDevTools.getToolboxForTarget(target);
 
         toolbox.once("styleeditor-selected", function SE_selected(id, styleEditor) {
