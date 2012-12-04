@@ -175,7 +175,7 @@ function log(aThing) {
         reply += type + "\n";
         keys.forEach(function(aProp) {
           reply += logProperty(aProp, aThing[aProp]);
-        }, this);
+        });
       }
       else {
         reply += type + "\n";
@@ -250,7 +250,7 @@ function parseStack(aStack) {
       line: posn.split(":")[1],
       call: line.substring(0, at)
     });
-  }, this);
+  });
   return trace;
 }
 
@@ -315,7 +315,7 @@ function createDumper(aLevel) {
     let data = args.map(function(arg) {
       return stringify(arg);
     });
-    dump(aLevel + ": " + data.join(", ") + "\n");
+    dump("console." + aLevel + ": " + data.join(", ") + "\n");
   };
 }
 
@@ -332,7 +332,7 @@ function createDumper(aLevel) {
  */
 function createMultiLineDumper(aLevel) {
   return function() {
-    dump(aLevel + "\n");
+    dump("console." + aLevel + ": \n");
     let args = Array.prototype.slice.call(arguments, 0);
     args.forEach(function(arg) {
       dump(log(arg));
