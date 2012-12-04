@@ -501,18 +501,15 @@ MarkupView.prototype = {
     aContainer.childrenDirty = false;
 
     let children = this._getVisibleChildren(aContainer, aCentered);
+    let fragment = this.doc.createDocumentFragment();
 
-    let lastContainer = null;
     for (child of children.children) {
       let container = this.importNode(child, false);
-      let before = lastContainer ? lastContainer.nextSibling : aContainer.children.firstChild;
-      // Make sure children are in the right order.
-      aContainer.children.insertBefore(container.elt, before);
-      lastContainer = container.elt;
+      fragment.appendChild(container.elt);
     }
 
-    while (aContainer.children.lastChild != lastContainer) {
-      aContainer.children.removeChild(aContainer.children.lastChild);
+    while (aContainer.children.firstChild) {
+      aContainer.children.removeChild(aContainer.children.firstChild);
     }
 
     if (!(children.hasFirst && children.hasLast)) {
@@ -545,7 +542,7 @@ MarkupView.prototype = {
       }
     }
 
-    let containerChildren = aContainer.children;
+    aContainer.children.appendChild(fragment);
 
     return true;
   },
