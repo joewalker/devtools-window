@@ -26,16 +26,9 @@ function addTab(aURL)
 function openInspector(callback)
 {
   let target = TargetFactory.forTab(gBrowser.selectedTab);
-  let inspector = gDevTools.getPanelForTarget("inspector", target);
-  if (inspector && inspector.isReady) {
-    callback(inspector);
-  } else {
-    let toolbox = gDevTools.openToolboxForTab(target, "inspector");
-    toolbox.once("inspector-ready", function(event, panel) {
-      let inspector = gDevTools.getPanelForTarget("inspector", target);
-      callback(inspector);
-    });
-  }
+  gDevTools.showToolbox(target, "inspector").then(function(toolbox) {
+    callback(toolbox.getCurrentPanel());
+  });
 }
 
 function addStyle(aDocument, aString)

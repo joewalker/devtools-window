@@ -112,9 +112,9 @@ gcli.addCommand({
 
     let gBrowser = context.environment.chromeDocument.defaultView.gBrowser;
     let target = TargetFactory.forTab(gBrowser.selectedTab);
-    gDevTools.openToolboxForTab(target, "webconsole");
-
-    return gcli.lookup("calllogChromeStartReply");
+    return gDevTools.showToolbox(target, "webconsole").then(function() {
+      return gcli.lookup("calllogChromeStartReply");
+    });
   },
 
   valueToString: function(value) {

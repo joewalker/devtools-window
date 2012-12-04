@@ -426,11 +426,10 @@ nsContextMenu.prototype = {
     if (inspector && inspector.isReady) {
       inspector.selection.setNode(this.target);
     } else {
-      let toolbox = gDevTools.openToolboxForTab(target, "inspector");
-      toolbox.once("inspector-ready", function(event, panel) {
-        let inspector = gDevTools.getPanelForTarget("inspector", target);
+      gDevTools.showToolbox(target, "inspector").then(function(toolbox) {
+        let inspector = toolbox.getCurrentPanel();
         inspector.selection.setNode(this.target, "browser-context-menu");
-      }.bind(this));
+      });
     }
   },
 
