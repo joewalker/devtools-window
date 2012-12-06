@@ -437,18 +437,22 @@ DeveloperToolbar.prototype.hide = function DT_hide()
  */
 DeveloperToolbar.prototype.destroy = function DT_destroy()
 {
-  this._chromeWindow.getBrowser().tabContainer.removeEventListener("TabSelect", this, false);
-  this._chromeWindow.getBrowser().removeEventListener("load", this, true); 
-  this._chromeWindow.getBrowser().removeEventListener("beforeunload", this, true);
+  let browser = this._chromeWindow.getBrowser();
 
-  let tabs = this._chromeWindow.getBrowser().tabs;
+  browser.tabContainer.removeEventListener("TabSelect", this, false);
+  browser.removeEventListener("load", this, true);
+  browser.removeEventListener("beforeunload", this, true);
+
+  let tabs = browser.tabs;
   Array.prototype.forEach.call(tabs, this._stopErrorsCount, this);
 
   this.display.focusManager.removeMonitoredElement(this.outputPanel._frame);
   this.display.focusManager.removeMonitoredElement(this._element);
 
-  this.display.onVisibilityChange.remove(this.outputPanel._visibilityChanged, this.outputPanel);
-  this.display.onVisibilityChange.remove(this.tooltipPanel._visibilityChanged, this.tooltipPanel);
+  this.display.onVisibilityChange.remove(this.outputPanel._visibilityChanged,
+    this.outputPanel);
+  this.display.onVisibilityChange.remove(this.tooltipPanel._visibilityChanged,
+    this.tooltipPanel);
   this.display.onOutput.remove(this.outputPanel._outputChanged, this.outputPanel);
   this.display.destroy();
   this.outputPanel.destroy();
