@@ -480,11 +480,8 @@ fun_hasInstance(JSContext *cx, HandleObject objArg, MutableHandleValue v, JSBool
 {
     RootedObject obj(cx, objArg);
 
-    while (obj->isFunction()) {
-        if (!obj->isBoundFunction())
-            break;
+    while (obj->isFunction() && obj->isBoundFunction())
         obj = obj->toFunction()->getBoundFunctionTarget();
-    }
 
     RootedValue pval(cx);
     if (!JSObject::getProperty(cx, obj, obj, cx->names().classPrototype, &pval))
@@ -994,7 +991,7 @@ JSFunction::initBoundFunction(JSContext *cx, HandleValue thisArg,
     if (!self->setFlag(cx, BaseShape::BOUND_FUNCTION))
         return false;
 
-    if (!self->setSlotSpan(cx, BOUND_FUNCTION_RESERVED_SLOTS + argslen))
+    if (!JSObject::setSlotSpan(cx, self, BOUND_FUNCTION_RESERVED_SLOTS + argslen))
         return false;
 
     self->setSlot(JSSLOT_BOUND_FUNCTION_THIS, thisArg);

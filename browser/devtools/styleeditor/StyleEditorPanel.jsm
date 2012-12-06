@@ -5,13 +5,14 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 const Cu = Components.utils;
-const Ci = Components.interfaces;
 
 this.EXPORTED_SYMBOLS = ["StyleEditorPanel"];
 
-Cu.import("resource:///modules/devtools/EventEmitter.jsm");
-Cu.import("resource:///modules/devtools/StyleEditorChrome.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource:///modules/devtools/EventEmitter.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "StyleEditorChrome",
+  "resource:///modules/devtools/StyleEditorChrome.jsm");
 
 this.StyleEditorPanel = function StyleEditorPanel(panelWin, toolbox) {
   new EventEmitter(this);

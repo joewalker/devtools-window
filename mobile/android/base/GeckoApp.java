@@ -43,7 +43,6 @@ import android.content.pm.ServiceInfo;
 import android.content.pm.Signature;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.PointF;
 import android.graphics.Rect;
@@ -102,7 +101,6 @@ import java.io.OutputStream;
 import java.lang.reflect.Method;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -190,7 +188,6 @@ abstract public class GeckoApp
 
     protected int mRestoreMode = RESTORE_NONE;
     protected boolean mInitialized = false;
-    protected Telemetry.Timer mAboutHomeStartupTimer;
     private Telemetry.Timer mJavaUiStartupTimer;
     private Telemetry.Timer mGeckoReadyStartupTimer;
 
@@ -227,7 +224,7 @@ abstract public class GeckoApp
         }
     }
 
-    void toggleChrome(final Boolean aShow) { }
+    void toggleChrome(final boolean aShow) { }
 
     void focusChrome() { }
 
@@ -443,13 +440,6 @@ abstract public class GeckoApp
         return null;
     }
 
-    synchronized Favicons getFavicons() {
-        if (mFavicons == null)
-            mFavicons = new Favicons(this);
-
-        return mFavicons;
-    }
-
     Class<?> getPluginClass(String packageName, String className)
             throws NameNotFoundException, ClassNotFoundException {
         Context pluginContext = mAppContext.createPackageContext(packageName,
@@ -589,6 +579,11 @@ abstract public class GeckoApp
 
     @Override
     public boolean onMenuOpened(int featureId, Menu menu) {
+        // exit full-screen mode whenever the menu is opened
+        if (mLayerView.isFullScreen()) {
+            GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("FullScreen:Exit", null));
+        }
+
         if (Build.VERSION.SDK_INT >= 11 && featureId == Window.FEATURE_OPTIONS_PANEL) {
             if (mMenu == null) {
                 onCreatePanelMenu(featureId, menu);
@@ -708,54 +703,6 @@ abstract public class GeckoApp
         outState.putString(SAVED_STATE_PRIVATE_SESSION, mPrivateBrowsingSession);
     }
 
-    void getAndProcessThumbnailForTab(final Tab tab) {
-        if ("about:home".equals(tab.getURL())) {
-            tab.updateThumbnail(null);
-            return;
-        }
-
-        if (tab.getState() == Tab.STATE_DELAYED) {
-            if (tab.getURL() != null) {
-                byte[] thumbnail = BrowserDB.getThumbnailForUrl(getContentResolver(), tab.getURL());
-                if (thumbnail != null)
-                    processThumbnail(tab, null, thumbnail);
-            }
-            return;
-        }
-
-        int dw = Tabs.getThumbnailWidth();
-        int dh = Tabs.getThumbnailHeight();
-        GeckoAppShell.sendEventToGecko(GeckoEvent.createScreenshotEvent(tab.getId(), 0, 0, 0, 0, 0, 0, dw, dh, dw, dh, ScreenshotHandler.SCREENSHOT_THUMBNAIL, tab.getThumbnailBuffer()));
-    }
-
-    void handleThumbnailData(Tab tab, ByteBuffer data) {
-        if (shouldUpdateThumbnail(tab)) {
-            Bitmap b = tab.getThumbnailBitmap();
-            data.position(0);
-            b.copyPixelsFromBuffer(data);
-            processThumbnail(tab, b, null);
-        }
-    }
-
-    void processThumbnail(Tab thumbnailTab, Bitmap bitmap, byte[] compressed) {
-        try {
-            if (bitmap == null) {
-                if (compressed == null) {
-                    Log.w(LOGTAG, "processThumbnail: one of bitmap or compressed must be non-null!");
-                    return;
-                }
-                bitmap = BitmapFactory.decodeByteArray(compressed, 0, compressed.length);
-            }
-            thumbnailTab.updateThumbnail(bitmap);
-        } catch (OutOfMemoryError ome) {
-            Log.w(LOGTAG, "decoding byte array ran out of memory", ome);
-        }
-    }
-
-    private boolean shouldUpdateThumbnail(Tab tab) {
-        return (Tabs.getInstance().isSelectedTab(tab) || areTabsShown());
-    }
-
     public void hideFormAssistPopup() {
         if (mFormAssistPopup != null)
             mFormAssistPopup.hide();
@@ -781,7 +728,7 @@ abstract public class GeckoApp
         (new GeckoAsyncTask<Void, Void, String>(mAppContext, GeckoAppShell.getHandler()) {
             @Override
             public String doInBackground(Void... params) {
-                return getFavicons().getFaviconUrlForPageUrl(url);
+                return Favicons.getInstance().getFaviconUrlForPageUrl(url);
             }
 
             @Override
@@ -1227,7 +1174,7 @@ abstract public class GeckoApp
                 if (!TextUtils.equals(oldURL, tab.getURL()))
                     return;
 
-                getAndProcessThumbnailForTab(tab);
+                ThumbnailHelper.getInstance().getAndProcessThumbnailFor(tab);
                 if (Tabs.getInstance().isSelectedTab(tab)) {
                     GeckoAppShell.sendEventToGecko(GeckoEvent.createStartPaintListentingEvent(tab.getId()));
                     ScreenshotHandler.screenshotWholePage(tab);
@@ -1470,13 +1417,13 @@ abstract public class GeckoApp
 
         // The clock starts...now. Better hurry!
         mJavaUiStartupTimer = new Telemetry.Timer("FENNEC_STARTUP_TIME_JAVAUI");
-        mAboutHomeStartupTimer = new Telemetry.Timer("FENNEC_STARTUP_TIME_ABOUTHOME");
         mGeckoReadyStartupTimer = new Telemetry.Timer("FENNEC_STARTUP_TIME_GECKOREADY");
 
         ((GeckoApplication)getApplication()).initialize();
 
         mAppContext = this;
         Tabs.getInstance().attachToActivity(this);
+        Favicons.getInstance().attachToContext(this);
 
         // Check to see if the activity is restarted after configuration change.
         if (getLastNonConfigurationInstance() != null) {
@@ -1655,6 +1602,7 @@ abstract public class GeckoApp
         Tabs.registerOnTabsChangedListener(this);
 
         // If we are doing a restore, read the session data and send it to Gecko
+        String restoreMessage = null;
         if (mRestoreMode != RESTORE_NONE) {
             try {
                 String sessionString = getProfile().readSessionFile(false);
@@ -1704,13 +1652,15 @@ abstract public class GeckoApp
                 JSONObject restoreData = new JSONObject();
                 restoreData.put("restoringOOM", mRestoreMode == RESTORE_OOM);
                 restoreData.put("sessionString", sessionString);
-                GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Session:Restore", restoreData.toString()));
+                restoreMessage = restoreData.toString();
             } catch (Exception e) {
                 // If restore failed, do a normal startup
                 Log.e(LOGTAG, "An error occurred during restore", e);
                 mRestoreMode = RESTORE_NONE;
             }
         }
+
+        GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Session:Restore", restoreMessage));
 
         if (mRestoreMode == RESTORE_OOM) {
             // If we successfully did an OOM restore, we now have tab stubs
@@ -2454,7 +2404,7 @@ abstract public class GeckoApp
 
     public boolean showAwesomebar(AwesomeBar.Target aTarget, String aUrl) {
         Intent intent = new Intent(getBaseContext(), AwesomeBar.class);
-        intent.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION | Intent.FLAG_ACTIVITY_NO_HISTORY);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY);
         intent.putExtra(AwesomeBar.TARGET_KEY, aTarget.name());
 
         // if we were passed in a url, show it
@@ -2475,6 +2425,7 @@ abstract public class GeckoApp
 
         int requestCode = GeckoAppShell.sActivityHelper.makeRequestCodeForAwesomebar();
         startActivityForResult(intent, requestCode);
+        overridePendingTransition (R.anim.awesomebar_fade_in, R.anim.awesomebar_hold_still);
         return true;
     }
 

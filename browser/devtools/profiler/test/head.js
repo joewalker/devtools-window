@@ -7,6 +7,9 @@ const PROFILER_ENABLED = "devtools.profiler.enabled";
 Cu.import("resource:///modules/devtools/Target.jsm", temp);
 let TargetFactory = temp.TargetFactory;
 
+Cu.import("resource:///modules/devtools/gDevTools.jsm", temp);
+let gDevTools = temp.gDevTools;
+
 function loadTab(url, callback) {
   let tab = gBrowser.addTab();
   gBrowser.selectedTab = tab;

@@ -160,8 +160,10 @@ struct ScaleRequest
 
     weakImage = aImage->asWeakPtr();
     srcRect = aSrcFrame->GetRect();
-    dstSize.width = NSToIntRoundUp(srcRect.width * scale.width);
-    dstSize.height = NSToIntRoundUp(srcRect.height * scale.height);
+
+    nsIntRect dstRect = srcRect;
+    dstRect.ScaleRoundOut(scale.width, scale.height);
+    dstSize = dstRect.Size();
   }
 
   // This can only be called on the main thread.
@@ -1114,8 +1116,14 @@ RasterImage::GetCurrentImage()
 
 
 NS_IMETHODIMP
-RasterImage::GetImageContainer(ImageContainer **_retval)
+RasterImage::GetImageContainer(LayerManager* aManager, ImageContainer **_retval)
 {
+  int32_t maxTextureSize = aManager->GetMaxTextureSize();
+  if (mSize.width > maxTextureSize || mSize.height > maxTextureSize) {
+    *_retval = nullptr;
+    return NS_OK;
+  }
+
   if (mImageContainer) {
     *_retval = mImageContainer;
     NS_ADDREF(*_retval);
@@ -2585,7 +2593,7 @@ RasterImage::ShutdownDecoder(eShutdownIntent aIntent)
 
   mFinishing = true;
   mInDecoder = true;
-  decoder->Finish();
+  decoder->Finish(aIntent);
   mInDecoder = false;
   mFinishing = false;
 

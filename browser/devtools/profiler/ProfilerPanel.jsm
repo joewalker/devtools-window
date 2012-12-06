@@ -6,39 +6,16 @@
 
 const Cu = Components.utils;
 
-const EXPORTED_SYMBOLS = ["ProfilerDefinition"];
-
 Cu.import("resource:///modules/devtools/ProfilerController.jsm");
 Cu.import("resource://gre/modules/devtools/EventEmitter.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
-XPCOMUtils.defineLazyModuleGetter(this, "gDevTools",
-  "resource:///modules/devtools/gDevTools.jsm");
+this.EXPORTED_SYMBOLS = ["ProfilerPanel"];
 
 XPCOMUtils.defineLazyGetter(this, "DebuggerServer", function () {
   Cu.import("resource://gre/modules/devtools/dbg-server.jsm");
   return DebuggerServer;
 });
-
-const ProfilerDefinition = {
-  id: "jsprofiler",
-  killswitch: "devtools.profiler.enabled",
-  icon: "chrome://browser/skin/devtools/tools-icons-small.png",
-  url: "chrome://browser/content/profiler.xul",
-  label: "Profiler", // FIXME: l10n
-
-  isTargetSupported: function (target) {
-    if (target.isRemote || target.isChrome) {
-      return false;
-    }
-
-    return true;
-  },
-
-  build: function (frame, target) {
-    return new ProfilerPanel(frame, target);
-  }
-};
 
 /**
  * An instance of a profile UI. Profile UI consists of
@@ -110,11 +87,11 @@ function ProfileUI(uid, panel) {
 }
 
 ProfileUI.prototype = {
-  show: function () {
+  show: function PUI_show() {
     this.iframe.removeAttribute("hidden");
   },
 
-  hide: function () {
+  hide: function PUI_hide() {
     this.iframe.setAttribute("hidden", true);
   },
 
@@ -128,7 +105,7 @@ ProfileUI.prototype = {
    *   parsing and displaying results.
    *
    */
-  parse: function (data, onParsed) {
+  parse: function PUI_parse(data, onParsed) {
     if (!this.isReady) {
       return;
     }
@@ -139,9 +116,6 @@ ProfileUI.prototype = {
       task: "receiveProfileData",
       rawProfile: data
     }), "*");
-
-    // FIXME: There has to be a better way to emit an event when
-    // Cleopatra finishes parsing data.
 
     let poll = function pollBreadcrumbs() {
       let wait = this.panel.window.setTimeout.bind(null, poll, 100);
@@ -159,6 +133,16 @@ ProfileUI.prototype = {
     }.bind(this);
 
     poll();
+  },
+
+  /**
+   * Destroys the ProfileUI instance.
+   */
+  destroy: function PUI_destroy() {
+    this.isReady = null
+    this.panel = null;
+    this.uid = null;
+    this.iframe = null;
   }
 };
 
@@ -316,7 +300,6 @@ ProfilerPanel.prototype = {
   startProfiling: function PP_startProfiling(onStart) {
     this.controller.start(function (err) {
       if (err) {
-        // FIXME: Error handling.
         Cu.reportError("ProfilerController.start: " + err.message);
         return;
       }
@@ -337,7 +320,6 @@ ProfilerPanel.prototype = {
   stopProfiling: function PP_stopProfiling(onStop) {
     this.controller.isActive(function (err, isActive) {
       if (err) {
-        // FIXME: Error handling.
         Cu.reportError("ProfilerController.isActive: " + err.message);
         return;
       }
@@ -348,7 +330,6 @@ ProfilerPanel.prototype = {
 
       this.controller.stop(function (err, data) {
         if (err) {
-          // FIXME: Error handling.
           Cu.reportError("ProfilerController.stop: " + err.message);
           return;
         }
@@ -367,8 +348,27 @@ ProfilerPanel.prototype = {
    * Cleanup.
    */
   destroy: function PP_destroy() {
-    // FIXME: Need an actualt destroy function that closes
-    // connections and all that.
+    if (this.profiles) {
+      let uid = this._uid;
+
+      while (uid >= 0) {
+        if (this.profiles.has(uid)) {
+          this.profiles.get(uid).destroy();
+          this.profiles.delete(uid);
+        }
+        uid -= 1;
+      }
+    }
+
+    this.isReady = null;
+    this.window = null;
+    this.document = null;
+    this.target = null;
+    this.controller = null;
+    this.profiles = null;
+    this._uid = null;
+    this._activeUid = null;
+
     this.emit("destroyed");
   }
 };

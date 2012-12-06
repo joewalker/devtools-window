@@ -49,6 +49,18 @@ class nsXPCClassInfo;
 
 namespace mozilla {
 namespace dom {
+/**
+ * @return true if aChar is what the DOM spec defines as 'space character'.
+ * http://dom.spec.whatwg.org/#space-character
+ */
+inline bool IsSpaceCharacter(PRUnichar aChar) {
+  return aChar == ' ' || aChar == '\t' || aChar == '\n' || aChar == '\r' ||
+         aChar == '\f';
+}
+inline bool IsSpaceCharacter(char aChar) {
+  return aChar == ' ' || aChar == '\t' || aChar == '\n' || aChar == '\r' ||
+         aChar == '\f';
+}
 class Element;
 class EventHandlerNonNull;
 class OnErrorEventHandlerNonNull;
@@ -59,8 +71,6 @@ template<typename T> class Optional;
 namespace JS {
 class Value;
 }
-
-inline void SetDOMStringToNull(nsAString& aString);
 
 #define NODE_FLAG_BIT(n_) (1U << (n_))
 
@@ -1494,10 +1504,7 @@ public:
   {
     SetNodeValueInternal(aNodeValue, aError);
   }
-  virtual void GetNodeValueInternal(nsAString& aNodeValue)
-  {
-    SetDOMStringToNull(aNodeValue);
-  }
+  virtual void GetNodeValueInternal(nsAString& aNodeValue);
   virtual void SetNodeValueInternal(const nsAString& aNodeValue,
                                     mozilla::ErrorResult& aError)
   {
@@ -1592,10 +1599,7 @@ protected:
     return IsEditableInternal();
   }
 
-  virtual void GetTextContentInternal(nsAString& aTextContent)
-  {
-    SetDOMStringToNull(aTextContent);
-  }
+  virtual void GetTextContentInternal(nsAString& aTextContent);
   virtual void SetTextContentInternal(const nsAString& aTextContent,
                                       mozilla::ErrorResult& aError)
   {

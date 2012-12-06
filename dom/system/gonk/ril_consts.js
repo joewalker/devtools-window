@@ -405,17 +405,20 @@ this.ICC_COMMAND_UPDATE_RECORD = 0xdc;
 this.ICC_EF_ICCID  = 0x2fe2;
 this.ICC_EF_IMG    = 0x4f20;
 this.ICC_EF_PBR    = 0x4f30;
+this.ICC_EF_PLMNsel = 0x6f30; // PLMN for SIM
 this.ICC_EF_SST    = 0x6f38;
 this.ICC_EF_UST    = 0x6f38; // For USIM
 this.ICC_EF_ADN    = 0x6f3a;
 this.ICC_EF_FDN    = 0x6f3b;
 this.ICC_EF_SMS    = 0x6f3c;
 this.ICC_EF_MSISDN = 0x6f40;
+this.ICC_EF_CBMI   = 0x6f45;
 this.ICC_EF_SPN    = 0x6f46;
 this.ICC_EF_SDN    = 0x6f49;
 this.ICC_EF_EXT1   = 0x6f4a;
 this.ICC_EF_EXT2   = 0x6f4b;
 this.ICC_EF_EXT3   = 0x6f4c;
+this.ICC_EF_CBMIR  = 0x6f50;
 this.ICC_EF_AD     = 0x6fad;
 this.ICC_EF_PHASE  = 0x6fae;
 this.ICC_EF_PNN    = 0x6fc5;
@@ -563,6 +566,10 @@ this.COMPREHENSIONTLV_TAG_ICON_ID_LIST = 0x1f;
 this.COMPREHENSIONTLV_TAG_IMMEDIATE_RESPONSE = 0x2b;
 this.COMPREHENSIONTLV_TAG_URL = 0x31;
 
+// Tags for Service Provider Display Information TLV
+this.SPDI_TAG_SPDI = 0xa3;
+this.SPDI_TAG_PLMN_LIST = 0x80;
+
 // Device identifiers, see TS 11.14, clause 12.7
 this.STK_DEVICE_ID_KEYPAD = 0x01;
 this.STK_DEVICE_ID_DISPLAY = 0x02;
@@ -573,6 +580,7 @@ this.STK_DEVICE_ID_NETWORK = 0x83;
 
 // STK Proactive commands.
 this.STK_CMD_REFRESH = 0x01;
+this.STK_CMD_MORE_TIME = 0x02;
 this.STK_CMD_POLL_INTERVAL = 0x03;
 this.STK_CMD_POLL_OFF = 0x04;
 this.STK_CMD_SET_UP_EVENT_LIST = 0x05;
@@ -800,7 +808,7 @@ this.STK_TERMINAL_SUPPORT_EXTENSION_TEXT               = 1;
 this.STK_TERMINAL_SUPPORT_PROACTIVE_DISPLAY_TEXT       = 1;
 this.STK_TERMINAL_SUPPORT_PROACTIVE_GET_INKEY          = 1;
 this.STK_TERMINAL_SUPPORT_PROACTIVE_GET_INPUT          = 1;
-this.STK_TERMINAL_SUPPORT_PROACTIVE_MORE_TIME          = 0;
+this.STK_TERMINAL_SUPPORT_PROACTIVE_MORE_TIME          = 1;
 this.STK_TERMINAL_SUPPORT_PROACTIVE_PLAY_TONE          = 1;
 this.STK_TERMINAL_SUPPORT_PROACTIVE_POLL_INTERVAL      = 1;
 this.STK_TERMINAL_SUPPORT_PROACTIVE_POLL_OFF           = 1;
@@ -906,17 +914,93 @@ this.GECKO_ICC_SERVICES = {
   sim: {
     ADN: 2,
     FDN: 3,
+    PLMNSEL: 7,
+    CBMI: 14,
+    SPN: 17,
     SDN: 18,
     DATA_DOWNLOAD_SMS_PP: 26,
+    CBMIR: 30,
     BDN: 31
   },
   usim: {
     FDN: 2,
     SDN: 4,
     BDN: 6,
-    DATA_DOWNLOAD_SMS_PP: 28
+    CBMI: 15,
+    CBMIR: 16,
+    SPN: 19,
+    DATA_DOWNLOAD_SMS_PP: 28,
+    SPDI: 51
   }
 };
+
+/**
+ * Cell Broadcast constants
+ */
+
+this.CB_FORMAT_GSM  = 0;
+this.CB_FORMAT_ETWS = 1;
+this.CB_FORMAT_CMAS = 2;
+this.CB_FORMAT_UMTS = 3;
+
+// CBS Data Coding Scheme: Language groups
+// see 3GPP TS 23.038 section 5
+this.CB_DCS_LANG_GROUP_1 = [
+  "de", "en", "it", "fr", "es", "nl", "sv", "da", "pt", "fi",
+  "no", "el", "tr", "hu", "pl", null
+];
+this.CB_DCS_LANG_GROUP_2 = [
+  "cs", "he", "ar", "ru", "is", null, null, null, null, null,
+  null, null, null, null, null, null
+];
+
+// See 3GPP TS 23.041 v11.2.0 section 9.4.1.2.2
+this.CB_NON_MMI_SETTABLE_RANGES = [
+  /*0x1000 - 0x107F*/4096,  4224,  /*0x1080 - 0x10FF*/4224,  4352,
+  /*0x1112 - 0x1112*/4370,  4371,  /*0x111F - 0x111F*/4383,  4384,
+  /*0xF000 - 0xFFFE*/61440, 65535, /*0xFFFF - 0xFFFF*/65535, 65536
+];
+
+// User Data max length in septets
+this.CB_MAX_CONTENT_7BIT = 93;
+// User Data max length in octets
+this.CB_MAX_CONTENT_8BIT = 82;
+// User Data max length in chars
+this.CB_MAX_CONTENT_UCS2 = 41;
+
+this.CB_MESSAGE_SIZE_ETWS = 56;
+this.CB_MESSAGE_SIZE_GSM  = 88;
+
+// GSM Cell Broadcast Geographical Scope
+// See 3GPP TS 23.041 clause 9.4.1.2.1
+this.CB_GSM_GEOGRAPHICAL_SCOPE_CELL_WIDE_IMMEDIATE = 0;
+this.CB_GSM_GEOGRAPHICAL_SCOPE_PLMN_WIDE           = 1;
+this.CB_GSM_GEOGRAPHICAL_SCOPE_LOCATION_AREA_WIDE  = 2;
+this.CB_GSM_GEOGRAPHICAL_SCOPE_CELL_WIDE           = 3;
+
+// GSM Cell Broadcast Geographical Scope
+// See 3GPP TS 23.041 clause 9.4.1.2.1
+this.CB_GSM_GEOGRAPHICAL_SCOPE_NAMES = [
+  "cell-immediate",
+  "plmn",
+  "location-area",
+  "cell"
+];
+
+// GSM Cell Broadcast Message Identifiers
+// see 3GPP TS 23.041 clause 9.4.1.2.2
+this.CB_GSM_MESSAGEID_ETWS_BEGIN = 0x1100;
+this.CB_GSM_MESSAGEID_ETWS_END   = 0x1107;
+
+// ETWS Warning-Type
+// see 3GPP TS 23.041 clause 9.3.24
+this.CB_ETWS_WARNING_TYPE_NAMES = [
+  "earthquake",
+  "tsunami",
+  "earthquake-tsunami",
+  "test",
+  "other"
+];
 
 /**
  * GSM PDU constants
@@ -1101,6 +1185,8 @@ this.PDU_DCS_MSG_CLASS_0                = 0x00;
 this.PDU_DCS_MSG_CLASS_1                = 0x01;
 this.PDU_DCS_MSG_CLASS_2                = 0x02;
 this.PDU_DCS_MSG_CLASS_3                = 0x03;
+this.PDU_DCS_MSG_CLASS_USER_1           = 0x04;
+this.PDU_DCS_MSG_CLASS_USER_2           = 0x05;
 this.PDU_DCS_CODING_GROUP_BITS          = 0xF0;
 this.PDU_DCS_MSG_CLASS_BITS             = 0x03;
 this.PDU_DCS_MWI_ACTIVE_BITS            = 0x08;
@@ -1117,6 +1203,8 @@ GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_0]      = "class-0";
 GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_1]      = "class-1";
 GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_2]      = "class-2";
 GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_3]      = "class-3";
+GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_USER_1] = "user-1";
+GECKO_SMS_MESSAGE_CLASSES[PDU_DCS_MSG_CLASS_USER_2] = "user-2";
 
 // Because service center timestamp omit the century. Yay.
 this.PDU_TIMESTAMP_YEAR_OFFSET = 2000;
@@ -2070,6 +2158,7 @@ this.MMI_SC_CF_ALL_CONDITIONAL = "004";
 this.MMI_SC_TO_CF_REASON = {};
 MMI_SC_TO_CF_REASON[MMI_SC_CFU] = CALL_FORWARD_REASON_UNCONDITIONAL;
 MMI_SC_TO_CF_REASON[MMI_SC_CF_BUSY] = CALL_FORWARD_REASON_MOBILE_BUSY;
+MMI_SC_TO_CF_REASON[MMI_SC_CF_NO_REPLY] = CALL_FORWARD_REASON_NO_REPLY;
 MMI_SC_TO_CF_REASON[MMI_SC_CF_NOT_REACHABLE] = CALL_FORWARD_REASON_NOT_REACHABLE;
 MMI_SC_TO_CF_REASON[MMI_SC_CF_ALL] = CALL_FORWARD_REASON_ALL_CALL_FORWARDING;
 MMI_SC_TO_CF_REASON[MMI_SC_CF_ALL_CONDITIONAL] = CALL_FORWARD_REASON_ALL_CONDITIONAL_CALL_FORWARDING;

@@ -1802,7 +1802,7 @@ var XPIProvider = {
     }
     catch (e) { }
     
-    const TelemetryPing = Cc["@mozilla.org/base/telemetry-ping;1"].getService(Ci.nsIObserver);
+    const TelemetryPing = Cc["@mozilla.org/base/telemetry-ping;1"].getService(Ci.nsITelemetryPing);
     TelemetryPing.observe(null, "Add-ons", data);
   },
 
@@ -2986,7 +2986,11 @@ var XPIProvider = {
         Prefs.getBoolPref(PREF_INSTALL_DISTRO_ADDONS, true))
       updateDatabase = this.installDistributionAddons(manifests) || updateDatabase;
 
+    // Telemetry probe added around getInstallLocationStates() to check perf
+    let telemetryCaptureTime = new Date();
     let state = this.getInstallLocationStates();
+    let telemetry = Services.telemetry;
+    telemetry.getHistogramById("CHECK_ADDONS_MODIFIED_MS").add(new Date() - telemetryCaptureTime);
 
     if (!updateDatabase) {
       // If the state has changed then we must update the database

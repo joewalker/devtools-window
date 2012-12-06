@@ -29,8 +29,8 @@ using mozilla::DebugOnly;
 IonBuilder::IonBuilder(JSContext *cx, TempAllocator *temp, MIRGraph *graph,
                        TypeOracle *oracle, CompileInfo *info, size_t inliningDepth, uint32 loopDepth)
   : MIRGenerator(cx->compartment, temp, graph, info),
-    recompileInfo(cx->compartment->types.compiledInfo),
     backgroundCodegen_(NULL),
+    recompileInfo(cx->compartment->types.compiledInfo),
     cx(cx),
     loopDepth_(loopDepth),
     callerResumePoint_(NULL),
@@ -500,7 +500,14 @@ IonBuilder::rewriteParameters()
 
     for (uint32 i = START_SLOT; i < CountArgSlots(info().fun()); i++) {
         MParameter *param = current->getSlot(i)->toParameter();
-        types::StackTypeSet *types = param->typeSet();
+
+        // Find the original (not cloned) type set for the MParameter, as we
+        // will be adding constraints to it.
+        types::StackTypeSet *types;
+        if (param->index() == MParameter::THIS_SLOT)
+            types = oracle->thisTypeSet(script_);
+        else
+            types = oracle->parameterTypeSet(script_, param->index());
         if (!types)
             continue;
 
@@ -544,7 +551,7 @@ IonBuilder::initParameters()
         return true;
 
     MParameter *param = MParameter::New(MParameter::THIS_SLOT,
-                                        oracle->thisTypeSet(script_));
+                                        cloneTypeSet(oracle->thisTypeSet(script_)));
     current->add(param);
     current->initSlot(info().thisSlot(), param);
 
@@ -893,7 +900,14 @@ IonBuilder::inspectOpcode(JSOp op)
 
       case JSOP_POP:
         current->pop();
-        return true;
+
+        // POP opcodes frequently appear where values are killed, e.g. after
+        // SET* opcodes. Place a resume point afterwards to avoid capturing
+        // the dead value in later snapshots, except in places where that
+        // resume point is obviously unnecessary.
+        if (pc[JSOP_POP_LENGTH] == JSOP_POP)
+            return true;
+        return maybeInsertResume();
 
       case JSOP_NEWINIT:
       {
@@ -2403,7 +2417,7 @@ IonBuilder::lookupSwitch(JSOp op, jssrcnote *sn)
 
     // Create CFGState
     CFGState state = CFGState::LookupSwitch(exitpc);
-    if (!state.lookupswitch.bodies->init(bodyBlocks.length()))
+    if (!state.lookupswitch.bodies || !state.lookupswitch.bodies->init(bodyBlocks.length()))
         return ControlStatus_Error;
 
     // Fill bodies in CFGState using bodies in bodyBlocks, move them to
@@ -2692,7 +2706,7 @@ IonBuilder::jsop_binary(JSOp op, MDefinition *left, MDefinition *right)
         MConcat *ins = MConcat::New(left, right);
         current->add(ins);
         current->push(ins);
-        return true;
+        return maybeInsertResume();
     }
 
     MBinaryArithInstruction *ins;
@@ -2729,7 +2743,7 @@ IonBuilder::jsop_binary(JSOp op, MDefinition *left, MDefinition *right)
 
     if (ins->isEffectful())
         return resumeAfter(ins);
-    return true;
+    return maybeInsertResume();
 }
 
 bool
@@ -3510,15 +3524,29 @@ MDefinition *
 IonBuilder::createThisScripted(MDefinition *callee)
 {
     // Get callee.prototype.
+    //
     // This instruction MUST be idempotent: since it does not correspond to an
-    // explicit operation in the bytecode, we cannot use resumeAfter(). But
-    // calling GetProperty can trigger a GC, and thus invalidation.
-    MCallGetProperty *getProto = MCallGetProperty::New(callee, cx->names().classPrototype);
-
-    // Getters may not override |prototype| fetching, so this is repeatable.
-    getProto->markUneffectful();
+    // explicit operation in the bytecode, we cannot use resumeAfter().
+    // Getters may not override |prototype| fetching, so this operation is indeed idempotent.
+    // - First try an idempotent property cache.
+    // - Upon failing idempotent property cache, we can't use a non-idempotent cache,
+    //   therefore we fallback to CallGetProperty
+    //
+    // Note: both CallGetProperty and GetPropertyCache can trigger a GC,
+    //       and thus invalidation.
+    MInstruction *getProto;
+    if (!invalidatedIdempotentCache()) {
+        MGetPropertyCache *getPropCache = MGetPropertyCache::New(callee, cx->names().classPrototype);
+        getPropCache->setIdempotent();
+        getProto = getPropCache;
+    } else {
+        MCallGetProperty *callGetProp = MCallGetProperty::New(callee, cx->names().classPrototype);
+        callGetProp->setIdempotent();
+        getProto = callGetProp;
+    }
     current->add(getProto);
 
+    // Create this from prototype
     MCreateThis *createThis = MCreateThis::New(callee, getProto, NULL);
     current->add(createThis);
 
@@ -4279,12 +4307,13 @@ IonBuilder::newPendingLoopHeader(MBasicBlock *predecessor, jsbytecode *pc)
 bool
 IonBuilder::resume(MInstruction *ins, jsbytecode *pc, MResumePoint::Mode mode)
 {
-    JS_ASSERT(ins->isEffectful());
+    JS_ASSERT(ins->isEffectful() || !ins->isMovable());
 
     MResumePoint *resumePoint = MResumePoint::New(ins->block(), pc, callerResumePoint_, mode);
     if (!resumePoint)
         return false;
     ins->setResumePoint(resumePoint);
+    resumePoint->setInstruction(ins);
     return true;
 }
 
@@ -4298,6 +4327,28 @@ bool
 IonBuilder::resumeAfter(MInstruction *ins)
 {
     return resume(ins, pc, MResumePoint::ResumeAfter);
+}
+
+bool
+IonBuilder::maybeInsertResume()
+{
+    // Create a resume point at the current position, without an existing
+    // effectful instruction. This resume point is not necessary for correct
+    // behavior (see above), but is added to avoid holding any values from the
+    // previous resume point which are now dead. This shortens the live ranges
+    // of such values and improves register allocation.
+    //
+    // This optimization is not performed outside of loop bodies, where good
+    // register allocation is not as critical, in order to avoid creating
+    // excessive resume points.
+
+    if (loopDepth_ == 0)
+        return true;
+
+    MNop *ins = MNop::New();
+    current->add(ins);
+
+    return resumeAfter(ins);
 }
 
 void
@@ -4536,7 +4587,7 @@ IonBuilder::pushTypeBarrier(MInstruction *ins, types::StackTypeSet *actual,
       case JSVAL_TYPE_UNKNOWN:
       case JSVAL_TYPE_UNDEFINED:
       case JSVAL_TYPE_NULL:
-        barrier = MTypeBarrier::New(ins, observed);
+        barrier = MTypeBarrier::New(ins, cloneTypeSet(observed));
         current->add(barrier);
 
         if (type == JSVAL_TYPE_UNDEFINED)
@@ -4569,7 +4620,7 @@ IonBuilder::monitorResult(MInstruction *ins, types::TypeSet *barrier, types::Typ
     if (!types || types->unknown())
         return;
 
-    MInstruction *monitor = MMonitorTypes::New(ins, types);
+    MInstruction *monitor = MMonitorTypes::New(ins, cloneTypeSet(types));
     current->add(monitor);
 }
 
@@ -5341,7 +5392,8 @@ IonBuilder::jsop_not()
 
 inline bool
 IonBuilder::TestCommonPropFunc(JSContext *cx, types::StackTypeSet *types, HandleId id,
-                               JSFunction **funcp, bool isGetter, bool *isDOM)
+                               JSFunction **funcp, bool isGetter, bool *isDOM,
+                               MDefinition **guardOut)
 {
     JSObject *found = NULL;
     JSObject *foundProto = NULL;
@@ -5484,6 +5536,12 @@ IonBuilder::TestCommonPropFunc(JSContext *cx, types::StackTypeSet *types, Handle
     MInstruction *wrapper = MConstant::New(ObjectValue(*foundProto));
     current->add(wrapper);
     wrapper = addShapeGuard(wrapper, foundProto->lastProperty(), Bailout_ShapeGuard);
+
+    // Pass the guard back so it can be an operand.
+    if (isGetter) {
+        JS_ASSERT(wrapper->isGuardShape());
+        *guardOut = wrapper;
+    }
 
     // Now we have to freeze all the property typesets to ensure there isn't a
     // lower shadowing getter or setter installed in the future.
@@ -5947,9 +6005,13 @@ IonBuilder::getPropTryCommonGetter(bool *emitted, HandleId id, types::StackTypeS
     JS_ASSERT(*emitted == false);
     JSFunction *commonGetter;
     bool isDOM;
+    MDefinition *guard;
 
-    if (!TestCommonPropFunc(cx, unaryTypes.inTypes, id, &commonGetter, true, &isDOM))
+    if (!TestCommonPropFunc(cx, unaryTypes.inTypes, id, &commonGetter, true,
+                            &isDOM, &guard))
+    {
         return false;
+    }
     if (!commonGetter)
         return true;
 
@@ -5958,11 +6020,11 @@ IonBuilder::getPropTryCommonGetter(bool *emitted, HandleId id, types::StackTypeS
 
     if (isDOM && TestShouldDOMCall(cx, unaryTypes.inTypes, getter)) {
         const JSJitInfo *jitinfo = getter->jitInfo();
-        MGetDOMProperty *get = MGetDOMProperty::New(jitinfo->op, obj, jitinfo->isInfallible);
+        MGetDOMProperty *get = MGetDOMProperty::New(jitinfo, obj, guard);
         current->add(get);
         current->push(get);
 
-        if (!resumeAfter(get))
+        if (get->isEffectful() && !resumeAfter(get))
             return false;
         if (!pushTypeBarrier(get, types, barrier))
             return false;
@@ -6107,7 +6169,7 @@ IonBuilder::jsop_setprop(HandlePropertyName name)
 
     JSFunction *commonSetter;
     bool isDOM;
-    if (!TestCommonPropFunc(cx, types, id, &commonSetter, false, &isDOM))
+    if (!TestCommonPropFunc(cx, types, id, &commonSetter, false, &isDOM, NULL))
         return false;
     if (!monitored && commonSetter) {
         RootedFunction setter(cx, commonSetter);
@@ -6520,7 +6582,7 @@ IonBuilder::jsop_instanceof()
         if (!protoObject)
             break;
 
-        MInstanceOfTyped *ins = new MInstanceOfTyped(obj, protoObject);
+        MInstanceOf *ins = new MInstanceOf(obj, protoObject);
 
         current->add(ins);
         current->push(ins);
@@ -6528,7 +6590,7 @@ IonBuilder::jsop_instanceof()
         return resumeAfter(ins);
     } while (false);
 
-    MInstanceOf *ins = new MInstanceOf(obj, rhs);
+    MCallInstanceOf *ins = new MCallInstanceOf(obj, rhs);
 
     current->add(ins);
     current->push(ins);
@@ -6560,4 +6622,17 @@ IonBuilder::addShapeGuard(MDefinition *obj, const Shape *shape, BailoutKind bail
         guard->setNotMovable();
 
     return guard;
+}
+
+const types::TypeSet *
+IonBuilder::cloneTypeSet(const types::TypeSet *types)
+{
+    if (!js_IonOptions.parallelCompilation)
+        return types;
+
+    // Clone a type set so that it can be stored into the MIR and accessed
+    // during off thread compilation. This is necessary because main thread
+    // updates to type sets can race with reads in the compiler backend, and
+    // after bug 804676 this code can be removed.
+    return types->clone(GetIonContext()->temp->lifoAlloc());
 }

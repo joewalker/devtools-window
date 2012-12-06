@@ -2834,7 +2834,7 @@ proxy_TraceObject(JSTracer *trc, RawObject obj)
              * the invariant that the wrapped object is the key in the wrapper map.
              */
             Value key = ObjectValue(*referent);
-            WrapperMap::Ptr p = obj->compartment()->crossCompartmentWrappers.lookup(key);
+            WrapperMap::Ptr p = obj->compartment()->lookupWrapper(key);
             JS_ASSERT(*p->value.unsafeGet() == ObjectValue(*obj));
         }
     }
@@ -2842,9 +2842,15 @@ proxy_TraceObject(JSTracer *trc, RawObject obj)
 
     // NB: If you add new slots here, make sure to change
     // js::NukeChromeCrossCompartmentWrappers to cope.
-    MarkCrossCompartmentSlot(trc, &obj->getReservedSlotRef(JSSLOT_PROXY_PRIVATE), "private");
+    MarkCrossCompartmentSlot(trc, obj, &obj->getReservedSlotRef(JSSLOT_PROXY_PRIVATE), "private");
     MarkSlot(trc, &obj->getReservedSlotRef(JSSLOT_PROXY_EXTRA + 0), "extra0");
-    MarkSlot(trc, &obj->getReservedSlotRef(JSSLOT_PROXY_EXTRA + 1), "extra1");
+
+    /*
+     * The GC can use the second reserved slot to link the cross compartment
+     * wrappers into a linked list, in which case we don't want to trace it.
+     */
+    if (!IsCrossCompartmentWrapper(obj))
+        MarkSlot(trc, &obj->getReservedSlotRef(JSSLOT_PROXY_EXTRA + 1), "extra1");
 }
 
 static void
@@ -2852,7 +2858,7 @@ proxy_TraceFunction(JSTracer *trc, RawObject obj)
 {
     // NB: If you add new slots here, make sure to change
     // js::NukeChromeCrossCompartmentWrappers to cope.
-    MarkCrossCompartmentSlot(trc, &GetCall(obj), "call");
+    MarkCrossCompartmentSlot(trc, obj, &GetCall(obj), "call");
     MarkSlot(trc, &GetFunctionProxyConstruct(obj), "construct");
     proxy_TraceObject(trc, obj);
 }
@@ -3147,6 +3153,7 @@ JSObject *
 js::RenewProxyObject(JSContext *cx, JSObject *obj,
                      BaseProxyHandler *handler, Value priv)
 {
+    JS_ASSERT_IF(IsCrossCompartmentWrapper(obj), IsDeadProxyObject(obj));
     JS_ASSERT(obj->getParent() == cx->global());
     JS_ASSERT(obj->getClass() == &ObjectProxyClass);
     JS_ASSERT(obj->getTaggedProto().isLazy());

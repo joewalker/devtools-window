@@ -76,6 +76,7 @@ namespace ion {
     _(InitProp)                                                             \
     _(Start)                                                                \
     _(OsrEntry)                                                             \
+    _(Nop)                                                                  \
     _(RegExp)                                                               \
     _(RegExpTest)                                                           \
     _(Lambda)                                                               \
@@ -133,8 +134,8 @@ namespace ion {
     _(Floor)                                                                \
     _(Round)                                                                \
     _(In)                                                                   \
-    _(InstanceOfTyped)                                                      \
     _(InstanceOf)                                                           \
+    _(CallInstanceOf)                                                       \
     _(InterruptCheck)                                                       \
     _(FunctionBoundary)                                                     \
     _(GetDOMProperty)                                                       \

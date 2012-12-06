@@ -331,7 +331,7 @@ nsHttpChannel::~nsHttpChannel()
 
 nsresult
 nsHttpChannel::Init(nsIURI *uri,
-                    uint8_t caps,
+                    uint32_t caps,
                     nsProxyInfo *proxyInfo,
                     uint32_t proxyResolveFlags,
                     nsIURI *proxyURI)
@@ -4294,6 +4294,11 @@ nsHttpChannel::AsyncOpen(nsIStreamListener *listener, nsISupports *context)
 
     AddCookiesToRequest();
 
+    // notify "http-on-opening-request" observers, but not if this is a redirect
+    if (!(mLoadFlags & LOAD_REPLACE)) {
+        gHttpHandler->OnOpeningRequest(this);
+    }
+
     mIsPending = true;
     mWasOpened = true;
 
@@ -4331,6 +4336,8 @@ nsHttpChannel::BeginConnect()
 
     // notify "http-on-modify-request" observers
     gHttpHandler->OnModifyRequest(this);
+
+    mRequestObserversCalled = true;
 
     // If mTimingEnabled flag is not set after OnModifyRequest() then
     // clear the already recorded AsyncOpen value for consistency.
@@ -4450,7 +4457,7 @@ nsHttpChannel::BeginConnect()
 NS_IMETHODIMP
 nsHttpChannel::SetupFallbackChannel(const char *aFallbackKey)
 {
-    ENSURE_CALLED_BEFORE_ASYNC_OPEN();
+    ENSURE_CALLED_BEFORE_CONNECT();
 
     LOG(("nsHttpChannel::SetupFallbackChannel [this=%x, key=%s]",
          this, aFallbackKey));
@@ -5332,7 +5339,7 @@ nsHttpChannel::SetCacheKey(nsISupports *key)
 
     LOG(("nsHttpChannel::SetCacheKey [this=%p key=%p]\n", this, key));
 
-    ENSURE_CALLED_BEFORE_ASYNC_OPEN();
+    ENSURE_CALLED_BEFORE_CONNECT();
 
     if (!key)
         mPostID = 0;
@@ -5581,7 +5588,7 @@ nsHttpChannel::GetApplicationCache(nsIApplicationCache **out)
 NS_IMETHODIMP
 nsHttpChannel::SetApplicationCache(nsIApplicationCache *appCache)
 {
-    ENSURE_CALLED_BEFORE_ASYNC_OPEN();
+    ENSURE_CALLED_BEFORE_CONNECT();
 
     mApplicationCache = appCache;
     return NS_OK;
@@ -5597,7 +5604,7 @@ nsHttpChannel::GetApplicationCacheForWrite(nsIApplicationCache **out)
 NS_IMETHODIMP
 nsHttpChannel::SetApplicationCacheForWrite(nsIApplicationCache *appCache)
 {
-    ENSURE_CALLED_BEFORE_ASYNC_OPEN();
+    ENSURE_CALLED_BEFORE_CONNECT();
 
     mApplicationCacheForWrite = appCache;
     return NS_OK;
@@ -5620,7 +5627,7 @@ nsHttpChannel::GetInheritApplicationCache(bool *aInherit)
 NS_IMETHODIMP
 nsHttpChannel::SetInheritApplicationCache(bool aInherit)
 {
-    ENSURE_CALLED_BEFORE_ASYNC_OPEN();
+    ENSURE_CALLED_BEFORE_CONNECT();
 
     mInheritApplicationCache = aInherit;
     return NS_OK;
@@ -5636,7 +5643,7 @@ nsHttpChannel::GetChooseApplicationCache(bool *aChoose)
 NS_IMETHODIMP
 nsHttpChannel::SetChooseApplicationCache(bool aChoose)
 {
-    ENSURE_CALLED_BEFORE_ASYNC_OPEN();
+    ENSURE_CALLED_BEFORE_CONNECT();
 
     mChooseApplicationCache = aChoose;
     return NS_OK;

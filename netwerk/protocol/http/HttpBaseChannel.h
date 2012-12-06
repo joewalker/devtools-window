@@ -62,7 +62,7 @@ public:
   HttpBaseChannel();
   virtual ~HttpBaseChannel();
 
-  virtual nsresult Init(nsIURI *aURI, uint8_t aCaps, nsProxyInfo *aProxyInfo,
+  virtual nsresult Init(nsIURI *aURI, uint32_t aCaps, nsProxyInfo *aProxyInfo,
                         uint32_t aProxyResolveFlags,
                         nsIURI *aProxyURI);
 
@@ -252,14 +252,16 @@ protected:
 
   nsresult                          mStatus;
   uint32_t                          mLoadFlags;
+  uint32_t                          mCaps;
   int16_t                           mPriority;
-  uint8_t                           mCaps;
   uint8_t                           mRedirectionLimit;
 
   uint32_t                          mApplyConversion            : 1;
   uint32_t                          mCanceled                   : 1;
   uint32_t                          mIsPending                  : 1;
   uint32_t                          mWasOpened                  : 1;
+  // if 1 all "http-on-{opening|modify|etc}-request" observers have been called
+  uint32_t                          mRequestObserversCalled     : 1;
   uint32_t                          mResponseHeadersModified    : 1;
   uint32_t                          mAllowPipelining            : 1;
   uint32_t                          mForceAllowThirdPartyCookie : 1;

@@ -402,6 +402,7 @@ DOMCI_CLASS(MozSmsCursor)
 DOMCI_CLASS(MozConnection)
 #ifdef MOZ_B2G_RIL
 DOMCI_CLASS(MozMobileConnection)
+DOMCI_CLASS(MozCellBroadcast)
 #endif
 
 DOMCI_CLASS(USSDReceivedEvent)
@@ -528,4 +529,8 @@ DOMCI_CLASS(MozTimeManager)
 
 #ifdef MOZ_WEBRTC
 DOMCI_CLASS(DataChannel)
+#endif
+
+#ifdef MOZ_AUDIO_CHANNEL_MANAGER
+DOMCI_CLASS(AudioChannelManager)
 #endif

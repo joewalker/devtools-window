@@ -233,7 +233,7 @@ JS_GetEmptyString(JSRuntime *rt)
 static void
 AssertHeapIsIdle(JSRuntime *rt)
 {
-    JS_ASSERT(rt->heapState == JSRuntime::Idle);
+    JS_ASSERT(rt->heapState == js::Idle);
 }
 
 static void
@@ -245,7 +245,7 @@ AssertHeapIsIdle(JSContext *cx)
 static void
 AssertHeapIsIdleOrIterating(JSRuntime *rt)
 {
-    JS_ASSERT(rt->heapState != JSRuntime::Collecting);
+    JS_ASSERT(rt->heapState != js::Collecting);
 }
 
 static void
@@ -786,8 +786,8 @@ JSRuntime::JSRuntime(JSUseHelperThreads useHelperThreads)
     gcDynamicHeapGrowth(false),
     gcDynamicMarkSlice(false),
     gcShouldCleanUpEverything(false),
+    gcGrayBitsValid(false),
     gcIsNeeded(0),
-    gcWeakMapList(NULL),
     gcStats(thisFromCtor()),
     gcNumber(0),
     gcStartNumber(0),
@@ -798,9 +798,13 @@ JSRuntime::JSRuntime(JSUseHelperThreads useHelperThreads)
     gcIncrementalState(gc::NO_INCREMENTAL),
     gcLastMarkSlice(false),
     gcSweepOnBackgroundThread(false),
+    gcFoundBlackGrayEdges(false),
     gcSweepingCompartments(NULL),
+    gcCompartmentGroupIndex(0),
+    gcRemainingCompartmentGroups(NULL),
+    gcCompartmentGroup(NULL),
     gcSweepPhase(0),
-    gcSweepCompartmentIndex(0),
+    gcSweepCompartment(NULL),
     gcSweepKindIndex(0),
     gcArenasAllocatedDuringSweep(NULL),
     gcInterFrameGC(0),
@@ -841,8 +845,6 @@ JSRuntime::JSRuntime(JSUseHelperThreads useHelperThreads)
     profilingScripts(false),
     alwaysPreserveCode(false),
     hadOutOfMemory(false),
-    debugScopes(NULL),
-    liveArrayBuffers(NULL),
     data(NULL),
     gcLock(NULL),
     gcHelperThread(thisFromCtor()),
@@ -885,7 +887,6 @@ JSRuntime::JSRuntime(JSUseHelperThreads useHelperThreads)
     requestedHelperThreadCount(-1)
 {
     /* Initialize infallibly first, so we can goto bad and JS_DestroyRuntime. */
-    JS_INIT_CLIST(&debuggerList);
     JS_INIT_CLIST(&onNewGlobalObjectWatchers);
 
     PodZero(&debugHooks);
@@ -940,6 +941,8 @@ JSRuntime::init(uint32_t maxbytes)
     if (!dtoaState)
         return false;
 
+    dateTimeInfo.updateTimeZoneAdjustment();
+
     if (!stackSpace.init())
         return false;
 
@@ -957,12 +960,6 @@ JSRuntime::init(uint32_t maxbytes)
     if (!evalCache.init())
         return false;
 
-    debugScopes = this->new_<DebugScopes>(this);
-    if (!debugScopes || !debugScopes->init()) {
-        js_delete(debugScopes);
-        return false;
-    }
-
     nativeStackBase = GetNativeStackBase();
     return true;
 }
@@ -972,8 +969,6 @@ JSRuntime::~JSRuntime()
 #ifdef JS_THREADSAFE
     clearOwnerThread();
 #endif
-
-    js_delete(debugScopes);
 
     /*
      * Even though all objects in the compartment are dead, we may have keep
@@ -1579,7 +1574,6 @@ JS_TransplantObject(JSContext *cx, JSObject *origobjArg, JSObject *targetArg)
     AutoMaybeTouchDeadCompartments agc(cx);
 
     JSCompartment *destination = target->compartment();
-    WrapperMap &map = destination->crossCompartmentWrappers;
     Value origv = ObjectValue(*origobj);
     JSObject *newIdentity;
 
@@ -1591,7 +1585,7 @@ JS_TransplantObject(JSContext *cx, JSObject *origobjArg, JSObject *targetArg)
         if (!origobj->swap(cx, target))
             MOZ_CRASH();
         newIdentity = origobj;
-    } else if (WrapperMap::Ptr p = map.lookup(origv)) {
+    } else if (WrapperMap::Ptr p = destination->lookupWrapper(origv)) {
         // There might already be a wrapper for the original object in
         // the new compartment. If there is, we use its identity and swap
         // in the contents of |target|.
@@ -1599,7 +1593,7 @@ JS_TransplantObject(JSContext *cx, JSObject *origobjArg, JSObject *targetArg)
 
         // When we remove origv from the wrapper map, its wrapper, newIdentity,
         // must immediately cease to be a cross-compartment wrapper. Neuter it.
-        map.remove(p);
+        destination->removeWrapper(p);
         NukeCrossCompartmentWrapper(cx, newIdentity);
 
         if (!newIdentity->swap(cx, target))
@@ -1623,7 +1617,7 @@ JS_TransplantObject(JSContext *cx, JSObject *origobjArg, JSObject *targetArg)
         JS_ASSERT(Wrapper::wrappedObject(newIdentityWrapper) == newIdentity);
         if (!origobj->swap(cx, newIdentityWrapper))
             MOZ_CRASH();
-        origobj->compartment()->crossCompartmentWrappers.put(ObjectValue(*newIdentity), origv);
+        origobj->compartment()->putWrapper(ObjectValue(*newIdentity), origv);
     }
 
     // The new identity object might be one of several things. Return it to avoid
@@ -1660,7 +1654,6 @@ js_TransplantObjectWithWrapper(JSContext *cx,
 
     JSObject *newWrapper;
     JSCompartment *destination = targetobj->compartment();
-    WrapperMap &map = destination->crossCompartmentWrappers;
 
     // |origv| is the map entry we're looking up. The map entries are going to
     // be for |origobj|, not |origwrapper|.
@@ -1668,14 +1661,14 @@ js_TransplantObjectWithWrapper(JSContext *cx,
 
     // There might already be a wrapper for the original object in the new
     // compartment.
-    if (WrapperMap::Ptr p = map.lookup(origv)) {
+    if (WrapperMap::Ptr p = destination->lookupWrapper(origv)) {
         // There is. Make the existing cross-compartment wrapper a same-
         // compartment wrapper.
         newWrapper = &p->value.toObject();
 
         // When we remove origv from the wrapper map, its wrapper, newWrapper,
         // must immediately cease to be a cross-compartment wrapper. Neuter it.
-        map.remove(p);
+        destination->removeWrapper(p);
         NukeCrossCompartmentWrapper(cx, newWrapper);
 
         if (!newWrapper->swap(cx, targetwrapper))
@@ -1715,8 +1708,8 @@ js_TransplantObjectWithWrapper(JSContext *cx,
         JS_ASSERT(Wrapper::wrappedObject(wrapperGuts) == targetobj);
         if (!origwrapper->swap(cx, wrapperGuts))
             MOZ_CRASH();
-        origwrapper->compartment()->crossCompartmentWrappers.put(ObjectValue(*targetobj),
-                                                                 ObjectValue(*origwrapper));
+        origwrapper->compartment()->putWrapper(ObjectValue(*targetobj),
+                                               ObjectValue(*origwrapper));
     }
 
     return newWrapper;
@@ -2949,9 +2942,9 @@ JS_PUBLIC_API(JSBool)
 JS_IsAboutToBeFinalized(void *thing)
 {
     gc::Cell *t = static_cast<gc::Cell *>(thing);
-    bool isMarked = IsCellMarked(&t);
+    bool isDying = IsCellAboutToBeFinalized(&t);
     JS_ASSERT(t == thing);
-    return !isMarked;
+    return isDying;
 }
 
 JS_PUBLIC_API(void)
@@ -6680,7 +6673,7 @@ JS_ClearDateCaches(JSContext *cx)
 {
     AssertHeapIsIdle(cx);
     CHECK_REQUEST(cx);
-    js_ClearDateCaches();
+    cx->runtime->dateTimeInfo.updateTimeZoneAdjustment();
 }
 
 /************************************************************************/
@@ -6880,8 +6873,8 @@ JS_ReportPendingException(JSContext *cx)
 }
 
 struct JSExceptionState {
-    JSBool throwing;
-    jsval  exception;
+    bool throwing;
+    jsval exception;
 };
 
 JS_PUBLIC_API(JSExceptionState *)
@@ -7044,6 +7037,14 @@ JS_ScheduleGC(JSContext *cx, uint32_t count)
     cx->runtime->gcNextScheduled = count;
 }
 #endif
+
+JS_PUBLIC_API(void)
+JS_SetParallelCompilationEnabled(JSContext *cx, bool enabled)
+{
+#ifdef JS_ION
+    ion::js_IonOptions.parallelCompilation = enabled;
+#endif
+}
 
 /************************************************************************/
 

@@ -29,6 +29,8 @@ public:
                              float aDevPixPerCSSPixel);
     virtual nsresult GetIntImpl(IntID aID, int32_t &aResult);
     virtual bool GetEchoPasswordImpl();
+    virtual uint32_t GetPasswordMaskDelayImpl();
+    virtual PRUnichar GetPasswordCharacterImpl();
 
 protected:
     virtual nsresult NativeGetColor(ColorID aID, nscolor &aColor);

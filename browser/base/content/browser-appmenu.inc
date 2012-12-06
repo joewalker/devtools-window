@@ -155,8 +155,8 @@
           <menuseparator id="appmenu_devtools_separator"/>
           <menuitem id="appmenu_devToolbar"
                     observes="devtoolsMenuBroadcaster_DevToolbar"/>
-          <menuitem id="appmenu_remoteWebConsole"
-                    observes="devtoolsMenuBroadcaster_RemoteWebConsole"/>
+          <menuitem id="appmenu_chromeDebugger"
+                    observes="devtoolsMenuBroadcaster_ChromeDebugger"/>
           <menuitem id="appmenu_responsiveUI"
                     observes="devtoolsMenuBroadcaster_ResponsiveUI"/>
           <menuitem id="appmenu_scratchpad"

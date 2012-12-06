@@ -646,7 +646,9 @@
                    class="chromeclass-toolbar-additional"
                    removable="false"
                    title="&socialToolbar.title;"
-                   hidden="true">
+                   hidden="true"
+                   skipintoolbarset="true"
+                   observes="socialActiveBroadcaster">
         <toolbarbutton id="social-provider-button"
                        class="toolbarbutton-1"
                        type="menu">
@@ -870,7 +872,8 @@
             tabbrowser="content"
             flex="1"
             setfocus="false"
-            tooltip="tabbrowser-tab-tooltip">
+            tooltip="tabbrowser-tab-tooltip"
+            stopwatchid="FX_TAB_CLICK_MS">
         <tab class="tabbrowser-tab" selected="true" fadein="true"/>
       </tabs>
 

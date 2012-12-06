@@ -119,7 +119,7 @@ class MacroAssembler : public MacroAssemblerSpecific
     // Emits a test of a value against all types in a TypeSet. A scratch
     // register is required.
     template <typename T>
-    void guardTypeSet(const T &address, types::TypeSet *types, Register scratch,
+    void guardTypeSet(const T &address, const types::TypeSet *types, Register scratch,
                       Label *mismatched);
 
     void loadObjShape(Register objReg, Register dest) {
@@ -143,8 +143,7 @@ class MacroAssembler : public MacroAssemblerSpecific
         branchPtr(cond, Address(scratch, BaseShape::offsetOfClass()), ImmWord(clasp), label);
     }
     void branchTestObjShape(Condition cond, Register obj, const Shape *shape, Label *label) {
-        branchPtr(Assembler::NotEqual, Address(obj, JSObject::offsetOfShape()),
-                  ImmGCPtr(shape), label);
+        branchPtr(cond, Address(obj, JSObject::offsetOfShape()), ImmGCPtr(shape), label);
     }
 
     void loadObjPrivate(Register obj, uint32_t nfixed, Register dest) {
@@ -385,7 +384,10 @@ class MacroAssembler : public MacroAssemblerSpecific
 
     template <typename T>
     void callPreBarrier(const T &address, MIRType type) {
-        JS_ASSERT(type == MIRType_Value || type == MIRType_String || type == MIRType_Object);
+        JS_ASSERT(type == MIRType_Value ||
+                  type == MIRType_String ||
+                  type == MIRType_Object ||
+                  type == MIRType_Shape);
         Label done;
 
         if (type == MIRType_Value)
@@ -395,7 +397,9 @@ class MacroAssembler : public MacroAssemblerSpecific
         computeEffectiveAddress(address, PreBarrierReg);
 
         JSCompartment *compartment = GetIonContext()->compartment;
-        IonCode *preBarrier = compartment->ionCompartment()->preBarrier();
+        IonCode *preBarrier = (type == MIRType_Shape)
+                              ? compartment->ionCompartment()->shapePreBarrier()
+                              : compartment->ionCompartment()->valuePreBarrier();
 
         call(preBarrier);
         Pop(PreBarrierReg);
@@ -653,7 +657,58 @@ class MacroAssembler : public MacroAssemblerSpecific
         movePtr(ImmWord(p->sizePointer()), temp);
         add32(Imm32(-1), Address(temp, 0));
     }
+
+    void printf(const char *output);
+    void printf(const char *output, Register value);
 };
+
+static inline Assembler::Condition
+JSOpToCondition(JSOp op)
+{
+    switch (op) {
+      case JSOP_EQ:
+      case JSOP_STRICTEQ:
+        return Assembler::Equal;
+      case JSOP_NE:
+      case JSOP_STRICTNE:
+        return Assembler::NotEqual;
+      case JSOP_LT:
+        return Assembler::LessThan;
+      case JSOP_LE:
+        return Assembler::LessThanOrEqual;
+      case JSOP_GT:
+        return Assembler::GreaterThan;
+      case JSOP_GE:
+        return Assembler::GreaterThanOrEqual;
+      default:
+        JS_NOT_REACHED("Unrecognized comparison operation");
+        return Assembler::Equal;
+    }
+}
+
+static inline Assembler::DoubleCondition
+JSOpToDoubleCondition(JSOp op)
+{
+    switch (op) {
+      case JSOP_EQ:
+      case JSOP_STRICTEQ:
+        return Assembler::DoubleEqual;
+      case JSOP_NE:
+      case JSOP_STRICTNE:
+        return Assembler::DoubleNotEqualOrUnordered;
+      case JSOP_LT:
+        return Assembler::DoubleLessThan;
+      case JSOP_LE:
+        return Assembler::DoubleLessThanOrEqual;
+      case JSOP_GT:
+        return Assembler::DoubleGreaterThan;
+      case JSOP_GE:
+        return Assembler::DoubleGreaterThanOrEqual;
+      default:
+        JS_NOT_REACHED("Unexpected comparison operation");
+        return Assembler::DoubleEqual;
+    }
+}
 
 } // namespace ion
 } // namespace js

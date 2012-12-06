@@ -775,7 +775,7 @@ Sprinter::Sprinter(JSContext *cx)
 #ifdef DEBUG
     initialized(false),
 #endif
-    base(NULL), size(0), offset(0)
+    base(NULL), size(0), offset(0), reportedOOM(false)
 { }
 
 Sprinter::~Sprinter()
@@ -971,6 +971,19 @@ Sprinter::getOffsetOf(const char *string) const
     return string - base;
 }
 
+void
+Sprinter::reportOutOfMemory() {
+    if (reportedOOM)
+        return;
+    js_ReportOutOfMemory(context);
+    reportedOOM = true;
+}
+
+bool
+Sprinter::hadOutOfMemory() const {
+    return reportedOOM;
+}
+
 ptrdiff_t
 js::Sprint(Sprinter *sp, const char *format, ...)
 {
@@ -982,7 +995,7 @@ js::Sprint(Sprinter *sp, const char *format, ...)
     bp = JS_vsmprintf(format, ap);      /* XXX vsaprintf */
     va_end(ap);
     if (!bp) {
-        JS_ReportOutOfMemory(sp->context);
+        sp->reportOutOfMemory();
         return -1;
     }
     offset = sp->put(bp);
@@ -1269,7 +1282,7 @@ js_printf(JSPrinter *jp, const char *format, ...)
         format = NULL;
     }
     if (!bp) {
-        JS_ReportOutOfMemory(jp->sprinter.context);
+        jp->sprinter.reportOutOfMemory();
         va_end(ap);
         return -1;
     }
@@ -1324,7 +1337,7 @@ UpdateDecompiledText(SprintStack *ss, jsbytecode *pc, ptrdiff_t todo)
 
         char *ntext = ss->printer->pool.newArrayUninitialized<char>(len);
         if (!ntext) {
-            js_ReportOutOfMemory(ss->sprinter.context);
+            ss->sprinter.reportOutOfMemory();
             return false;
         }
 
@@ -1344,7 +1357,7 @@ SprintDupeStr(SprintStack *ss, const char *str)
     if (nstr) {
         js_memcpy((char *) nstr, str, len);
     } else {
-        js_ReportOutOfMemory(ss->sprinter.context);
+        ss->sprinter.reportOutOfMemory();
         nstr = "";
     }
 
@@ -1370,7 +1383,7 @@ SprintOpcode(SprintStack *ss, const char *str, jsbytecode *pc,
              jsbytecode *parentpc, ptrdiff_t startOffset)
 {
     if (startOffset < 0) {
-        JS_ASSERT(ss->sprinter.context->isExceptionPending());
+        JS_ASSERT(ss->sprinter.hadOutOfMemory());
         return;
     }
     ptrdiff_t offset = ss->sprinter.getOffset();
@@ -1416,6 +1429,8 @@ static int
 ReconstructPCStack(JSContext *cx, JSScript *script, jsbytecode *pc, jsbytecode **pcstack);
 
 #define FAILED_EXPRESSION_DECOMPILER ((char *) 1)
+
+static JSBool DecompileFunction(JSPrinter *jp);
 
 /*
  * Decompile a part of expression up to the given pc. The function returns
@@ -1510,7 +1525,7 @@ PushOff(SprintStack *ss, ptrdiff_t off, JSOp op, jsbytecode *pc = NULL)
     top = ss->top;
     JS_ASSERT(top < StackDepth(ss->printer->script));
     if (top >= StackDepth(ss->printer->script)) {
-        JS_ReportOutOfMemory(ss->sprinter.context);
+        ss->sprinter.reportOutOfMemory();
         return JS_FALSE;
     }
 
@@ -1567,6 +1582,9 @@ PopOffPrec(SprintStack *ss, uint8_t prec, jsbytecode **ppc = NULL)
         ss->offsets[top] = off - 2;
         ss->sprinter.setOffset(off - 2);
         off = Sprint(&ss->sprinter, "(%s)", ss->sprinter.stringAt(off));
+        /* If allocation failed, return any safe string. */
+        if (off < 0)
+            off = 0;
         if (ss->printer->decompiledOpcodes && pc)
             ss->printer->decompiled(pc).parenthesized = true;
     } else {
@@ -1671,7 +1689,7 @@ SprintDoubleValue(Sprinter *sp, jsval v, JSOp *opp)
         ToCStringBuf cbuf;
         s = NumberToCString(sp->context, &cbuf, d);
         if (!s) {
-            JS_ReportOutOfMemory(sp->context);
+            sp->reportOutOfMemory();
             return -1;
         }
         JS_ASSERT(strcmp(s, "Infinity") &&
@@ -2980,7 +2998,7 @@ Decompile(SprintStack *ss, jsbytecode *pc, int nb)
                                         jp->strict);
                     if (!jp2)
                         return NULL;
-                    ok = js_DecompileFunction(jp2);
+                    ok = DecompileFunction(jp2);
                     if (ok && !jp2->sprinter.empty())
                         js_puts(jp, jp2->sprinter.string());
                     js_DestroyPrinter(jp2);
@@ -4937,7 +4955,7 @@ Decompile(SprintStack *ss, jsbytecode *pc, int nb)
                     bool strict = jp->script->strictModeCode;
                     str = js_DecompileToString(cx, "lambda", fun, 0,
                                                false, grouped, strict,
-                                               js_DecompileFunction);
+                                               DecompileFunction);
                     if (!str)
                         return NULL;
                 }
@@ -5495,7 +5513,7 @@ Decompile(SprintStack *ss, jsbytecode *pc, int nb)
             }
         }
 
-        if (cx->isExceptionPending()) {
+        if (ss->sprinter.hadOutOfMemory()) {
             /* OOMs while printing to a string do not immediately return. */
             return NULL;
         }
@@ -5629,8 +5647,8 @@ DecompileBody(JSPrinter *jp, JSScript *script, jsbytecode *pc)
     return DecompileCode(jp, script, pc, end - pc, 0);
 }
 
-JSBool
-js_DecompileScript(JSPrinter *jp, JSScript *script)
+static JSBool
+DecompileScript(JSPrinter *jp, JSScript *script)
 {
     return DecompileBody(jp, script, script->code);
 }
@@ -5656,24 +5674,8 @@ js_DecompileToString(JSContext *cx, const char *name, JSFunction *fun,
 
 static const char native_code_str[] = "\t[native code]\n";
 
-JSBool
-js_DecompileFunctionBody(JSPrinter *jp)
-{
-    JSScript *script;
-
-    JS_ASSERT(jp->fun);
-    JS_ASSERT(!jp->script);
-    if (jp->fun->isNative() || jp->fun->isSelfHostedBuiltin()) {
-        js_printf(jp, native_code_str);
-        return JS_TRUE;
-    }
-
-    script = jp->fun->nonLazyScript().unsafeGet();
-    return DecompileBody(jp, script, script->code);
-}
-
-JSBool
-js_DecompileFunction(JSPrinter *jp)
+static JSBool
+DecompileFunction(JSPrinter *jp)
 {
     JSContext *cx = jp->sprinter.context;
 
@@ -6376,7 +6378,8 @@ DecompileArgumentFromStack(JSContext *cx, int formalIndex, char **res)
     if (!pcStack.init(cx, script, current))
         return false;
 
-    uint32_t formalStackIndex = pcStack.depth() - GET_ARGC(current) + formalIndex;
+    int formalStackIndex = pcStack.depth() - GET_ARGC(current) + formalIndex;
+    JS_ASSERT(formalStackIndex >= 0);
     if (formalStackIndex >= pcStack.depth())
         return true;
 
@@ -7075,10 +7078,10 @@ GetPCCountJSON(JSContext *cx, const ScriptAndCounts &sac, StringBuffer &buf)
     jp->decompiledOpcodes = &decompiledOpcodes;
 
     if (fun) {
-        if (!js_DecompileFunction(jp))
+        if (!DecompileFunction(jp))
             return false;
     } else {
-        if (!js_DecompileScript(jp, script))
+        if (!DecompileScript(jp, script))
             return false;
     }
     JSString *str = js_GetPrinterOutput(jp);

@@ -18,6 +18,10 @@ XPCOMUtils.defineLazyGetter(this, "DebuggerServer", function () {
   return DebuggerServer;
 });
 
+/**
+ * Object acting as a mediator between the ProfilerController and
+ * DebuggerServer.
+ */
 function ProfilerConnection() {
   if (!DebuggerServer.initialized) {
     DebuggerServer.init();
@@ -31,6 +35,12 @@ function ProfilerConnection() {
 ProfilerConnection.prototype = {
   actor: null,
 
+  /**
+   * Connects to a debugee and executes a callback when ready.
+   *
+   * @param function aCallback
+   *        Function to be called once we're connected to the client.
+   */
   connect: function PCn_connect(aCallback) {
     let client = this.client;
 
@@ -42,11 +52,27 @@ ProfilerConnection.prototype = {
     }.bind(this));
   },
 
+  /**
+   * Sends a message to check if the profiler is currently active.
+   *
+   * @param function aCallback
+   *        Function to be called once we have a response from
+   *        the client. It will be called with a single argument
+   *        containing a response object.
+   */
   isActive: function PCn_isActive(aCallback) {
     var message = { to: this.actor, type: "isActive" };
     this.client.request(message, aCallback);
   },
 
+  /**
+   * Sends a message to start a profiler.
+   *
+   * @param function aCallback
+   *        Function to be called once the profiler is running.
+   *        It will be called with a single argument containing
+   *        a response object.
+   */
   startProfiler: function PCn_startProfiler(aCallback) {
     var message = {
       to: this.actor,
@@ -58,24 +84,50 @@ ProfilerConnection.prototype = {
     this.client.request(message, aCallback);
   },
 
+  /**
+   * Sends a message to stop a profiler.
+   *
+   * @param function aCallback
+   *        Function to be called once the profiler is idle.
+   *        It will be called with a single argument containing
+   *        a response object.
+   */
   stopProfiler: function PCn_stopProfiler(aCallback) {
     var message = { to: this.actor, type: "stopProfiler" };
     this.client.request(message, aCallback);
   },
 
+  /**
+   * Sends a message to get the generated profile data.
+   *
+   * @param function aCallback
+   *        Function to be called once we have the data.
+   *        It will be called with a single argument containing
+   *        a response object.
+   */
   getProfileData: function PCn_getProfileData(aCallback) {
     var message = { to: this.actor, type: "getProfile" };
     this.client.request(message, aCallback);
   }
 };
 
+/**
+ * Object defining the profiler controller components.
+ */
 function ProfilerController() {
-  // TODO: Check if profile has already been started (by an addon for example).
   this.profiler = new ProfilerConnection();
   this._connected = false;
 }
 
 ProfilerController.prototype = {
+  /**
+   * Connects to the client unless we're already connected.
+   *
+   * @param function aCallback
+   *        Function to be called once we're connected. If
+   *        the controller is already connected, this function
+   *        will be called immediately (synchronously).
+   */
   connect: function (aCallback) {
     if (this._connected) {
       aCallback();
@@ -87,18 +139,43 @@ ProfilerController.prototype = {
     }.bind(this));
   },
 
+  /**
+   * Checks whether the profiler is active.
+   *
+   * @param function aCallback
+   *        Function to be called with a response from the
+   *        client. It will be called with two arguments:
+   *        an error object (may be null) and a boolean
+   *        value indicating if the profiler is active or not.
+   */
   isActive: function PC_isActive(aCallback) {
     this.profiler.isActive(function onActive(aResponse) {
       aCallback(aResponse.error, aResponse.isActive);
     });
   },
 
+  /**
+   * Starts the profiler.
+   *
+   * @param function aCallback
+   *        Function to be called once the profiler is started
+   *        or we get an error. It will be called with a single
+   *        argument: an error object (may be null).
+   */
   start: function PC_start(aCallback) {
     this.profiler.startProfiler(function onStart(aResponse) {
       aCallback(aResponse.error);
     });
   },
 
+  /**
+   * Stops the profiler.
+   *
+   * @param function aCallback
+   *        Function to be called once the profiler is stopped
+   *        or we get an error. It will be called with a single
+   *        argument: an error object (may be null).
+   */
   stop: function PC_stop(aCallback) {
     this.profiler.getProfileData(function onData(aResponse) {
       let data = aResponse.profile;

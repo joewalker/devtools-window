@@ -5,6 +5,13 @@
 
 %include ../shared.inc
 
+/* Font for code */
+
+.devtools-monospace {
+  font: message-box;
+  font-family: monospace;
+}
+
 /* Toolbar and Toolbar items */
 
 .devtools-toolbar {
@@ -49,6 +56,10 @@
 
 .devtools-toolbarbutton:not([label]) {
   min-width: 32px;
+}
+
+.devtools-toolbarbutton:not([label]) > .toolbarbutton-text {
+  display: none;
 }
 
 .devtools-toolbarbutton:not([checked=true]):hover:active {
