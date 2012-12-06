@@ -317,6 +317,11 @@ DeveloperToolbar.prototype._onload = function DT_onload(aFocus)
   this.display.focusManager.addMonitoredElement(this.outputPanel._frame);
   this.display.focusManager.addMonitoredElement(this._element);
 
+  // Bind destructor to preserve context and call it when the browser begins
+  // closing.
+  this.destroy = this.destroy.bind(this);
+  Services.obs.addObserver(this.destroy, "quit-application-requested", false);
+
   this.display.onVisibilityChange.add(this.outputPanel._visibilityChanged, this.outputPanel);
   this.display.onVisibilityChange.add(this.tooltipPanel._visibilityChanged, this.tooltipPanel);
   this.display.onOutput.add(this.outputPanel._outputChanged, this.outputPanel);
@@ -437,6 +442,8 @@ DeveloperToolbar.prototype.hide = function DT_hide()
  */
 DeveloperToolbar.prototype.destroy = function DT_destroy()
 {
+  Services.obs.removeObserver(this.destroy, "quit-application-requested");
+
   let browser = this._chromeWindow.getBrowser();
 
   browser.tabContainer.removeEventListener("TabSelect", this, false);
