@@ -366,9 +366,27 @@ BrowserTabActor.prototype = {
     // as the title.
     if (!title && this._tabbrowser) {
       title = this._tabbrowser
-                  ._getTabForContentWindow(this.browser.contentWindow).label;
+                  ._getTabForContentWindow(this.contentWindow).label;
     }
     return title;
+  },
+
+  /**
+   * Getter for the tab URL.
+   * @return string
+   *         Tab URL.
+   */
+  get url() {
+    return this.browser.currentURI.spec;
+  },
+
+  /**
+   * Getter for the tab content window.
+   * @return nsIDOMWindow
+   *         Tab content window.
+   */
+  get contentWindow() {
+    return this.browser.contentWindow;
   },
 
   grip: function BTA_grip() {
@@ -380,7 +398,7 @@ BrowserTabActor.prototype = {
     let response = {
       actor: this.actorID,
       title: this.title,
-      url: this.browser.currentURI.spec
+      url: this.url,
     };
 
     // Walk over tab actors added by extensions and add them to a new ActorPool.
@@ -457,7 +475,7 @@ BrowserTabActor.prototype = {
     this._contextPool = new ActorPool(this.conn);
     this.conn.addActorPool(this._contextPool);
 
-    this.threadActor = new ThreadActor(this, this.browser.contentWindow.wrappedJSObject);
+    this.threadActor = new ThreadActor(this, this.contentWindow.wrappedJSObject);
     this._contextPool.addActor(this.threadActor);
   },
 
@@ -532,7 +550,7 @@ BrowserTabActor.prototype = {
       // The tab is already closed.
       return;
     }
-    let windowUtils = this.browser.contentWindow
+    let windowUtils = this.contentWindow
                           .QueryInterface(Ci.nsIInterfaceRequestor)
                           .getInterface(Ci.nsIDOMWindowUtils);
     windowUtils.suppressEventHandling(true);
@@ -547,7 +565,7 @@ BrowserTabActor.prototype = {
       // The tab is already closed.
       return;
     }
-    let windowUtils = this.browser.contentWindow
+    let windowUtils = this.contentWindow
                           .QueryInterface(Ci.nsIInterfaceRequestor)
                           .getInterface(Ci.nsIDOMWindowUtils);
     windowUtils.resumeTimeouts();
@@ -639,7 +657,7 @@ DebuggerProgressListener.prototype = {
 
     // Skip non-interesting states.
     if (!isWindow || !isNetwork ||
-        aProgress.DOMWindow != this._tabActor.browser.contentWindow) {
+        aProgress.DOMWindow != this._tabActor.contentWindow) {
       return;
     }
 
@@ -668,11 +686,11 @@ DebuggerProgressListener.prototype = {
         this._tabActor.threadActor.dbg.enabled = true;
       }
 
-      let window = this._tabActor.browser.contentWindow;
+      let window = this._tabActor.contentWindow;
       this._tabActor.conn.send({
         from: this._tabActor.actorID,
         type: "tabNavigated",
-        url: this._tabActor.browser.contentDocument.URL,
+        url: this._tabActor.url,
         title: this._tabActor.title,
         nativeConsoleAPI: this._tabActor.hasNativeConsoleAPI(window),
         state: "stop",

@@ -4129,6 +4129,15 @@ WebConsoleConnectionProxy.prototype = {
     this._attachTab(aResponse.tabs[aResponse.selected], aCallback);
   },
 
+  /**
+   * Attach to the tab actor.
+   *
+   * @private
+   * @param object aTab
+   *        Grip for the tab to attach to.
+   * @param function aCallback
+   *        Function to invoke when the connection is established.
+   */
   _attachTab: function WCCP__attachTab(aTab, aCallback)
   {
     this._consoleActor = aTab.consoleActor;
@@ -4161,6 +4170,13 @@ WebConsoleConnectionProxy.prototype = {
     this._attachConsole(aCallback);
   },
 
+  /**
+   * Attach to the Web Console actor.
+   *
+   * @private
+   * @param function aCallback
+   *        Function to invoke when the connection is established.
+   */
   _attachConsole: function WCCP__attachConsole(aCallback)
   {
     let listeners = ["PageError", "ConsoleAPI", "NetworkActivity",
