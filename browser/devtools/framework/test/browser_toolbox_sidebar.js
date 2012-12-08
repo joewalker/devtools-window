@@ -48,8 +48,8 @@ function test() {
 
   addTab("about:blank", function(aBrowser, aTab) {
     let target = TargetFactory.forTab(gBrowser.selectedTab);
-    let toolbox = gDevTools.openToolbox(target, "bottom", "fakeTool4242");
-    toolbox.once("fakeTool4242-ready", function(event, panel) {
+    gDevTools.showToolbox(target, toolDefinition.id).then(function(toolbox) {
+      let panel = toolbox.getPanel(toolDefinition.id);
       ok(true, "Tool open");
 
       let tabbox = panel.panelDoc.getElementById("sidebar");
@@ -85,7 +85,7 @@ function test() {
       panel.sidebar.addTab("tab3", tab3URL);
 
       panel.sidebar.show();
-    });
+    }).then(null, console.error);
   });
 
   function allTabsReady(panel) {

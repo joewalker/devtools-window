@@ -4,6 +4,10 @@
 
 this.EXPORTED_SYMBOLS = ["EventEmitter"];
 
+Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
+XPCOMUtils.defineLazyModuleGetter(this, "console",
+                                  "resource:///modules/devtools/Console.jsm");
+
 /**
  * EventEmitter.
  *
@@ -92,7 +96,15 @@ EventEmitter.prototype = {
       // event handler we're going to fire wasn't removed.
       if (originalListeners === this._eventEmitterListeners.get(aEvent) ||
           this._eventEmitterListeners.get(aEvent).some(function(l) l === listener)) {
-        listener.apply(null, arguments);
+        try {
+          listener.apply(null, arguments);
+        }
+        catch (ex) {
+          // Prevent a bad listener from interfering with the others.
+          let msg = ex + ": " + ex.stack;
+          Components.utils.reportError(msg);
+          dump(msg + "\n");
+        }
       }
     }
   },

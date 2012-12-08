@@ -7,6 +7,7 @@
 const Cu = Components.utils;
 
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/commonjs/promise/core.js");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 
 this.EXPORTED_SYMBOLS = [ "Hosts" ];
@@ -44,6 +45,8 @@ BottomHost.prototype = {
    * Create a box at the bottom of the host tab.
    */
   open: function BH_open() {
+    let deferred = Promise.defer();
+
     let gBrowser = this.hostTab.ownerDocument.defaultView.gBrowser;
     let ownerDocument = gBrowser.ownerDocument;
 
@@ -61,6 +64,8 @@ BottomHost.prototype = {
     let frameLoad = function() {
       this.frame.removeEventListener("DOMContentLoaded", frameLoad, true);
       this.emit("ready", this.frame);
+
+      deferred.resolve(this.frame);
     }.bind(this);
 
     this.frame.addEventListener("DOMContentLoaded", frameLoad, true);
@@ -69,6 +74,8 @@ BottomHost.prototype = {
     this.frame.setAttribute("src", "about:blank");
 
     focusTab(this.hostTab);
+
+    return deferred.promise;
   },
 
   /**
@@ -105,6 +112,8 @@ SidebarHost.prototype = {
    * Create a box in the sidebar of the host tab.
    */
   open: function RH_open() {
+    let deferred = Promise.defer();
+
     let gBrowser = this.hostTab.ownerDocument.defaultView.gBrowser;
     let ownerDocument = gBrowser.ownerDocument;
 
@@ -122,12 +131,16 @@ SidebarHost.prototype = {
     let frameLoad = function() {
       this.frame.removeEventListener("DOMContentLoaded", frameLoad, true);
       this.emit("ready", this.frame);
+
+      deferred.resolve(this.frame);
     }.bind(this);
 
     this.frame.addEventListener("DOMContentLoaded", frameLoad, true);
     this.frame.setAttribute("src", "about:blank");
 
     focusTab(this.hostTab);
+
+    return deferred.promise;
   },
 
   /**
@@ -159,6 +172,8 @@ WindowHost.prototype = {
    * Create a new xul window to contain the toolbox.
    */
   open: function WH_open() {
+    let deferred = Promise.defer();
+
     let flags = "chrome,centerscreen,resizable,dialog=no";
     let win = Services.ww.openWindow(null, this.WINDOW_URL, "_blank",
                                      flags, null);
@@ -167,6 +182,8 @@ WindowHost.prototype = {
       win.removeEventListener("load", frameLoad, true);
       this.frame = win.document.getElementById("toolbox-iframe");
       this.emit("ready", this.frame);
+
+      deferred.resolve(this.frame);
     }.bind(this);
 
     win.addEventListener("load", frameLoad, true);
@@ -175,6 +192,8 @@ WindowHost.prototype = {
     win.focus();
 
     this._window = win;
+
+    return deferred.promise;
   },
 
   /**

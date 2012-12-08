@@ -12,6 +12,8 @@ Cu.import("resource:///modules/devtools/gDevTools.jsm", tempScope);
 let gDevTools = tempScope.gDevTools;
 Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
 let TargetFactory = tempScope.TargetFactory;
+Components.utils.import("resource:///modules/devtools/Console.jsm", tempScope);
+let console = tempScope.console;
 
 const WEBCONSOLE_STRINGS_URI = "chrome://browser/locale/devtools/webconsole.properties";
 let WCU_l10n = new WebConsoleUtils.l10n(WEBCONSOLE_STRINGS_URI);
@@ -139,22 +141,10 @@ function findLogEntry(aString)
  */
 function openConsole(aTab, aCallback = function() { })
 {
-  function onWebConsoleOpen(aEvent, aPanel)
-  {
-    executeSoon(aCallback.bind(null, aPanel.hud));
-  }
-
   let target = TargetFactory.forTab(aTab || tab);
-  let toolbox = gDevTools.getToolboxForTarget(target);
-  if (toolbox) {
-    toolbox.once("webconsole-selected", onWebConsoleOpen);
-    toolbox.selectTool("webconsole");
-  }
-  else {
-    let target = TargetFactory.forTab(aTab || tab);
-    toolbox = gDevTools.openToolboxForTab(target, "webconsole");
-    toolbox.once("webconsole-selected", onWebConsoleOpen);
-  }
+  gDevTools.showToolbox(target, "webconsole").then(function(toolbox) {
+    aCallback(toolbox.getCurrentPanel().hud);
+  });
 }
 
 /**
@@ -321,13 +311,7 @@ function waitForSuccess(aOptions)
 function openInspector(aCallback, aTab = gBrowser.selectedTab)
 {
   let target = TargetFactory.forTab(aTab);
-  let inspector = gDevTools.getPanelForTarget("inspector", target);
-  if (inspector && inspector.isReady) {
-    aCallback(inspector);
-  } else {
-    let toolbox = gDevTools.openToolboxForTab(target, "inspector");
-    toolbox.once("inspector-ready", function _onSelect(aEvent, aPanel) {
-      aCallback(aPanel);
-    });
-  }
+  gDevTools.showToolbox(target, "inspector").then(function(toolbox) {
+    aCallback(toolbox.getCurrentPanel());
+  });
 }
