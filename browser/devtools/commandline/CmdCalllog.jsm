@@ -55,9 +55,9 @@ gcli.addCommand({
 
     let gBrowser = context.environment.chromeDocument.defaultView.gBrowser;
     let target = TargetFactory.forTab(gBrowser.selectedTab);
-    return gDevTools.showToolbox(target, "webconsole").then(function() {
-      return gcli.lookup("calllogStartReply");
-    });
+    gDevTools.showToolbox(target, "webconsole");
+
+    return gcli.lookup("calllogStartReply")
   },
 
   callDescription: function(frame) {

@@ -18,7 +18,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "Toolbox",
   "resource:///modules/devtools/Toolbox.jsm");
 XPCOMUtils.defineLazyModuleGetter(this, "TargetFactory",
   "resource:///modules/devtools/Target.jsm");
-Cu.import("resource:///modules/devtools/Console.jsm");
+Cu.import("resource://gre/modules/devtools/Console.jsm");
 
 const FORBIDDEN_IDS = new Set("toolbox", "");
 
@@ -144,12 +144,13 @@ DevTools.prototype = {
    * @param {string} toolId
    *        The id of the tool to show
    * @param {Toolbox.HostType} hostType
-   *        The type of host (bottom, top, side)
+   *        The type of host (bottom, window, side)
    *
    * @return {Toolbox} toolbox
    *        The toolbox that was opened
    */
   showToolbox: function(target, toolId, hostType) {
+    let deferred = Promise.defer();
 
     let toolbox = this._toolboxes.get(target);
     if (toolbox) {
@@ -165,31 +166,32 @@ DevTools.prototype = {
       //
       // However instead ...
 
-      let deferred = Promise.defer();
       let outstandingHostChange = false;
       let outstandingToolChange = false;
       let maybeResolve = function() {
         if (!outstandingHostChange && !outstandingToolChange) {
-          deferred.resolve(promise);
+          deferred.resolve(toolbox);
         }
       }
 
       if (hostType != null && toolbox.hostType != hostType) {
         outstandingHostChange = true;
-        toolbox.once("host-changed", maybeResolve);
+        toolbox.once("host-changed", function() {
+          outstandingHostChange = false;
+          maybeResolve();
+        });
         toolbox.hostType = hostType;
       }
 
       if (toolId != null && toolbox.currentToolId != toolId) {
         outstandingToolChange = true;
-        toolbox.once(toolId + "-selected", maybeResolve);
-        toolbox.selectTool(toolId);
+        toolbox.selectTool(toolId).then(function() {
+          outstandingToolChange = false;
+          maybeResolve();
+        });
       }
 
-      // TODO: toolbox.focus();
-
       maybeResolve();
-      return deferred.promise;
     }
     else {
       // No toolbox for target, create one
@@ -205,13 +207,27 @@ DevTools.prototype = {
         this.emit("toolbox-destroyed", target);
       }.bind(this));
 
-      return toolbox.open().then(function() {
+      toolbox.once("ready", function() {
         this.emit("toolbox-ready", toolbox);
         this._updateMenuCheckbox();
-
-        return toolbox;
       }.bind(this));
+
+      // If we were asked for a specific tool then we need to wait for the
+      // tool to be ready, otherwise we can just wait for toolbox open
+      if (toolId != null) {
+        toolbox.once(toolId + "-ready", function(event, panel) {
+          deferred.resolve(toolbox);
+        });
+        toolbox.open();
+      }
+      else {
+        toolbox.open().then(function() {
+          deferred.resolve(toolbox);
+        });
+      }
     }
+
+    return deferred.promise;
   },
 
   /**

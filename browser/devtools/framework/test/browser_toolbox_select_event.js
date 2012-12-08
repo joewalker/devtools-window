@@ -17,7 +17,9 @@ let called = {
   //jsdebugger: false,
 }
 
-function testSelect() {
+function testSelect(aToolbox) {
+  toolbox = aToolbox;
+
   info("Toolbox fired a `ready` event");
 
   toolbox.on("select", selectCB);

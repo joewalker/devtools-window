@@ -43,7 +43,6 @@ this.Toolbox = function Toolbox(target, hostType, selectedTool) {
   this._target = target;
   this._toolPanels = new Map();
 
-  this._onLoad = this._onLoad.bind(this);
   this._toolRegistered = this._toolRegistered.bind(this);
   this._toolUnregistered = this._toolUnregistered.bind(this);
   this.destroy = this.destroy.bind(this);
@@ -179,7 +178,35 @@ Toolbox.prototype = {
     let deferred = Promise.defer();
 
     this._host.once("ready", function(event, iframe) {
-      iframe.addEventListener("DOMContentLoaded", this._onLoad, true);
+      let onload = function() {
+        iframe.removeEventListener("DOMContentLoaded", onload, true);
+
+        this.isReady = true;
+
+        let closeButton = this.doc.getElementById("toolbox-close");
+        closeButton.addEventListener("command", this.destroy, true);
+
+        this._buildDockButtons();
+
+        this._buildTabs();
+        this._buildButtons(this.frame);
+
+        /*
+        // We'd like to resolve only when select is done, but that breaks tests
+        // that wait for events which fire after after open has completed
+
+        return this.selectTool(this._defaultToolId).then(function(panel) {
+          this.emit("ready");
+          deferred.resolve();
+        }.bind(this));
+        */
+
+        this.selectTool(this._defaultToolId);
+
+        this.emit("ready");
+      }.bind(this);
+
+      iframe.addEventListener("DOMContentLoaded", onload, true);
       iframe.setAttribute("src", this._URL);
     }.bind(this));
 
@@ -220,26 +247,6 @@ Toolbox.prototype = {
 
       dockBox.appendChild(button);
     }
-  },
-
-  /**
-   * Onload handler for the toolbox's iframe
-   */
-  _onLoad: function TBOX_onLoad() {
-    this.frame.removeEventListener("DOMContentLoaded", this._onLoad, true);
-    this.isReady = true;
-
-    let closeButton = this.doc.getElementById("toolbox-close");
-    closeButton.addEventListener("command", this.destroy, true);
-
-    this._buildDockButtons();
-
-    this._buildTabs();
-    this._buildButtons(this.frame);
-
-    this.selectTool(this._defaultToolId);
-
-    this.emit("ready");
   },
 
   /**

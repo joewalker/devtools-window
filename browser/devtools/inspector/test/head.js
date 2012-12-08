@@ -8,6 +8,8 @@ Cu.import("resource:///modules/devtools/LayoutHelpers.jsm", tempScope);
 let LayoutHelpers = tempScope.LayoutHelpers;
 Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
 let TargetFactory = tempScope.TargetFactory;
+Components.utils.import("resource:///modules/devtools/Console.jsm", tempScope);
+let console = tempScope.console;
 
 // Import the GCLI test helper
 let testDir = gTestPath.substr(0, gTestPath.lastIndexOf("/"));
@@ -18,7 +20,7 @@ function openInspector(callback)
   let target = TargetFactory.forTab(gBrowser.selectedTab);
   gDevTools.showToolbox(target, "inspector").then(function(toolbox) {
     callback(toolbox.getCurrentPanel());
-  });
+  }).then(null, console.error);
 }
 
 function getActiveInspector()

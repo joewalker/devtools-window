@@ -13,6 +13,8 @@ let CssHtmlTree = tempScope.CssHtmlTree;
 let gDevTools = tempScope.gDevTools;
 Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
 let TargetFactory = tempScope.TargetFactory;
+Components.utils.import("resource:///modules/devtools/Console.jsm", tempScope);
+let console = tempScope.console;
 
 let browser, hudId, hud, hudBox, filterBox, outputNode, cs;
 

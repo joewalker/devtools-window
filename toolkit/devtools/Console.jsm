@@ -162,7 +162,21 @@ function log(aThing) {
   if (typeof aThing == "object") {
     let reply = "";
     let type = getCtorName(aThing);
-    if (type == "Error") {
+    if (type == "Map") {
+      reply += "Map\n";
+      for (let [key, value] of aThing) {
+        reply += logProperty(key, value);
+      }
+    }
+    else if (type == "Set") {
+      let i = 0;
+      reply += "Set\n";
+      for (let value of aThing) {
+        reply += logProperty('' + i, value);
+        i++;
+      }
+    }
+    else if (type == "Error") {
       reply += "  " + aThing.message + "\n";
       reply += logProperty("stack", aThing.stack);
     }

@@ -49,8 +49,8 @@ function test() {
   addTab("about:blank", function(aBrowser, aTab) {
     let target = TargetFactory.forTab(gBrowser.selectedTab);
     gDevTools.showToolbox(target, toolDefinition.id).then(function(toolbox) {
-      let panel = toolbox.getToolPanels().get(toolDefinition.id);
-      ok(panel != null, "We have a fake panel")
+      let panel = toolbox.getPanel(toolDefinition.id);
+      ok(true, "Tool open");
 
       let tabbox = panel.panelDoc.getElementById("sidebar");
       panel.sidebar = new ToolSidebar(tabbox, panel, true);
@@ -85,7 +85,7 @@ function test() {
       panel.sidebar.addTab("tab3", tab3URL);
 
       panel.sidebar.show();
-    });
+    }).then(null, console.error);
   });
 
   function allTabsReady(panel) {

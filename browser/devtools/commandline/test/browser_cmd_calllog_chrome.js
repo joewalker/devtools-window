@@ -107,5 +107,6 @@ function testCallLogExec() {
   DeveloperToolbarTest.exec({
     typed: "calllog chromestart javascript \"({a1: function() {this.a2()},a2: function() {}});\"",
     outputMatch: /Call logging started/,
+    completed: false,
   });
 }

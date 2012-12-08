@@ -19,17 +19,20 @@ function test()
   waitForExplicitFinish();
 
   gBrowser.selectedTab = gBrowser.addTab();
+  target = TargetFactory.forTab(gBrowser.selectedTab);
+
   gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
     gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
-    target = TargetFactory.forTab(gBrowser.selectedTab);
-    gDevTools.getToolboxForTarget(target).then(testBottomHost);
+    gDevTools.showToolbox(target).then(testBottomHost, console.error);
   }, true);
 
   content.location = "data:text/html,test for opening toolbox in different hosts";
 }
 
-function testBottomHost()
+function testBottomHost(aToolbox)
 {
+  toolbox = aToolbox;
+
   checkHostType(Toolbox.HostType.BOTTOM);
 
   // test UI presence
@@ -85,7 +88,7 @@ function testToolSelect()
 function testDestroy()
 {
   toolbox.once("destroyed", function() {
-    gDevTools.getToolboxForTarget(target).then(testRememberHost);
+    gDevTools.showToolbox(target).then(testRememberHost);
   });
 
   toolbox.destroy();

@@ -75,7 +75,7 @@ function test() {
   function setupTest() {
     var target = TargetFactory.forTab(gBrowser.selectedTab);
     gDevTools.showToolbox(target, "inspector").then(function(toolbox) {
-      let inspector = toolbox.getCurrentPanel();
+      inspector = toolbox.getCurrentPanel();
       startNavigation();
     });
   }
