@@ -33,7 +33,7 @@ gcli.addCommand({
   exec: function (args, context) {
     let gBrowser = context.environment.chromeDocument.defaultView.gBrowser;
     let target = TargetFactory.forTab(gBrowser.selectedTab);
-    gDevTools.openToolboxForTab(target, "jsdebugger");
+    return gDevTools.showToolbox(target, "jsdebugger");
   }
 });
 

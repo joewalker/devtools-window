@@ -6,51 +6,30 @@ let tempScope = {};
 Cu.import("resource:///modules/devtools/Target.jsm", tempScope);
 let TargetFactory = tempScope.TargetFactory;
 
-let toolbox;
-
 function test()
 {
   waitForExplicitFinish();
 
   gBrowser.selectedTab = gBrowser.addTab();
+  let target = TargetFactory.forTab(gBrowser.selectedTab);
+
   gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
     gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
-    openToolbox();
+    gDevTools.showToolbox(target).then(testReady);
   }, true);
 
   content.location = "data:text/html,test for dynamically registering and unregistering tools";
 }
 
-function openToolbox()
-{
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
-  gDevTools.toggleToolboxForTarget(target);
-
-  toolbox = gDevTools.getToolboxForTarget(target);
-
-  ok(!toolbox.isReady, "toolbox isReady isn't set yet");
-
-  try {
-    toolbox.selectTool("webconsole");
-    ok(false, "Should throw when selectTool() called before toolbox is ready");
-  }
-  catch(error) {
-    is(error.message, "Can't select tool, wait for toolbox 'ready' event")
-  }
-
-  toolbox.once("ready", testReady);
-}
-
-function testReady()
+function testReady(toolbox)
 {
   ok(toolbox.isReady, "toolbox isReady is set");
-  cleanup();
+  cleanup(toolbox);
 }
 
-function cleanup()
+function cleanup(toolbox)
 {
   toolbox.destroy();
-  toolbox = null;
   gBrowser.removeCurrentTab();
   finish();
 }

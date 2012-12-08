@@ -70,7 +70,8 @@ function testCommands(dbg, cmd) {
 function testDbgCmd() {
   DeveloperToolbarTest.exec({
     typed: "dbg open",
-    blankOutput: true
+    blankOutput: true,
+    completed: false,
   });
 
   let target = TargetFactory.forTab(gBrowser.selectedTab);

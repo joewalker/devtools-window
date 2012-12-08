@@ -12,32 +12,27 @@ let Toolbox = temp.Toolbox;
 Cu.import("resource:///modules/devtools/Target.jsm", temp);
 let TargetFactory = temp.TargetFactory;
 
-let toolbox;
+let toolbox, target;
 
 function test()
 {
   waitForExplicitFinish();
 
   gBrowser.selectedTab = gBrowser.addTab();
+  target = TargetFactory.forTab(gBrowser.selectedTab);
+
   gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
     gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
-    openToolbox(testBottomHost);
+    gDevTools.showToolbox(target).then(testBottomHost, console.error);
   }, true);
 
   content.location = "data:text/html,test for opening toolbox in different hosts";
 }
 
-function openToolbox(callback)
+function testBottomHost(aToolbox)
 {
-  let target = TargetFactory.forTab(gBrowser.selectedTab);
-  gDevTools.toggleToolboxForTarget(target);
+  toolbox = aToolbox;
 
-  toolbox = gDevTools.getToolboxForTarget(target);
-  toolbox.once("ready", callback);
-}
-
-function testBottomHost()
-{
   checkHostType(Toolbox.HostType.BOTTOM);
 
   // test UI presence
@@ -93,7 +88,7 @@ function testToolSelect()
 function testDestroy()
 {
   toolbox.once("destroyed", function() {
-    openToolbox(testRememberHost);
+    gDevTools.showToolbox(target).then(testRememberHost);
   });
 
   toolbox.destroy();
@@ -129,7 +124,7 @@ function cleanup()
   Services.prefs.setCharPref("devtools.toolbox.host", Toolbox.HostType.BOTTOM);
 
   toolbox.destroy();
-  DevTools = Toolbox = toolbox = null;
+  DevTools = Toolbox = toolbox = target = null;
   gBrowser.removeCurrentTab();
   finish();
 }

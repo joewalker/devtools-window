@@ -243,7 +243,7 @@ DevTools.prototype = {
    * @return {Toolbox} toolbox
    *        The toolbox that was opened
    */
-  openToolbox: function DT_openToolbox(target, hostType, defaultToolId) {
+  _openToolbox: function DT_openToolbox(target, hostType, defaultToolId) {
     if (this._toolboxes.has(target)) {
       // only allow one toolbox per target
       return this._toolboxes.get(target);
@@ -281,7 +281,7 @@ DevTools.prototype = {
 
   /**
    * Open the toolbox for a specific target (not tab).
-   * FIXME: We should probably merge this function and openToolbox
+   * FIXME: We should probably merge this function and _openToolbox
    *
    * @param  {Target} target
    *         The target that the toolbox should be debugging
@@ -291,13 +291,13 @@ DevTools.prototype = {
    * @return {Toolbox} toolbox
    *         The toolbox that has been opened
    */
-  openToolboxForTab: function DT_openToolboxForTab(target, toolId) {
+  _openToolboxForTab: function DT_openToolboxForTab(target, toolId) {
     let tb = this.getToolboxForTarget(target);
 
     if (tb) {
       tb.selectTool(toolId);
     } else {
-      tb = this.openToolbox(target, null, toolId);
+      tb = this._openToolbox(target, null, toolId);
     }
     return tb;
   },
@@ -326,7 +326,7 @@ DevTools.prototype = {
     if (tb /* FIXME: && tool is showing */ ) {
       tb.destroy();
     } else {
-      this.openToolboxForTab(target, toolId);
+      this._openToolboxForTab(target, toolId);
     }
   },
 
