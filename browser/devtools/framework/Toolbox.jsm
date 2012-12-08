@@ -8,6 +8,7 @@ const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/commonjs/promise/core.js");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 Cu.import("resource:///modules/devtools/gDevTools.jsm");
 
@@ -42,7 +43,6 @@ this.Toolbox = function Toolbox(target, hostType, selectedTool) {
   this._target = target;
   this._toolPanels = new Map();
 
-  this._onLoad = this._onLoad.bind(this);
   this._toolRegistered = this._toolRegistered.bind(this);
   this._toolUnregistered = this._toolUnregistered.bind(this);
   this.destroy = this.destroy.bind(this);
@@ -106,6 +106,22 @@ Toolbox.prototype = {
   },
 
   /**
+   * Access the panel for a given tool
+   */
+  getPanel: function TBOX_getPanel(id) {
+    return this.getToolPanels().get(id);
+  },
+
+  /**
+   * This is a shortcut for getPanel(currentToolId) because it is much more
+   * likely that we're going to want to get the panel that we've just made
+   * visible
+   */
+  getCurrentPanel: function TBOX_getCurrentPanel() {
+    return this.getToolPanels().get(this.currentToolId);
+  },
+
+  /**
    * Get/alter the target of a Toolbox so we're debugging something different.
    * See Target.jsm for more details.
    * TODO: Do we allow |toolbox.target = null;| ?
@@ -159,12 +175,48 @@ Toolbox.prototype = {
    * Open the toolbox
    */
   open: function TBOX_open() {
+    let deferred = Promise.defer();
+
     this._host.once("ready", function(event, iframe) {
-      iframe.addEventListener("DOMContentLoaded", this._onLoad, true);
+      let onload = function() {
+        iframe.removeEventListener("DOMContentLoaded", onload, true);
+
+        this.isReady = true;
+
+        let closeButton = this.doc.getElementById("toolbox-close");
+        closeButton.addEventListener("command", this.destroy, true);
+
+        this._buildDockButtons();
+
+        this._buildTabs();
+        this._buildButtons(this.frame);
+
+        /*
+        // We'd like to resolve only when select is done, but that breaks tests
+        // that wait for events which fire after after open has completed
+
+        return this.selectTool(this._defaultToolId).then(function(panel) {
+          this.emit("ready");
+          deferred.resolve();
+        }.bind(this));
+        */
+
+        this.selectTool(this._defaultToolId);
+
+        this.emit("ready");
+      }.bind(this);
+
+      iframe.addEventListener("DOMContentLoaded", onload, true);
       iframe.setAttribute("src", this._URL);
     }.bind(this));
 
+    this.once("ready", function() {
+      deferred.resolve();
+    });
+
     this._host.open();
+
+    return deferred.promise;
   },
 
   /**
@@ -195,26 +247,6 @@ Toolbox.prototype = {
 
       dockBox.appendChild(button);
     }
-  },
-
-  /**
-   * Onload handler for the toolbox's iframe
-   */
-  _onLoad: function TBOX_onLoad() {
-    this.frame.removeEventListener("DOMContentLoaded", this._onLoad, true);
-    this.isReady = true;
-
-    let closeButton = this.doc.getElementById("toolbox-close");
-    closeButton.addEventListener("command", this.destroy, true);
-
-    this._buildDockButtons();
-
-    this._buildTabs();
-    this._buildButtons(this.frame);
-
-    this.selectTool(this._defaultToolId);
-
-    this.emit("ready");
   },
 
   /**
@@ -292,6 +324,8 @@ Toolbox.prototype = {
    *        The id of the tool to switch to
    */
   selectTool: function TBOX_selectTool(id) {
+    let deferred = Promise.defer();
+
     if (!this.isReady) {
       throw new Error("Can't select tool, wait for toolbox 'ready' event");
     }
@@ -340,6 +374,7 @@ Toolbox.prototype = {
           this.emit("select", id);
           this.emit(id + "-selected", panel);
           gDevTools.emit(id + "-ready", this, panel);
+          deferred.resolve(panel);
         }.bind(this);
 
         if (panel.isReady) {
@@ -357,12 +392,15 @@ Toolbox.prototype = {
       if (panel) {
         this.emit("select", id);
         this.emit(id + "-selected", panel);
+        deferred.resolve(panel);
       }
     }
 
     Services.prefs.setCharPref(this._prefs.LAST_TOOL, id);
 
     this._currentToolId = id;
+
+    return deferred.promise;
   },
 
   /**
