@@ -194,20 +194,12 @@ Toolbox.prototype = {
     return this._target;
   },
 
-  set target(value) {
-    this._target = value;
-  },
-
   /**
    * Get/alter the host of a Toolbox, i.e. is it in browser or in a separate
    * tab. See HostType for more details.
    */
   get hostType() {
     return this._host.type;
-  },
-
-  set hostType(value) {
-    this._switchToHost(value);
   },
 
   /**
@@ -241,7 +233,7 @@ Toolbox.prototype = {
   open: function TBOX_open() {
     let deferred = Promise.defer();
 
-    this._host.once("ready", function(event, iframe) {
+    this._host.open().then(function(iframe) {
       let onload = function() {
         iframe.removeEventListener("DOMContentLoaded", onload, true);
 
@@ -268,17 +260,12 @@ Toolbox.prototype = {
         this.selectTool(this._defaultToolId);
 
         this.emit("ready");
+        deferred.resolve();
       }.bind(this);
 
       iframe.addEventListener("DOMContentLoaded", onload, true);
       iframe.setAttribute("src", this._URL);
     }.bind(this));
-
-    this.once("ready", function() {
-      deferred.resolve();
-    });
-
-    this._host.open();
 
     return deferred.promise;
   },
@@ -306,7 +293,7 @@ Toolbox.prototype = {
       button.id = "toolbox-dock-" + position;
       button.className = "toolbox-dock-button";
       button.addEventListener("command", function(position) {
-        this.hostType = position;
+        this.switchHost(position);
       }.bind(this, position));
 
       dockBox.appendChild(button);
@@ -496,16 +483,15 @@ Toolbox.prototype = {
    * @param {string} hostType
    *        The host type of the new host object
    */
-  _switchToHost: function TBOX_switchToHost(hostType) {
+  switchHost: function TBOX_switchHost(hostType) {
     if (hostType == this._host.type) {
       return;
     }
 
     let newHost = this._createHost(hostType);
-
-    newHost.once("ready", function(event, iframe) {
+    return newHost.open().then(function(iframe) {
       // change toolbox document's parent to the new host
-      iframe.QueryInterface(Components.interfaces.nsIFrameLoaderOwner);
+      iframe.QueryInterface(Ci.nsIFrameLoaderOwner);
       iframe.swapFrameLoaders(this.frame);
 
       this._host.off("window-closed", this.destroy);
@@ -519,8 +505,6 @@ Toolbox.prototype = {
 
       this.emit("host-changed");
     }.bind(this));
-
-    newHost.open();
   },
 
   /**

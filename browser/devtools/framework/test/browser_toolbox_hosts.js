@@ -23,7 +23,9 @@ function test()
 
   gBrowser.selectedBrowser.addEventListener("load", function onLoad(evt) {
     gBrowser.selectedBrowser.removeEventListener(evt.type, onLoad, true);
-    gDevTools.showToolbox(target).then(testBottomHost, console.error);
+    gDevTools.showToolbox(target)
+             .then(testBottomHost, console.error)
+             .then(null, console.error);
   }, true);
 
   content.location = "data:text/html,test for opening toolbox in different hosts";
@@ -41,8 +43,7 @@ function testBottomHost(aToolbox)
 
   checkToolboxLoaded(iframe);
 
-  toolbox.once("host-changed", testSidebarHost);
-  toolbox.hostType = Toolbox.HostType.SIDE;
+  toolbox.switchHost(Toolbox.HostType.SIDE).then(testSidebarHost);
 }
 
 function testSidebarHost()
@@ -58,8 +59,7 @@ function testSidebarHost()
 
   checkToolboxLoaded(iframe);
 
-  toolbox.once("host-changed", testWindowHost);
-  toolbox.hostType = Toolbox.HostType.WINDOW;
+  toolbox.switchHost(Toolbox.HostType.WINDOW).then(testWindowHost);
 }
 
 function testWindowHost()

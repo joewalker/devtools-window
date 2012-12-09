@@ -153,44 +153,18 @@ DevTools.prototype = {
 
     let toolbox = this._toolboxes.get(target);
     if (toolbox) {
-      // Toolbox exists for target, we just need to point it in the right place
-
-      // This would be simple-simple if we had a toolbox.switchHost() and
-      // toolbox.showTool() which both returned promises:
-      //
-      // let outstanding = [ toolbox.switchHost(), toolbox.showTool() ];
-      // return Promise.all(outstanding).then(function() {
-      //   return toolbox;
-      // });
-      //
-      // However instead ...
-
-      let outstandingHostChange = false;
-      let outstandingToolChange = false;
-      let maybeResolve = function() {
-        if (!outstandingHostChange && !outstandingToolChange) {
-          deferred.resolve(toolbox);
-        }
-      }
+      let outstanding = [ ];
 
       if (hostType != null && toolbox.hostType != hostType) {
-        outstandingHostChange = true;
-        toolbox.once("host-changed", function() {
-          outstandingHostChange = false;
-          maybeResolve();
-        });
-        toolbox.hostType = hostType;
+        outstanding.push(toolbox.switchHost(hostType));
       }
-
       if (toolId != null && toolbox.currentToolId != toolId) {
-        outstandingToolChange = true;
-        toolbox.selectTool(toolId).then(function() {
-          outstandingToolChange = false;
-          maybeResolve();
-        });
+        outstanding.push(toolbox.selectTool(toolId));
       }
 
-      maybeResolve();
+      return Promise.all(outstanding).then(function() {
+        return toolbox;
+      });
     }
     else {
       // No toolbox for target, create one
