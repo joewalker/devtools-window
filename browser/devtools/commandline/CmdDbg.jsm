@@ -47,11 +47,7 @@ gcli.addCommand({
   exec: function (args, context) {
     let gBrowser = context.environment.chromeDocument.defaultView.gBrowser;
     let target = TargetFactory.forTab(gBrowser.selectedTab);
-    let dbg = gDevTools.getPanelForTarget("jsdebugger", target);
-
-    if (dbg /* FIXME: and debugger panel is currently active */) {
-      gDevTools.closeToolbox(target);
-    }
+    return gDevTools.closeToolbox(target);
   }
 });
 

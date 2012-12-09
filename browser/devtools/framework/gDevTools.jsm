@@ -276,7 +276,7 @@ DevTools.prototype = {
     if (toolbox == null) {
       return;
     }
-    toolbox.destroy();
+    return toolbox.destroy();
   },
 
   /**

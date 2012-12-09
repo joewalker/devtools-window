@@ -6,15 +6,15 @@
 
 this.EXPORTED_SYMBOLS = [ "WebConsolePanel" ];
 
-const Cu = Components.utils;
-const Ci = Components.interfaces;
+const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/commonjs/promise/core.js");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "HUDService",
-  "resource:///modules/HUDService.jsm");
+                                  "resource:///modules/HUDService.jsm");
 
 /**
  * A DevToolPanel that controls the Web Console.
@@ -50,6 +50,12 @@ WebConsolePanel.prototype = {
 
   destroy: function WCP_destroy()
   {
+    if (this.destroyer) {
+      return this.destroyer.promise;
+    }
+
+    this.destroyer = Promise.defer();
+
     let hudId = this.hud.hudId;
 
     let onClose = function _onWebConsoleClose(aSubject)
@@ -57,12 +63,16 @@ WebConsolePanel.prototype = {
       aSubject.QueryInterface(Ci.nsISupportsString);
       if (hudId == aSubject.data) {
         Services.obs.removeObserver(onClose, "web-console-destroyed");
-        this.emit("destroyed");
+
+        // this.emit("destroyed");
+        this.destroyer.resolve(null);
       }
     }.bind(this);
 
     Services.obs.addObserver(onClose, "web-console-destroyed", false);
     HUDService.deactivateHUDForContext(this.hud.tab, false);
+
+    return this.destroyer.promise;
   },
 
   setReady: function WCP_setReady()

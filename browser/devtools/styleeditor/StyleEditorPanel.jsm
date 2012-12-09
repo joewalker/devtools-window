@@ -4,15 +4,16 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const Cu = Components.utils;
+const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
 this.EXPORTED_SYMBOLS = ["StyleEditorPanel"];
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource://gre/modules/commonjs/promise/core.js");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "StyleEditorChrome",
-  "resource:///modules/devtools/StyleEditorChrome.jsm");
+                        "resource:///modules/devtools/StyleEditorChrome.jsm");
 
 this.StyleEditorPanel = function StyleEditorPanel(panelWin, toolbox) {
   new EventEmitter(this);
@@ -94,17 +95,18 @@ StyleEditorPanel.prototype = {
    * Destroy StyleEditor
    */
   destroy: function StyleEditor_destroy() {
-    if (this._destroyed) {
-      return;
-    }
-    this._destroyed = true;
+    if (!this._destroyed) {
+      this._destroyed = true;
 
-    this._target.off("will-navigate", this.reset);
-    this._target.off("navigate", this.newPage);
-    this._target.off("close", this.destroy);
-    this._target = null;
-    this._toolbox = null;
-    this._panelWin = null;
-    this._panelDoc = null;
+      this._target.off("will-navigate", this.reset);
+      this._target.off("navigate", this.newPage);
+      this._target.off("close", this.destroy);
+      this._target = null;
+      this._toolbox = null;
+      this._panelWin = null;
+      this._panelDoc = null;
+    }
+
+    return Promise.resolve(null);
   },
 }

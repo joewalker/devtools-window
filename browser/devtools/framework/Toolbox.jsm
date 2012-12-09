@@ -602,26 +602,34 @@ Toolbox.prototype = {
    * Remove all UI elements, detach from target and clear up
    */
   destroy: function TBOX_destroy() {
-    if (this._destroyed) {
-      return;
+    // If several things call destroy then we give them all the same
+    // destruction promise so we're sure to destroy only once
+    if (this._destroyer) {
+      return this._destroyer.promise;
     }
+
+    let outstanding = [];
 
     // Remote targets need to be notified that the toolbox is being torn down.
     if (this._target && this._target.isRemote) {
-      this._target.destroy();
+      outstanding.push(this._target.destroy());
     }
     this._target = null;
 
     for (let [id, panel] of this._toolPanels) {
-      panel.destroy();
+      outstanding.push(panel.destroy());
     }
 
-    this._host.destroy();
+    outstanding.push(this._host.destroy());
 
     gDevTools.off("tool-registered", this._toolRegistered);
     gDevTools.off("tool-unregistered", this._toolUnregistered);
 
-    this._destroyed = true;
-    this.emit("destroyed");
+    this._destroyer = Promise.all(outstanding);
+    this._destroyer.then(function() {
+      this.emit("destroyed");
+    }.bind(this));
+
+    return this._destroyer.promise;
   }
 };

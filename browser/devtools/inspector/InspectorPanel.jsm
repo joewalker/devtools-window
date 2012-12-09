@@ -10,6 +10,7 @@ this.EXPORTED_SYMBOLS = ["InspectorPanel"];
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
+Cu.import("resource://gre/modules/commonjs/promise/core.js");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "MarkupView",
@@ -274,10 +275,11 @@ InspectorPanel.prototype = {
    */
   destroy: function InspectorPanel__destroy() {
     if (this._destroyed) {
-      return;
+      return Promise.resolve(null);
     }
-    this.cancelLayoutChange();
     this._destroyed = true;
+
+    this.cancelLayoutChange();
 
     this._toolbox = null;
 
@@ -314,6 +316,8 @@ InspectorPanel.prototype = {
     this.lastNodemenuItem = null;
     this.nodemenu = null;
     this.highlighter = null;
+
+    return Promise.resolve(null);
   },
 
   /**

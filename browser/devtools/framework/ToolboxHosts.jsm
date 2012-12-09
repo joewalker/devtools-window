@@ -82,14 +82,15 @@ BottomHost.prototype = {
    * Destroy the bottom dock.
    */
   destroy: function BH_destroy() {
-    if (this._destroyed) {
-      return;
-    }
-    this._destroyed = true;
-    Services.prefs.setIntPref(this.heightPref, this.frame.height);
+    if (!this._destroyed) {
+      this._destroyed = true;
 
-    this._nbox.removeChild(this._splitter);
-    this._nbox.removeChild(this.frame);
+      Services.prefs.setIntPref(this.heightPref, this.frame.height);
+      this._nbox.removeChild(this._splitter);
+      this._nbox.removeChild(this.frame);
+    }
+
+    return Promise.resolve(null);
   }
 }
 
@@ -147,10 +148,15 @@ SidebarHost.prototype = {
    * Destroy the sidebar.
    */
   destroy: function RH_destroy() {
-    Services.prefs.setIntPref(this.widthPref, this.frame.width);
+    if (!this._destroyed) {
+      this._destroyed = true;
 
-    this._sidebar.removeChild(this._splitter);
-    this._sidebar.removeChild(this.frame);
+      Services.prefs.setIntPref(this.widthPref, this.frame.width);
+      this._sidebar.removeChild(this._splitter);
+      this._sidebar.removeChild(this.frame);
+    }
+
+    return Promise.resolve(null);
   }
 }
 
@@ -212,8 +218,14 @@ WindowHost.prototype = {
    * Destroy the window.
    */
   destroy: function WH_destroy() {
-    this._window.removeEventListener("unload", this._boundUnload);
-    this._window.close();
+    if (!this._destroyed) {
+      this._destroyed = true;
+
+      this._window.removeEventListener("unload", this._boundUnload);
+      this._window.close();
+    }
+
+    return Promise.resolve(null);
   }
 }
 
