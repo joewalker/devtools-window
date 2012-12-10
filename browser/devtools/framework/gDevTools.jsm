@@ -203,42 +203,16 @@ DevTools.prototype = {
   },
 
   /**
-   * Create a toolbox to debug |target| using a window displayed in |hostType|
-   * (optionally with |defaultToolId| opened)
+   * Return the toolbox for a given target.
    *
-   * @param {Target} target
-   *         The target the toolbox will debug
-   * @param {Toolbox.HostType} hostType
-   *        The type of host (bottom, top, side)
-   * @param {string} defaultToolId
-   *        The id of the initial tool to show
+   * @param  {object} target
+   *         Target value e.g. the target that owns this toolbox
    *
    * @return {Toolbox} toolbox
-   *        The toolbox that was opened
+   *         The toobox that is debugging the given target
    */
-  _openToolbox: function DT_openToolbox(target, hostType, defaultToolId) {
-    if (this._toolboxes.has(target)) {
-      // only allow one toolbox per target
-      return this._toolboxes.get(target);
-    }
-
-    let tb = new Toolbox(target, hostType, defaultToolId);
-
-    this._toolboxes.set(target, tb);
-    tb.once("destroyed", function() {
-      this._toolboxes.delete(target);
-      this._updateMenuCheckbox();
-      this.emit("toolbox-destroyed", target);
-    }.bind(this));
-
-    tb.once("ready", function() {
-      this.emit("toolbox-ready", tb);
-      this._updateMenuCheckbox();
-    }.bind(this));
-
-    tb.open();
-
-    return tb;
+  getToolboxForTarget: function DT_getToolboxForTarget(target) {
+    return this._toolboxes.get(target);
   },
 
   /**
@@ -253,86 +227,17 @@ DevTools.prototype = {
   },
 
   /**
-   * Open the toolbox for a specific target (not tab).
-   * FIXME: We should probably merge this function and _openToolbox
-   *
-   * @param  {Target} target
-   *         The target that the toolbox should be debugging
-   * @param  {String} toolId
-   *         The id of the tool to open
-   *
-   * @return {Toolbox} toolbox
-   *         The toolbox that has been opened
-   */
-  _openToolboxForTab: function DT_openToolboxForTab(target, toolId) {
-    let tb = this.getToolboxForTarget(target);
-
-    if (tb) {
-      tb.selectTool(toolId);
-    } else {
-      tb = this._openToolbox(target, null, toolId);
-    }
-    return tb;
-  },
-
-  /**
    * This function is for the benefit of command#Tools:DevToolbox in
    * browser/base/content/browser-sets.inc and should not be used outside
    * of there
    */
   toggleToolboxCommand: function(gBrowser, toolId=null) {
     let target = TargetFactory.forTab(gBrowser.selectedTab);
-    this.toggleToolboxForTarget(target, toolId);
-  },
+    let toolbox = gDevTools.getToolboxForTarget(target);
 
-  /**
-   * Toggle a toolbox for the given target.
-   *
-   * @param  {Target} target
-   *         The target the toolbox is debugging
-   * @param  {string} toolId
-   *         The id of the tool to show in the toolbox, if it's to be opened.
-   */
-  toggleToolboxForTarget: function DT_toggleToolboxForTarget(target, toolId) {
-    let tb = this.getToolboxForTarget(target);
-
-    if (tb /* FIXME: && tool is showing */ ) {
-      tb.destroy();
-    } else {
-      this._openToolboxForTab(target, toolId);
-    }
-  },
-
-  /**
-   * Return the toolbox for a given target.
-   *
-   * @param  {object} target
-   *         Target value e.g. the target that owns this toolbox
-   *
-   * @return {Toolbox} toolbox
-   *         The toobox that is debugging the given target
-   */
-  getToolboxForTarget: function DT_getToolboxForTarget(target) {
-    return this._toolboxes.get(target);
-  },
-
-  /**
-   * Return a tool panel for a given tool and target.
-   *
-   * @param  {String} toolId
-   *         The id of the tool to open.
-   * @param  {object} target
-   *         The toolbox's target.
-   *
-   * @return {ToolPanel} panel
-   *         Panel for the tool with the toolid
-   */
-  getPanelForTarget: function DT_getPanelForTarget(toolId, target) {
-    let toolbox = this.getToolboxForTarget(target);
-    if (!toolbox) {
-      return undefined;
-    }
-    return toolbox.getToolPanels().get(toolId);
+    return toolbox && (toolId == null || toolId == toolbox.currentToolId) ?
+        toolbox.destroy() :
+        gDevTools.showToolbox(target, "webconsole");
   },
 
   /**
