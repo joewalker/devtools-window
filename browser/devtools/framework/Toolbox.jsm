@@ -243,24 +243,13 @@ Toolbox.prototype = {
         closeButton.addEventListener("command", this.destroy, true);
 
         this._buildDockButtons();
-
         this._buildTabs();
         this._buildButtons(this.frame);
 
-        /*
-        // We'd like to resolve only when select is done, but that breaks tests
-        // that wait for events which fire after after open has completed
-
-        return this.selectTool(this._defaultToolId).then(function(panel) {
+        this.selectTool(this._defaultToolId).then(function(panel) {
           this.emit("ready");
           deferred.resolve();
         }.bind(this));
-        */
-
-        this.selectTool(this._defaultToolId);
-
-        this.emit("ready");
-        deferred.resolve();
       }.bind(this);
 
       iframe.addEventListener("DOMContentLoaded", onload, true);

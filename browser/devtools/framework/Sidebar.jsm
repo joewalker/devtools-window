@@ -130,7 +130,6 @@ ToolSidebar.prototype = {
     }
   },
 
-
   /**
    * Toggle sidebar's visibility state.
    */

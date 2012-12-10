@@ -40,21 +40,11 @@ function runTests(aTab) {
     "The tool is registered");
 
   let target = TargetFactory.forTab(gBrowser.selectedTab);
-
-  function onToolboxClosed(event, targetFromEvent) {
-    is(targetFromEvent, target, "'toolbox-destroyed' event fired. Correct tab value.");
-    finishUp();
-  }
-
-  gDevTools.once("toolbox-destroyed", onToolboxClosed);
-
-  executeSoon(function() {
-    gDevTools.showToolbox(target, toolId).then(function(toolbox) {
-      is(toolbox.target, target, "toolbox target is correct");
-      is(toolbox._host.hostTab, gBrowser.selectedTab, "toolbox host is correct");
-      continueTests(toolbox);
-    });
-  });
+  gDevTools.showToolbox(target, toolId).then(function(toolbox) {
+    is(toolbox.target, target, "toolbox target is correct");
+    is(toolbox._host.hostTab, gBrowser.selectedTab, "toolbox host is correct");
+    continueTests(toolbox);
+  }).then(null, console.error);
 }
 
 function continueTests(toolbox, panel) {
@@ -71,7 +61,13 @@ function continueTests(toolbox, panel) {
   is(gDevTools.getToolDefinitions().has(toolId), false,
     "The tool is no longer registered");
 
-  toolbox.destroy();
+  toolbox.destroy().then(function() {
+    let target = TargetFactory.forTab(gBrowser.selectedTab);
+    ok(gDevTools._toolboxes.get(target) == null, "gDevTools doesn't know about target");
+    ok(toolbox._target == null, "toolbox doesn't know about target.");
+
+    finishUp();
+  }).then(null, console.error);
 }
 
 function finishUp() {
