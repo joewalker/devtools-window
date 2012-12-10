@@ -417,22 +417,17 @@ Toolbox.prototype = {
 
       let boundLoad = function() {
         iframe.removeEventListener("DOMContentLoaded", boundLoad, true);
-        let panel = definition.build(iframe.contentWindow, this);
-        this._toolPanels.set(id, panel);
 
-        let panelReady = function() {
+        definition.build(iframe.contentWindow, this).then(function(panel) {
+          this._toolPanels.set(id, panel);
+
           this.emit(id + "-ready", panel);
           this.emit("select", id);
           this.emit(id + "-selected", panel);
           gDevTools.emit(id + "-ready", this, panel);
-          deferred.resolve(panel);
-        }.bind(this);
 
-        if (panel.isReady) {
-          panelReady();
-        } else {
-          panel.once("ready", panelReady);
-        }
+          deferred.resolve(panel);
+        }.bind(this));
       }.bind(this);
 
       iframe.addEventListener("DOMContentLoaded", boundLoad, true);

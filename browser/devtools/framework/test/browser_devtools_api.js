@@ -27,7 +27,7 @@ function runTests(aTab) {
     label: "someLabel",
     build: function(iframeWindow, toolbox) {
       let panel = new DevToolPanel(iframeWindow, toolbox);
-      return panel;
+      return panel.open();
     },
   };
 
@@ -99,13 +99,21 @@ function DevToolPanel(iframeWindow, toolbox) {
 
   label.appendChild(textNode);
   doc.body.appendChild(label);*/
-
-  executeSoon(function() {
-    this.setReady();
-  }.bind(this));
 }
 
 DevToolPanel.prototype = {
+  open: function() {
+    let deferred = Promise.defer();
+
+    executeSoon(function() {
+      this._isReady = true;
+      this.emit("ready");
+      deferred.resolve(this);
+    }.bind(this));
+
+    return deferred.promise;
+  },
+
   get target() this._toolbox.target,
 
   get toolbox() this._toolbox,
@@ -114,13 +122,7 @@ DevToolPanel.prototype = {
 
   _isReady: false,
 
-  setReady: function() {
-    this._isReady = true;
-    this.emit("ready");
-  },
-
-  destroy: function DTI_destroy()
-  {
-
+  destroy: function DTI_destroy() {
+    return Promise.defer(null);
   },
 };

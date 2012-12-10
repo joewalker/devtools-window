@@ -31,20 +31,25 @@ this.StyleEditorPanel = function StyleEditorPanel(panelWin, toolbox) {
 
   this._panelWin = panelWin;
   this._panelDoc = panelWin.document;
-
-  let contentWin = toolbox.target.tab.linkedBrowser.contentWindow;
-  this.setPage(contentWin);
-
-  this.isReady = true;
 }
 
 StyleEditorPanel.prototype = {
   /**
+   * open is effectively an asynchronous constructor
+   */
+  open: function StyleEditor_open() {
+    let contentWin = this._toolbox.target.tab.linkedBrowser.contentWindow;
+    this.setPage(contentWin);
+
+    this.isReady = true;
+
+    return Promise.resolve(this);
+  },
+
+  /**
    * Target getter.
    */
-  get target() {
-    return this._target;
-  },
+  get target() this._target,
 
   /**
    * Panel window getter.

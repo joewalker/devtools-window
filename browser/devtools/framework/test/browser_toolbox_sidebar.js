@@ -33,14 +33,17 @@ function test() {
     label: "FAKE TOOL!!!",
     isTargetSupported: function() true,
     build: function(iframeWindow, toolbox) {
-      let panel = {
-        target: toolbox.target,
-        toolbox: toolbox,
-        isReady: true,
-        destroy: function(){},
-        panelDoc: iframeWindow.document,
-      }
-      return panel;
+      let deferred = Promise.defer();
+      executeSoon(function() {
+        deferred.resolve({
+          target: toolbox.target,
+          toolbox: toolbox,
+          isReady: true,
+          destroy: function(){},
+          panelDoc: iframeWindow.document,
+        });
+      }.bind(this));
+      return deferred.promise;
     },
   };
 
