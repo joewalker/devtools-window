@@ -584,7 +584,7 @@ Toolbox.prototype = {
     // If several things call destroy then we give them all the same
     // destruction promise so we're sure to destroy only once
     if (this._destroyer) {
-      return this._destroyer.promise;
+      return this._destroyer;
     }
 
     let outstanding = [];
@@ -609,6 +609,6 @@ Toolbox.prototype = {
       this.emit("destroyed");
     }.bind(this));
 
-    return this._destroyer.promise;
+    return this._destroyer;
   }
 };
