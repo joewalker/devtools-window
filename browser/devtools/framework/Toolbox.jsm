@@ -98,12 +98,12 @@ Promise.all = Promise.promised(Array);
  *
  * @param {object} target
  *        The object the toolbox is debugging.
- * @param {Toolbox.HostType} hostType
- *        Type of host that will host the toolbox (e.g. sidebar, window)
  * @param {string} selectedTool
  *        Tool to select initially
+ * @param {Toolbox.HostType} hostType
+ *        Type of host that will host the toolbox (e.g. sidebar, window)
  */
-this.Toolbox = function Toolbox(target, hostType, selectedTool) {
+this.Toolbox = function Toolbox(target, selectedTool, hostType) {
   this._target = target;
   this._toolPanels = new Map();
 

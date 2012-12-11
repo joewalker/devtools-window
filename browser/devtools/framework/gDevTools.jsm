@@ -156,9 +156,7 @@ DevTools.prototype = {
     }
     else {
       // No toolbox for target, create one
-
-      // TODO: I'd like to change the order of these parameters to match
-      toolbox = new Toolbox(target, hostType, toolId);
+      toolbox = new Toolbox(target, toolId, hostType);
 
       this._toolboxes.set(target, toolbox);
 
