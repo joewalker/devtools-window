@@ -165,15 +165,13 @@ function closeConsole(aTab, aCallback = function() { })
     let panel = toolbox.getTool("inspector");
     if (panel) {
       let hudId = panel.hud.hudId;
-      panel.once("destroyed", function() {
+      toolbox.destroy(function() {
         executeSoon(aCallback.bind(null, hudId));
       });
     }
     else {
-      toolbox.once("destroyed", aCallback.bind(null, null));
+      toolbox.destroy().then(aCallback.bind(null));
     }
-
-    toolbox.destroy();
   }
   else {
     aCallback();

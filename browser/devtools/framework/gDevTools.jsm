@@ -167,21 +167,20 @@ DevTools.prototype = {
         this.emit("toolbox-destroyed", target);
       }.bind(this));
 
-      toolbox.once("ready", function() {
-        this.emit("toolbox-ready", toolbox);
-      }.bind(this));
-
       // If we were asked for a specific tool then we need to wait for the
       // tool to be ready, otherwise we can just wait for toolbox open
       if (toolId != null) {
         toolbox.once(toolId + "-ready", function(event, panel) {
           deferred.resolve(toolbox);
         });
-        toolbox.open();
+        toolbox.open().then(function() {
+          this.emit("toolbox-ready", toolbox);
+        });
       }
       else {
         toolbox.open().then(function() {
           deferred.resolve(toolbox);
+          this.emit("toolbox-ready", toolbox);
         });
       }
     }

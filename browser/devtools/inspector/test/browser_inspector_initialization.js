@@ -93,14 +93,13 @@ function _clickOnInspectMenuItem(node) {
   document.popupNode = node;
   var contentAreaContextMenu = document.getElementById("contentAreaContextMenu");
   var contextMenu = new nsContextMenu(contentAreaContextMenu, gBrowser);
-  contextMenu.inspectNode();
+  return contextMenu.inspectNode();
 }
 
 function runContextMenuTest()
 {
   salutation = doc.getElementById("salutation");
-  _clickOnInspectMenuItem(salutation);
-  gDevTools.once("inspector-ready", testInitialNodeIsSelected);
+  _clickOnInspectMenuItem(salutation).then(testInitialNodeIsSelected);
 }
 
 function testInitialNodeIsSelected() {

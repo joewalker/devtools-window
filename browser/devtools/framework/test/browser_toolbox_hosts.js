@@ -81,17 +81,14 @@ function testWindowHost()
 function testToolSelect()
 {
   // make sure we can load a tool after switching hosts
-  toolbox.once("inspector-ready", testDestroy);
-  toolbox.selectTool("inspector");
+  toolbox.selectTool("inspector").then(testDestroy);
 }
 
 function testDestroy()
 {
-  toolbox.once("destroyed", function() {
+  toolbox.destroy().then(function() {
     gDevTools.showToolbox(target).then(testRememberHost);
   });
-
-  toolbox.destroy();
 }
 
 function testRememberHost()
