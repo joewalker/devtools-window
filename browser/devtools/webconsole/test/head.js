@@ -162,7 +162,7 @@ function closeConsole(aTab, aCallback = function() { })
   let target = TargetFactory.forTab(aTab || tab);
   let toolbox = gDevTools.getToolboxForTarget(target);
   if (toolbox) {
-    let panel = toolbox.getTool("inspector");
+    let panel = toolbox.getPanel("inspector");
     if (panel) {
       let hudId = panel.hud.hudId;
       toolbox.destroy(function() {
