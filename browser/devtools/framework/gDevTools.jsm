@@ -4,7 +4,7 @@
 
 "use strict";
 
-this.EXPORTED_SYMBOLS = [ "gDevTools", "DevTools", "DevToolsXULCommands" ];
+this.EXPORTED_SYMBOLS = [ "gDevTools", "DevTools", "gDevToolsBrowser" ];
 
 const { classes: Cc, interfaces: Ci, utils: Cu } = Components;
 
@@ -31,18 +31,11 @@ this.DevTools = function DevTools() {
   // destroy() is an observer's handler so we need to preserve context.
   this.destroy = this.destroy.bind(this);
 
-  this._trackedBrowserWindows = new Set();
-
-  // Bind _updateMenuCheckbox() to preserve context.
-  this._updateMenuCheckbox = this._updateMenuCheckbox.bind(this);
-
   new EventEmitter(this);
 
   Services.obs.addObserver(this.destroy, "quit-application", false);
 
-  /**
-   * Register the set of default tools
-   */
+  // Register the set of default tools
   for (let definition of defaultTools) {
     this.registerTool(definition);
   }
@@ -80,10 +73,8 @@ DevTools.prototype = {
     }
 
     toolDefinition.killswitch = toolDefinition.killswitch ||
-      "devtools." + toolId + ".enabled";
+        "devtools." + toolId + ".enabled";
     this._tools.set(toolId, toolDefinition);
-
-    this._addToolToWindows(toolDefinition);
 
     this.emit("tool-registered", toolId);
   },
@@ -97,8 +88,6 @@ DevTools.prototype = {
    */
   unregisterTool: function DT_unregisterTool(toolId) {
     this._tools.delete(toolId);
-
-    this._removeToolFromWindows(toolId);
 
     this.emit("tool-unregistered", toolId);
   },
@@ -175,13 +164,11 @@ DevTools.prototype = {
 
       toolbox.once("destroyed", function() {
         this._toolboxes.delete(target);
-        this._updateMenuCheckbox();
         this.emit("toolbox-destroyed", target);
       }.bind(this));
 
       toolbox.once("ready", function() {
         this.emit("toolbox-ready", toolbox);
-        this._updateMenuCheckbox();
       }.bind(this));
 
       // If we were asked for a specific tool then we need to wait for the
@@ -227,6 +214,37 @@ DevTools.prototype = {
   },
 
   /**
+   * All browser windows have been closed, tidy up remaining objects.
+   */
+  destroy: function() {
+    Services.obs.removeObserver(this.destroy, "quit-application");
+
+    delete this._trackedBrowserWindows;
+    delete this._toolboxes;
+  },
+};
+
+/**
+ * gDevTools is a singleton that controls the Firefox Developer Tools.
+ *
+ * It is an instance of a DevTools class that holds a set of tools. It has the
+ * same lifetime as the browser.
+ */
+let gDevTools = new DevTools();
+this.gDevTools = gDevTools;
+
+/**
+ * gDevToolsBrowser exposes functions to connect the gDevTools instance with a
+ * Firefox instance.
+ */
+let gDevToolsBrowser = {
+  /**
+   * A record of the windows whose menus we altered, so we can undo the changes
+   * as the window is closed
+   */
+  _trackedBrowserWindows: new Set(),
+
+  /**
    * This function is for the benefit of command#Tools:DevToolbox in
    * browser/base/content/browser-sets.inc and should not be used outside
    * of there
@@ -241,17 +259,25 @@ DevTools.prototype = {
   },
 
   /**
+   * Open a tab to allow connects to a remote browser
+   */
+  openConnectScreen: function(gBrowser) {
+    gBrowser.selectedTab = gBrowser.addTab("chrome://browser/content/devtools/connect.xhtml");
+  },
+
+  /**
    * Add this DevTools's presence to a browser window's document
    *
-   * @param  {XULDocument} doc
-   *         The document to which menuitems and handlers are to be added
+   * @param {XULDocument} doc
+   *        The document to which menuitems and handlers are to be added
    */
   registerBrowserWindow: function DT_registerBrowserWindow(win) {
-    this._trackedBrowserWindows.add(win);
-    this._addAllToolsToMenu(win.document);
+    gDevToolsBrowser._trackedBrowserWindows.add(win);
+    gDevToolsBrowser._addAllToolsToMenu(win.document);
 
     let tabContainer = win.document.getElementById("tabbrowser-tabs")
-    tabContainer.addEventListener("TabSelect", this._updateMenuCheckbox, false);
+    tabContainer.addEventListener("TabSelect",
+                                  gDevToolsBrowser._updateMenuCheckbox, false);
   },
 
   /**
@@ -261,8 +287,8 @@ DevTools.prototype = {
    *        properties of the tool to add
    */
   _addToolToWindows: function DT_addToolToWindows(toolDefinition) {
-    for (let win of this._trackedBrowserWindows) {
-      this._addToolToMenu(toolDefinition, win.document);
+    for (let win of gDevToolsBrowser._trackedBrowserWindows) {
+      gDevToolsBrowser._addToolToMenu(toolDefinition, win.document);
     }
   },
 
@@ -279,8 +305,8 @@ DevTools.prototype = {
     let fragAppMenuItems = doc.createDocumentFragment();
     let fragMenuItems = doc.createDocumentFragment();
 
-    for (let [key, toolDefinition] of this._tools) {
-      let frags = this._addToolToMenu(toolDefinition, doc, true);
+    for (let [key, toolDefinition] of gDevTools._tools) {
+      let frags = gDevToolsBrowser._addToolToMenu(toolDefinition, doc, true);
 
       if (!frags) {
         return;
@@ -339,7 +365,7 @@ DevTools.prototype = {
     let cmd = doc.createElement("command");
     cmd.id = "Tools:" + id;
     cmd.setAttribute("oncommand",
-        'gDevTools.toggleToolboxCommand(gBrowser, "' + id + '");');
+        'gDevToolsBrowser.toggleToolboxCommand(gBrowser, "' + id + '");');
 
     let key = null;
     if (toolDefinition.key) {
@@ -353,7 +379,7 @@ DevTools.prototype = {
       }
 
       key.setAttribute("oncommand",
-          'gDevTools.toggleToolboxCommand(gBrowser, "' + id + '");');
+          'gDevToolsBrowser.toggleToolboxCommand(gBrowser, "' + id + '");');
       key.setAttribute("modifiers", toolDefinition.modifiers);
     }
 
@@ -409,12 +435,12 @@ DevTools.prototype = {
    * called when a toolbox is created or destroyed.
    */
   _updateMenuCheckbox: function DT_updateMenuCheckbox() {
-    for (let win of this._trackedBrowserWindows) {
+    for (let win of gDevToolsBrowser._trackedBrowserWindows) {
 
       let hasToolbox = false;
       if (TargetFactory.isKnownTab(win.gBrowser.selectedTab)) {
         let target = TargetFactory.forTab(win.gBrowser.selectedTab);
-        if (this._toolboxes.has(target)) {
+        if (gDevTools._toolboxes.has(target)) {
           hasToolbox = true;
         }
       }
@@ -435,8 +461,8 @@ DevTools.prototype = {
    *        id of the tool to remove
    */
   _removeToolFromWindows: function DT_removeToolFromWindows(toolId) {
-    for (let win of this._trackedBrowserWindows) {
-      this._removeToolFromMenu(toolId, win.document);
+    for (let win of gDevToolsBrowser._trackedBrowserWindows) {
+      gDevToolsBrowser._removeToolFromMenu(toolId, win.document);
     }
   },
 
@@ -459,13 +485,6 @@ DevTools.prototype = {
 
     let bc = doc.getElementById("devtoolsMenuBroadcaster_" + toolId);
     bc.parentNode.removeChild(bc);
-
-    /*
-    // FIXME: item is null in testing. This is the only place to use
-    // "appmenu_devToolbar" + toolId, so it seems clear that this is wrong
-    let item = doc.getElementById("appmenu_devToolbar" + toolId);
-    item.parentNode.removeChild(item);
-    */
   },
 
   /**
@@ -476,14 +495,14 @@ DevTools.prototype = {
    *         The window containing the menu entry
    */
   forgetBrowserWindow: function DT_forgetBrowserWindow(win) {
-    if (!this._tools) {
+    if (!gDevToolsBrowser._trackedBrowserWindows) {
       return;
     }
 
-    this._trackedBrowserWindows.delete(win);
+    gDevToolsBrowser._trackedBrowserWindows.delete(win);
 
     // Destroy toolboxes for closed window
-    for (let [target, toolbox] of this._toolboxes) {
+    for (let [target, toolbox] of gDevTools._toolboxes) {
       if (toolbox.frame.ownerDocument.defaultView == win) {
         toolbox.destroy();
       }
@@ -491,34 +510,29 @@ DevTools.prototype = {
 
     let tabContainer = win.document.getElementById("tabbrowser-tabs")
     tabContainer.removeEventListener("TabSelect",
-                                     this._updateMenuCheckbox, false);
+                                     gDevToolsBrowser._updateMenuCheckbox, false);
   },
 
   /**
    * All browser windows have been closed, tidy up remaining objects.
    */
   destroy: function() {
-    Services.obs.removeObserver(this.destroy, "quit-application");
-
-    delete this._trackedBrowserWindows;
-    delete this._tools;
-    delete this._toolboxes;
-  },
-};
-
-/**
- * gDevTools is a singleton that controls the Firefox Developer Tools.
- *
- * It is an instance of a DevTools class that holds a set of tools. It has the
- * same lifetime as the browser.
- */
-this.gDevTools = new DevTools();
-
-/**
- * DevToolsXULCommands exposes methods used by browser's <command>s.
- */
-this.DevToolsXULCommands = {
-  openConnectScreen: function(gBrowser) {
-    gBrowser.selectedTab = gBrowser.addTab("chrome://browser/content/devtools/connect.xhtml");
+    Services.obs.removeObserver(gDevToolsBrowser.destroy, "quit-application");
+    delete gDevToolsBrowser._trackedBrowserWindows;
   },
 }
+this.gDevToolsBrowser = gDevToolsBrowser;
+
+gDevTools.on("tool-registered", function(ev, toolId) {
+  let toolDefinition = gDevTools._tools.get(toolId);
+  gDevToolsBrowser._addToolToWindows(toolDefinition);
+});
+
+gDevTools.on("tool-unregistered", function(ev, toolId) {
+  gDevToolsBrowser._removeToolFromWindows(toolId);
+});
+
+gDevTools.on("toolbox-ready", gDevToolsBrowser._updateMenuCheckbox);
+gDevTools.on("toolbox-destroyed", gDevToolsBrowser._updateMenuCheckbox);
+
+Services.obs.addObserver(gDevToolsBrowser.destroy, "quit-application", false);
