@@ -75,10 +75,8 @@ function testDbgCmd() {
   });
 
   let target = TargetFactory.forTab(gBrowser.selectedTab);
-  let toolbox = gDevTools.getToolboxForTarget(target);
-
-  toolbox.once("jsdebugger-ready", function dbgReady() {
-    let dbg = gDevTools.getPanelForTarget("jsdebugger", target);
+  gDevTools.showToolbox(target, "jsdebugger").then(function(toolbox) {
+    let dbg = toolbox.getCurrentPanel();
     ok(dbg, "DebuggerPanel exists");
 
     function cmd(aTyped, aCallback) {
