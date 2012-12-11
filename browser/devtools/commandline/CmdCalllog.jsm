@@ -57,7 +57,7 @@ gcli.addCommand({
     let target = TargetFactory.forTab(gBrowser.selectedTab);
     gDevTools.showToolbox(target, "webconsole");
 
-    return gcli.lookup("calllogStartReply")
+    return gcli.lookup("calllogStartReply");
   },
 
   callDescription: function(frame) {

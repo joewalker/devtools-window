@@ -75,7 +75,7 @@ WebConsolePanel.prototype = {
       if (hudId == aSubject.data) {
         Services.obs.removeObserver(onClose, "web-console-destroyed");
 
-        // this.emit("destroyed");
+        this.emit("destroyed");
         this.destroyer.resolve(null);
       }
     }.bind(this);

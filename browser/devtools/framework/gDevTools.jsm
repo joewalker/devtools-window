@@ -255,7 +255,7 @@ let gDevToolsBrowser = {
 
     return toolbox && (toolId == null || toolId == toolbox.currentToolId) ?
         toolbox.destroy() :
-        gDevTools.showToolbox(target, "webconsole");
+        gDevTools.showToolbox(target, toolId);
   },
 
   /**
