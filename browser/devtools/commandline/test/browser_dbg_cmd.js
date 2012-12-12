@@ -68,11 +68,18 @@ function testCommands(dbg, cmd) {
 }
 
 function testDbgCmd() {
-  DeveloperToolbarTest.exec({
+  let output = DeveloperToolbarTest.exec({
     typed: "dbg open",
     blankOutput: true,
     completed: false,
   });
+
+  output.onChange.add(onOpenComplete);
+}
+
+function onOpenComplete(ev) {
+  let output = ev.output;
+  output.onChange.remove(onOpenComplete);
 
   let target = TargetFactory.forTab(gBrowser.selectedTab);
   gDevTools.showToolbox(target, "jsdebugger").then(function(toolbox) {
