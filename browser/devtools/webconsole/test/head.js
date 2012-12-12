@@ -162,12 +162,12 @@ function closeConsole(aTab, aCallback = function() { })
   let target = TargetFactory.forTab(aTab || tab);
   let toolbox = gDevTools.getToolboxForTarget(target);
   if (toolbox) {
-    let panel = toolbox.getPanel("inspector");
+    let panel = toolbox.getPanel("webconsole");
     if (panel) {
       let hudId = panel.hud.hudId;
-      toolbox.destroy(function() {
+      toolbox.destroy().then(function() {
         executeSoon(aCallback.bind(null, hudId));
-      });
+      }).then(null, console.error);
     }
     else {
       toolbox.destroy().then(aCallback.bind(null));

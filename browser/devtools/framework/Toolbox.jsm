@@ -598,6 +598,10 @@ Toolbox.prototype = {
       this.emit("destroyed");
     }.bind(this));
 
-    return this._destroyer;
+    return this._destroyer.then(function() {
+      // Ensure that the promise resolves to nothing, rather than an array of
+      // several nothings, which is what we get from Promise.all
+      return undefined;
+    });
   }
 };

@@ -141,16 +141,18 @@ DevTools.prototype = {
 
     let toolbox = this._toolboxes.get(target);
     if (toolbox) {
-      let outstanding = [ ];
 
-      if (hostType != null && toolbox.hostType != hostType) {
-        outstanding.push(toolbox.switchHost(hostType));
-      }
+      let promise = (hostType != null && toolbox.hostType != hostType) ?
+          toolbox.switchHost(hostType) :
+          Promise.resolve(null);
+
       if (toolId != null && toolbox.currentToolId != toolId) {
-        outstanding.push(toolbox.selectTool(toolId));
+        promise = promise.then(function() {
+          return toolbox.selectTool(toolId);
+        });
       }
 
-      return Promise.all(outstanding).then(function() {
+      return promise.then(function() {
         return toolbox;
       });
     }

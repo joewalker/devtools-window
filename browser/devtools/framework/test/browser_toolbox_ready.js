@@ -24,12 +24,24 @@ function test()
 function testReady(toolbox)
 {
   ok(toolbox.isReady, "toolbox isReady is set");
-  cleanup(toolbox);
+  testDouble(toolbox);
+}
+
+function testDouble(toolbox)
+{
+  let target = toolbox.target;
+  let toolId = toolbox.currentToolId;
+
+  gDevTools.showToolbox(target, toolId).then(function(toolbox2) {
+    is(toolbox2, toolbox, "same toolbox");
+    cleanup(toolbox);
+  });
 }
 
 function cleanup(toolbox)
 {
-  toolbox.destroy();
-  gBrowser.removeCurrentTab();
-  finish();
+  toolbox.destroy().then(function() {
+    gBrowser.removeCurrentTab();
+    finish();
+  });
 }
