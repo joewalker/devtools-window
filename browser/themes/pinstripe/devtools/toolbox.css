@@ -2,8 +2,20 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+window {
+  color: hsl(0,0%,10%);
+}
+
 #toolbox-tabs {
   margin: 0;
+}
+
+#toolbox-controls {
+  margin: 0 4px;
+}
+
+#toolbox-controls toolbarbutton:not(:last-child) {
+  margin: 0 4px;
 }
 
 #toolbox-dock-bottom {
@@ -15,7 +27,44 @@
 }
 
 #toolbox-dock-window {
-  list-style-image: url("chrome://browser/skin/devtools/dock-window.png");
+  list-style-image: url("chrome://browser/skin/devtools/undock.png");
+}
+
+#toolbox-dock-window,
+#toolbox-dock-bottom,
+#toolbox-dock-side,
+#toolbox-close {
+  opacity: 0.6;
+}
+
+#toolbox-dock-window:hover,
+#toolbox-dock-bottom:hover,
+#toolbox-dock-side:hover,
+#toolbox-close:hover {
+  opacity: 1;
+}
+
+/* Command buttons */
+
+.command-button {
+  padding: 0 8px;
+  margin: 0;
+  width: 16px;
+  height: 32px;
+}
+
+.command-button:hover {
+  background-color: hsla(206,37%,4%,.2);
+}
+
+.command-button:hover:active {
+  background-color: hsla(206,37%,4%,.4);
+}
+.command-button.active {
+  color: #f5f7fa;
+}
+.command-button.toggled {
+  background-color: hsla(206,37%,4%,.4);
 }
 
 #command-button-responsive {
@@ -66,29 +115,83 @@
 
 .devtools-tabbar {
   -moz-appearance: none;
-  background-image: url(background-noise-toolbar.png), linear-gradient(to bottom, hsl(210,11%,36%), hsl(210,11%,18%));
+  background-image: url(background-noise-toolbar.png),
+                    linear-gradient(#303840, #2d3640);
   color: hsl(210,30%,85%);
-  padding: 4px 3px 3px;
-  box-shadow: 0 -3px 0 0 rgb(20,20,20) inset, 0 -4px 0 0 rgba(0,0,0,0.8) inset;
+  border-top: 1px solid #060a0d;
+  box-shadow: 0 1px 0 hsla(204,45%,98%,.05) inset,
+              0 -1px 0 hsla(206,37%,4%,.1) inset;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
 }
 
 .devtools-tab {
   -moz-appearance: none;
-  min-width: 78px;
-  min-height: 22px;
-  text-shadow: 0 -1px 0 hsla(210,8%,5%,.45);
-  border-radius: @toolbarbuttonCornerRadius@ @toolbarbuttonCornerRadius@ 0 0;
-  color: inherit;
-  border-style: solid;
-  border-color: transparent;
-  border-width: 1px 1px 0;
-  margin: 0 5px;
-  padding: 0 10px 1px;
+  min-width: 88px;
+  height: 32px;
+  color: #b6babf;
+  font-size: 11px;
+  -moz-user-select: none;
+  margin: 0;
+}
+
+.devtools-tab > .radio-label-box {
+  padding: 0 16px;
+}
+
+.devtools-tab .radio-icon {
+  -moz-margin-end: 6px;
+  opacity: 0.6;
+}
+
+.devtools-tab:hover .radio-icon {
+  opacity: 0.8;
+}
+
+.devtools-tab:active .radio-icon,
+.devtools-tab[selected=true] .radio-icon {
+  opacity: 1;
+}
+
+.devtools-tab:hover {
+  background-image: -moz-linear-gradient(hsla(206,37%,4%,.1), hsla(206,37%,4%,.2));
+  color: #ced3d9;
+}
+.devtools-tab:hover:active {
+  background-color: hsla(206,37%,4%,.2);
+  color: #f5f7fa;
 }
 
 .devtools-tab[selected=true] {
-  border-color: hsla(210,8%,5%,.6);
-  background-color: rgb(20,20,20);
-  text-shadow: none;
-  color: white;
+  color: #f5f7fa;
+  background-image: url(tab-indicator.png),
+                    -moz-radial-gradient(center top, ellipse farthest-corner, #9fdfff, hsla(200,100%,70%,.3)),
+                    -moz-radial-gradient(center top, ellipse farthest-side, hsla(200,100%,70%,.4), hsla(200,100%,70%,0)),
+                    -moz-linear-gradient(hsla(206,37%,4%,.2), hsla(206,37%,4%,.3));
+  background-size: auto,
+                   100% 1px,
+                   100% 5px,
+                   100%;
+  background-repeat: no-repeat,
+                     no-repeat,
+                     no-repeat,
+                     repeat-x;
+  background-position: center bottom, top right, top left;
+  box-shadow: 1px -1px 0 hsla(206,37%,4%,.2) inset;
+}
+
+.devtools-tab::before {
+  content:"";
+  display: block;
+  margin: 0 -2px;
+  width: 3px;
+  min-width: 3px;
+  height: 32px;
+  background-image: -moz-linear-gradient(hsla(204,45%,98%,.05), hsla(204,45%,98%,.1)),
+                    -moz-linear-gradient(hsla(206,37%,4%,.3), hsla(206,37%,4%,.6)),
+                    -moz-linear-gradient(hsla(204,45%,98%,.05), hsla(204,45%,98%,.1));
+  background-size: 1px 32px;
+  background-repeat: no-repeat;
+  background-position: 0, 1px, 2px;
 }

@@ -8,3 +8,7 @@
   display: none;
 }
 
+#toolbox-controls toolbarbutton > .toolbarbutton-text,
+.command-button > .toolbarbutton-text {
+  display: none;
+}
