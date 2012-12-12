@@ -88,10 +88,10 @@ function onStyleEditorReady(aEvent, aPanel)
       let line = nodes[1].sourceLine;
       ok(line, "found source line");
 
-      toolbox.once("webconsole-selected", function(aEvent) {
-        info(aEvent + " event fired");
+      toolbox.selectTool("webconsole").then(function() {
+        info("webconsole selected");
 
-        toolbox.once("styleeditor-selected", function() {
+        toolbox.once("styleeditor-selected", function(aEvent) {
           info(aEvent + " event fired");
 
           checkStyleEditorForSheetAndLine(sheet, line - 1, function() {
@@ -102,8 +102,6 @@ function onStyleEditorReady(aEvent, aPanel)
 
         EventUtils.sendMouseEvent({ type: "click" }, nodes[1]);
       });
-
-      toolbox.selectTool("webconsole");
     });
   }, win);
 }

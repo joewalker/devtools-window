@@ -538,6 +538,7 @@ WebConsole.prototype = {
         gDevTools.showToolbox(target, "styleeditor").then(function(toolbox) {
           toolbox.getCurrentPanel().selectStyleSheet(style, aSourceLine);
         });
+        return;
       }
     }
     // Open view source if style editor fails.

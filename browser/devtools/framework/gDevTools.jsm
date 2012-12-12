@@ -175,13 +175,13 @@ DevTools.prototype = {
         });
         toolbox.open().then(function() {
           this.emit("toolbox-ready", toolbox);
-        });
+        }.bind(this));
       }
       else {
         toolbox.open().then(function() {
           deferred.resolve(toolbox);
           this.emit("toolbox-ready", toolbox);
-        });
+        }.bind(this));
       }
     }
 
