@@ -171,11 +171,10 @@ DevTools.prototype = {
       // tool to be ready, otherwise we can just wait for toolbox open
       if (toolId != null) {
         toolbox.once(toolId + "-ready", function(event, panel) {
-          deferred.resolve(toolbox);
-        });
-        toolbox.open().then(function() {
           this.emit("toolbox-ready", toolbox);
+          deferred.resolve(toolbox);
         }.bind(this));
+        toolbox.open();
       }
       else {
         toolbox.open().then(function() {
