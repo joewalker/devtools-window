@@ -598,7 +598,7 @@ var HeadsUpDisplayUICommands = {
   {
     var window = HUDService.currentContext();
     let target = TargetFactory.forTab(window.gBrowser.selectedTab);
-    let toolbox = gDevTools.getToolboxForTarget(target);
+    let toolbox = gDevTools.getToolbox(target);
 
     return toolbox && toolbox.currentToolId == "webconsole" ?
         toolbox.destroy() :

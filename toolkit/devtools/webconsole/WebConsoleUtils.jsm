@@ -1572,7 +1572,7 @@ this.JSTermHelpers = function JSTermHelpers(aOwner)
       try {
         let window = aOwner.chromeWindow();
         let target = TargetFactory.forTab(window.gBrowser.selectedTab);
-        let toolbox = gDevTools.getToolboxForTarget(target);
+        let toolbox = gDevTools.getToolbox(target);
 
         return toolbox == null ?
             undefined :

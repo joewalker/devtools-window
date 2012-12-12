@@ -46,7 +46,7 @@ function testCommands(dbg, cmd) {
                         });
 
                         let target = TargetFactory.forTab(gBrowser.selectedTab);
-                        ok(!gDevTools.getToolboxForTarget(target),
+                        ok(!gDevTools.getToolbox(target),
                           "Debugger was closed.");
                         finish();
                       });

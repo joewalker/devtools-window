@@ -9,7 +9,7 @@ function test() {
     gBrowser.selectedTab = tab1;
     let target1 = TargetFactory.forTab(tab1);
 
-    ok(!gDevTools.getToolboxForTarget(target1),
+    ok(!gDevTools.getToolbox(target1),
       "Shouldn't have a debugger panel for this tab yet.");
 
     gDevTools.showToolbox(target1, "jsdebugger").then(function(toolbox) {

@@ -101,7 +101,7 @@ function closeDebuggerAndFinish(aRemoteFlag, aCallback, aWindow) {
     _maybeFinish();
   }, false);
 
-  let toolbox = gDevTools.getToolboxForTarget(target);
+  let toolbox = gDevTools.getToolbox(target);
   toolbox.destroy().then(function() {
     debuggerClosed = true;
     _maybeFinish();

@@ -26,7 +26,7 @@ function openInspector(callback)
 function getActiveInspector()
 {
   let target = TargetFactory.forTab(gBrowser.selectedTab);
-  return gDevTools.getToolboxForTarget(target).getPanel("inspector");
+  return gDevTools.getToolbox(target).getPanel("inspector");
 }
 
 function isHighlighting()

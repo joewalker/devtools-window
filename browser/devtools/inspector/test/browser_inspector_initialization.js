@@ -61,7 +61,7 @@ function startInspectorTests(toolbox)
   toolbox.once("destroyed", function() {
     ok("true", "'destroyed' notification received.");
     let target = TargetFactory.forTab(gBrowser.selectedTab);
-    ok(!gDevTools.getToolboxForTarget(target), "Toolbox destroyed.");
+    ok(!gDevTools.getToolbox(target), "Toolbox destroyed.");
     executeSoon(runContextMenuTest);
   });
   toolbox.destroy();

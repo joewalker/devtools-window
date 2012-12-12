@@ -197,7 +197,7 @@ DevTools.prototype = {
    * @return {Toolbox} toolbox
    *         The toobox that is debugging the given target
    */
-  getToolboxForTarget: function DT_getToolboxForTarget(target) {
+  getToolbox: function DT_getToolbox(target) {
     return this._toolboxes.get(target);
   },
 
@@ -250,7 +250,7 @@ let gDevToolsBrowser = {
    */
   toggleToolboxCommand: function(gBrowser, toolId=null) {
     let target = TargetFactory.forTab(gBrowser.selectedTab);
-    let toolbox = gDevTools.getToolboxForTarget(target);
+    let toolbox = gDevTools.getToolbox(target);
 
     return toolbox && (toolId == null || toolId == toolbox.currentToolId) ?
         toolbox.destroy() :

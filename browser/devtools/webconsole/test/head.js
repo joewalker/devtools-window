@@ -160,7 +160,7 @@ function openConsole(aTab, aCallback = function() { })
 function closeConsole(aTab, aCallback = function() { })
 {
   let target = TargetFactory.forTab(aTab || tab);
-  let toolbox = gDevTools.getToolboxForTarget(target);
+  let toolbox = gDevTools.getToolbox(target);
   if (toolbox) {
     let panel = toolbox.getPanel("webconsole");
     if (panel) {

@@ -179,6 +179,6 @@ function getPanel(context, id) {
 
   let gBrowser = context.environment.chromeDocument.defaultView.gBrowser;
   let target = TargetFactory.forTab(gBrowser.selectedTab);
-  let toolbox = gDevTools.getToolboxForTarget(target);
+  let toolbox = gDevTools.getToolbox(target);
   return toolbox == null ? undefined : toolbox.getPanel(id);
 }

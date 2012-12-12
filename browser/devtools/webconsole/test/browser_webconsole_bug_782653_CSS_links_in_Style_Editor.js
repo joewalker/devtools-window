@@ -40,7 +40,7 @@ function testViewSource(aHud)
       is(nodes.length, 2, "correct number of css messages");
 
       let target = TargetFactory.forTab(gBrowser.selectedTab);
-      let toolbox = gDevTools.getToolboxForTarget(target);
+      let toolbox = gDevTools.getToolbox(target);
       toolbox.once("styleeditor-selected", onStyleEditorReady);
 
       EventUtils.sendMouseEvent({ type: "click" }, nodes[0]);
@@ -81,7 +81,7 @@ function onStyleEditorReady(aEvent, aPanel)
       info("first check done");
 
       let target = TargetFactory.forTab(gBrowser.selectedTab);
-      let toolbox = gDevTools.getToolboxForTarget(target);
+      let toolbox = gDevTools.getToolbox(target);
 
       let sheet = sheetForNode(nodes[1]);
       ok(sheet, "sheet found");
