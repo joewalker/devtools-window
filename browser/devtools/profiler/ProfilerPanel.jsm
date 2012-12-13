@@ -360,6 +360,10 @@ ProfilerPanel.prototype = {
       }
     }
 
+    if (this.controller) {
+      this.controller.destroy();
+    }
+
     this.isReady = null;
     this.window = null;
     this.document = null;

@@ -108,6 +108,15 @@ ProfilerConnection.prototype = {
   getProfileData: function PCn_getProfileData(aCallback) {
     var message = { to: this.actor, type: "getProfile" };
     this.client.request(message, aCallback);
+  },
+
+  /**
+   * Cleanup.
+   */
+  destroy: function PCn_destroy() {
+    this.client.close(function () {
+      this.client = null;
+    }.bind(this));
   }
 };
 
@@ -187,5 +196,13 @@ ProfilerController.prototype = {
         aCallback(aResponse.error, data);
       });
     }.bind(this));
+  },
+
+  /**
+   * Cleanup.
+   */
+  destroy: function PC_destroy(aCallback) {
+    this.profiler.destroy();
+    this.profiler = null;
   }
 };
