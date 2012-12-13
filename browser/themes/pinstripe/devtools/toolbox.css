@@ -14,7 +14,7 @@ window {
   margin: 0 4px;
 }
 
-#toolbox-controls toolbarbutton:not(:last-child) {
+#toolbox-controls > toolbarbutton:not(:last-child) {
   margin: 0 4px;
 }
 
@@ -56,14 +56,7 @@ window {
 .command-button:hover {
   background-color: hsla(206,37%,4%,.2);
 }
-
 .command-button:hover:active {
-  background-color: hsla(206,37%,4%,.4);
-}
-.command-button.active {
-  color: #f5f7fa;
-}
-.command-button.toggled {
   background-color: hsla(206,37%,4%,.4);
 }
 
@@ -121,7 +114,6 @@ window {
   border-top: 1px solid #060a0d;
   box-shadow: 0 1px 0 hsla(204,45%,98%,.05) inset,
               0 -1px 0 hsla(206,37%,4%,.1) inset;
-  height: 32px;
   min-height: 32px;
   padding: 0;
 }
@@ -129,10 +121,7 @@ window {
 .devtools-tab {
   -moz-appearance: none;
   min-width: 88px;
-  height: 32px;
   color: #b6babf;
-  font-size: 11px;
-  -moz-user-select: none;
   margin: 0;
 }
 
@@ -140,22 +129,22 @@ window {
   padding: 0 16px;
 }
 
-.devtools-tab .radio-icon {
+.devtools-tab > .radio-label-box > .radio-icon {
   -moz-margin-end: 6px;
   opacity: 0.6;
 }
 
-.devtools-tab:hover .radio-icon {
+.devtools-tab:hover > .radio-label-box > .radio-icon {
   opacity: 0.8;
 }
 
-.devtools-tab:active .radio-icon,
-.devtools-tab[selected=true] .radio-icon {
+.devtools-tab:active > .radio-label-box > .radio-icon,
+.devtools-tab[selected=true] > .radio-label-box > .radio-icon {
   opacity: 1;
 }
 
 .devtools-tab:hover {
-  background-image: -moz-linear-gradient(hsla(206,37%,4%,.1), hsla(206,37%,4%,.2));
+  background-image: linear-gradient(hsla(206,37%,4%,.1), hsla(206,37%,4%,.2));
   color: #ced3d9;
 }
 .devtools-tab:hover:active {
@@ -165,32 +154,29 @@ window {
 
 .devtools-tab[selected=true] {
   color: #f5f7fa;
-  background-image: url(tab-indicator.png),
-                    -moz-radial-gradient(center top, ellipse farthest-corner, #9fdfff, hsla(200,100%,70%,.3)),
-                    -moz-radial-gradient(center top, ellipse farthest-side, hsla(200,100%,70%,.4), hsla(200,100%,70%,0)),
-                    -moz-linear-gradient(hsla(206,37%,4%,.2), hsla(206,37%,4%,.3));
-  background-size: auto,
-                   100% 1px,
+  background-image: radial-gradient(ellipse farthest-corner at center top, #9fdfff, hsla(200,100%,70%,.3)),
+                    radial-gradient(ellipse farthest-side at center top, hsla(200,100%,70%,.4), hsla(200,100%,70%,0)),
+                    linear-gradient(hsla(206,37%,4%,.2), hsla(206,37%,4%,.3));
+  background-size: 100% 1px,
                    100% 5px,
                    100%;
   background-repeat: no-repeat,
                      no-repeat,
-                     no-repeat,
                      repeat-x;
-  background-position: center bottom, top right, top left;
+  background-position: top right, top left;
   box-shadow: 1px -1px 0 hsla(206,37%,4%,.2) inset;
 }
 
 .devtools-tab::before {
-  content:"";
+  content:" ";
   display: block;
   margin: 0 -2px;
   width: 3px;
   min-width: 3px;
   height: 32px;
-  background-image: -moz-linear-gradient(hsla(204,45%,98%,.05), hsla(204,45%,98%,.1)),
-                    -moz-linear-gradient(hsla(206,37%,4%,.3), hsla(206,37%,4%,.6)),
-                    -moz-linear-gradient(hsla(204,45%,98%,.05), hsla(204,45%,98%,.1));
+  background-image: linear-gradient(hsla(204,45%,98%,.05), hsla(204,45%,98%,.1)),
+                    linear-gradient(hsla(206,37%,4%,.3), hsla(206,37%,4%,.6)),
+                    linear-gradient(hsla(204,45%,98%,.05), hsla(204,45%,98%,.1));
   background-size: 1px 32px;
   background-repeat: no-repeat;
   background-position: 0, 1px, 2px;
