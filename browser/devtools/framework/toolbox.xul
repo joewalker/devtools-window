@@ -14,7 +14,7 @@
   <notificationbox id="toolbox-notificationbox" flex="1">
     <toolbar class="devtools-tabbar">
       <hbox id="toolbox-controls">
-        <toolbarbutton id="toolbox-close" class="devtools-closebutton"></toolbarbutton>
+        <toolbarbutton id="toolbox-close"></toolbarbutton>
         <hbox id="toolbox-dock-buttons"/>
       </hbox>
       <radiogroup id="toolbox-tabs" orient="horizontal">

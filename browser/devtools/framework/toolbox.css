@@ -9,6 +9,7 @@
 }
 
 #toolbox-controls > toolbarbutton > .toolbarbutton-text,
+#toolbox-dock-buttons > toolbarbutton > .toolbarbutton-text,
 .command-button > .toolbarbutton-text {
   display: none;
 }

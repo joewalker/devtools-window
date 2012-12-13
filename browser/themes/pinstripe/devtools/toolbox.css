@@ -14,8 +14,11 @@ window {
   margin: 0 4px;
 }
 
-#toolbox-controls > toolbarbutton:not(:last-child) {
+#toolbox-controls > toolbarbutton,
+#toolbox-dock-buttons > toolbarbutton {
   margin: 0 4px;
+  min-width: 16px;
+  width: 16px;
 }
 
 #toolbox-dock-bottom {
@@ -28,6 +31,10 @@ window {
 
 #toolbox-dock-window {
   list-style-image: url("chrome://browser/skin/devtools/undock.png");
+}
+
+#toolbox-close {
+  list-style-image: url("chrome://browser/skin/devtools/close.png");
 }
 
 #toolbox-dock-window,
@@ -168,7 +175,7 @@ window {
 }
 
 .devtools-tab::before {
-  content:" ";
+  content: "";
   display: block;
   margin: 0 -2px;
   width: 3px;
