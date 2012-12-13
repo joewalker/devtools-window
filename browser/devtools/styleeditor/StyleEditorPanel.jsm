@@ -38,9 +38,8 @@ StyleEditorPanel.prototype = {
    * open is effectively an asynchronous constructor
    */
   open: function StyleEditor_open() {
-    let contentWin = this._toolbox.target.tab.linkedBrowser.contentWindow;
+    let contentWin = this._toolbox.target.window;
     this.setPage(contentWin);
-
     this.isReady = true;
 
     return Promise.resolve(this);
