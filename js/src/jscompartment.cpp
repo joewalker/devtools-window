@@ -47,10 +47,10 @@ JSCompartment::JSCompartment(JSRuntime *rt)
   : rt(rt),
     principals(NULL),
     global_(NULL),
+    enterCompartmentDepth(0),
 #ifdef JSGC_GENERATIONAL
     gcStoreBuffer(&gcNursery),
 #endif
-    needsBarrier_(false),
     ionUsingBarriers_(false),
     gcScheduled(false),
     gcState(NoGC),
@@ -75,6 +75,7 @@ JSCompartment::JSCompartment(JSRuntime *rt)
     gcIncomingGrayPointers(NULL),
     gcLiveArrayBuffers(NULL),
     gcWeakMapList(NULL),
+    gcGrayRoots(),
     gcMallocBytes(0),
     debugModeBits(rt->debugMode ? DebugFromC : 0),
     watchpointMap(NULL),
@@ -85,6 +86,10 @@ JSCompartment::JSCompartment(JSRuntime *rt)
     , ionCompartment_(NULL)
 #endif
 {
+    /* Ensure that there are no vtables to mess us up here. */
+    JS_ASSERT(reinterpret_cast<JS::shadow::Compartment *>(this) ==
+              static_cast<JS::shadow::Compartment *>(this));
+
     setGCMaxMallocBytes(rt->gcMaxMallocBytes * 0.9);
 }
 
@@ -526,6 +531,13 @@ JSCompartment::mark(JSTracer *trc)
     if (ionCompartment_)
         ionCompartment_->mark(trc, this);
 #endif
+
+    /*
+     * If a compartment is on-stack, we mark its global so that
+     * JSContext::global() remains valid.
+     */
+    if (enterCompartmentDepth && global_)
+        MarkObjectRoot(trc, global_.unsafeGet(), "on-stack compartment global");
 }
 
 void
@@ -631,7 +643,7 @@ JSCompartment::sweep(FreeOp *fop, bool releaseTypes)
         sweepNewTypeObjectTable(lazyTypeObjects);
         sweepBreakpoints(fop);
 
-        if (global_ && IsObjectAboutToBeFinalized(&global_))
+        if (global_ && IsObjectAboutToBeFinalized(global_.unsafeGet()))
             global_ = NULL;
 
 #ifdef JS_ION

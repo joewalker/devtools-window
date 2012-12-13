@@ -48,8 +48,7 @@ CopyStackFrameArguments(const StackFrame *fp, HeapValue *dst)
 /* static */ void
 ArgumentsObject::MaybeForwardToCallObject(StackFrame *fp, JSObject *obj, ArgumentsData *data)
 {
-    AutoAssertNoGC nogc;
-    RawScript script = fp->script().get(nogc);
+    UnrootedScript script = fp->script();
     if (fp->fun()->isHeavyweight() && script->argsObjAliasesFormals()) {
         obj->initFixedSlot(MAYBE_CALL_SLOT, ObjectValue(fp->callObj()));
         for (AliasedFormalIter fi(script); fi; fi++)
@@ -130,7 +129,7 @@ ArgumentsObject::create(JSContext *cx, HandleScript script, HandleFunction calle
     if (!type)
         return NULL;
 
-    bool strict = callee->inStrictMode();
+    bool strict = callee->strict();
     Class *clasp = strict ? &StrictArgumentsObjectClass : &NormalArgumentsObjectClass;
 
     RootedShape shape(cx, EmptyShape::getInitialShape(cx, clasp, TaggedProto(proto),

@@ -97,6 +97,8 @@
 #include "nsHTMLImageElement.h"
 #include "nsHTMLVideoElement.h"
 #include "mozilla/dom/CanvasRenderingContext2DBinding.h"
+#include <cstdlib> // for std::abs(int/long)
+#include <cmath> // for std::abs(float/double)
 
 #ifdef XP_WIN
 #include "gfxWindowsPlatform.h"
@@ -3073,6 +3075,21 @@ CanvasRenderingContext2D::SetGlobalCompositeOperation(const nsAString& op,
   else CANVAS_OP_TO_GFX_OP("destination-atop", DEST_ATOP)
   else CANVAS_OP_TO_GFX_OP("lighter", ADD)
   else CANVAS_OP_TO_GFX_OP("xor", XOR)
+  else CANVAS_OP_TO_GFX_OP("multiply", MULTIPLY)
+  else CANVAS_OP_TO_GFX_OP("screen", SCREEN)
+  else CANVAS_OP_TO_GFX_OP("overlay", OVERLAY)
+  else CANVAS_OP_TO_GFX_OP("darken", DARKEN)
+  else CANVAS_OP_TO_GFX_OP("lighten", LIGHTEN)
+  else CANVAS_OP_TO_GFX_OP("color-dodge", COLOR_DODGE)
+  else CANVAS_OP_TO_GFX_OP("color-burn", COLOR_BURN)
+  else CANVAS_OP_TO_GFX_OP("hard-light", HARD_LIGHT)
+  else CANVAS_OP_TO_GFX_OP("soft-light", SOFT_LIGHT)
+  else CANVAS_OP_TO_GFX_OP("difference", DIFFERENCE)
+  else CANVAS_OP_TO_GFX_OP("exclusion", EXCLUSION)
+  else CANVAS_OP_TO_GFX_OP("hue", HUE)
+  else CANVAS_OP_TO_GFX_OP("saturation", SATURATION)
+  else CANVAS_OP_TO_GFX_OP("color", COLOR)
+  else CANVAS_OP_TO_GFX_OP("luminosity", LUMINOSITY)
   // XXX ERRMSG we need to report an error to developers here! (bug 329026)
   else return;
 
@@ -3101,6 +3118,21 @@ CanvasRenderingContext2D::GetGlobalCompositeOperation(nsAString& op,
   else CANVAS_OP_TO_GFX_OP("source-out", OUT)
   else CANVAS_OP_TO_GFX_OP("source-over", OVER)
   else CANVAS_OP_TO_GFX_OP("xor", XOR)
+  else CANVAS_OP_TO_GFX_OP("multiply", MULTIPLY)
+  else CANVAS_OP_TO_GFX_OP("screen", SCREEN)
+  else CANVAS_OP_TO_GFX_OP("overlay", OVERLAY)
+  else CANVAS_OP_TO_GFX_OP("darken", DARKEN)
+  else CANVAS_OP_TO_GFX_OP("lighten", LIGHTEN)
+  else CANVAS_OP_TO_GFX_OP("color-dodge", COLOR_DODGE)
+  else CANVAS_OP_TO_GFX_OP("color-burn", COLOR_BURN)
+  else CANVAS_OP_TO_GFX_OP("hard-light", HARD_LIGHT)
+  else CANVAS_OP_TO_GFX_OP("soft-light", SOFT_LIGHT)
+  else CANVAS_OP_TO_GFX_OP("difference", DIFFERENCE)
+  else CANVAS_OP_TO_GFX_OP("exclusion", EXCLUSION)
+  else CANVAS_OP_TO_GFX_OP("hue", HUE)
+  else CANVAS_OP_TO_GFX_OP("saturation", SATURATION)
+  else CANVAS_OP_TO_GFX_OP("color", COLOR)
+  else CANVAS_OP_TO_GFX_OP("luminosity", LUMINOSITY)
   else {
     error.Throw(NS_ERROR_FAILURE);
   }
@@ -3739,8 +3771,8 @@ CanvasRenderingContext2D::CreateImageData(JSContext* cx, double sw,
   int32_t wi = JS_DoubleToInt32(sw);
   int32_t hi = JS_DoubleToInt32(sh);
 
-  uint32_t w = NS_ABS(wi);
-  uint32_t h = NS_ABS(hi);
+  uint32_t w = std::abs(wi);
+  uint32_t h = std::abs(hi);
   return mozilla::dom::CreateImageData(cx, this, w, h, error);
 }
 
