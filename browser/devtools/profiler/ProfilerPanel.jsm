@@ -7,6 +7,7 @@
 const Cu = Components.utils;
 
 Cu.import("resource:///modules/devtools/ProfilerController.jsm");
+Cu.import("resource://gre/modules/commonjs/promise/core.js");
 Cu.import("resource://gre/modules/devtools/EventEmitter.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -183,18 +184,6 @@ function ProfilerPanel(frame, toolbox) {
   this._uid = 0;
 
   new EventEmitter(this);
-
-  this.controller.connect(function onConnect() {
-    let create = this.document.getElementById("profiler-create");
-    create.addEventListener("click", this.createProfile.bind(this), false);
-    create.removeAttribute("disabled");
-
-    let profile = this.createProfile();
-    this.switchToProfile(profile, function () {
-      this.isReady = true;
-      this.emit("ready");
-    }.bind(this))
-  }.bind(this));
 }
 
 ProfilerPanel.prototype = {
@@ -214,6 +203,32 @@ ProfilerPanel.prototype = {
 
   set activeProfile(profile) {
     this._activeUid = profile.uid;
+  },
+
+  /**
+   * Open a debug connection and, on success, switch to
+   * the newly created profile.
+   *
+   * @return Promise
+   */
+  open: function PP_open() {
+    let deferred = Promise.defer();
+
+    this.controller.connect(function onConnect() {
+      let create = this.document.getElementById("profiler-create");
+      create.addEventListener("click", this.createProfile.bind(this), false);
+      create.removeAttribute("disabled");
+
+      let profile = this.createProfile();
+      this.switchToProfile(profile, function () {
+        this.isReady = true;
+        this.emit("ready");
+
+        deferred.resolve(this);
+      }.bind(this))
+    }.bind(this));
+
+    return deferred.promise;
   },
 
   /**

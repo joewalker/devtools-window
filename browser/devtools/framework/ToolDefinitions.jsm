@@ -154,7 +154,8 @@ let profilerDefinition = {
   },
 
   build: function (frame, target) {
-    return new ProfilerPanel(frame, target);
+    let panel = new ProfilerPanel(frame, target);
+    return panel.open();
   }
 };
 

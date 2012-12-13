@@ -31,13 +31,12 @@ function loadTab(url, callback) {
 
 function openProfiler(tab, callback) {
   let target = TargetFactory.forTab(tab);
-  let tb = gDevTools.openToolboxForTab(target, "jsprofiler");
-  tb.once("jsprofiler-ready", callback);
+  gDevTools.showToolbox(target, "jsprofiler").then(callback);
 }
 
 function closeProfiler(tab, callback) {
   let target = TargetFactory.forTab(tab);
-  let panel = gDevTools.getPanelForTarget("jsprofiler", target);
+  let panel = gDevTools.getToolbox(target).getPanel("jsprofiler");
   panel.once("destroyed", callback);
 
   gDevTools.closeToolbox(target);
@@ -49,7 +48,7 @@ function setUp(url, callback=function(){}) {
   loadTab(url, function onTabLoad(tab, browser) {
     openProfiler(tab, function onProfilerOpen() {
       let target = TargetFactory.forTab(tab);
-      let panel = gDevTools.getPanelForTarget("jsprofiler", target);
+      let panel = gDevTools.getToolbox(target).getPanel("jsprofiler");
       callback(tab, browser, panel);
     });
   });
