@@ -34,6 +34,11 @@ XPCOMUtils.defineLazyGetter(this, "prefBranch", function() {
           .QueryInterface(Components.interfaces.nsIPrefBranch2);
 });
 
+Components.utils.import("resource://gre/modules/devtools/Require.jsm");
+let Requisition = require('gcli/cli').Requisition;
+let CommandOutputManager = require('gcli/canon').CommandOutputManager;
+let FocusManager = require('gcli/ui/focus').FocusManager;
+
 /**
  * A collection of utilities to help working with commands
  */
@@ -289,9 +294,25 @@ DeveloperToolbar.prototype.show = function DT_show(aFocus, aCallback)
  */
 DeveloperToolbar.prototype._onload = function DT_onload(aFocus)
 {
+  let browser = this._chromeWindow.getBrowser();
+
   this._doc.getElementById("Tools:DevToolbar").setAttribute("checked", "true");
 
-  let contentDocument = this._chromeWindow.getBrowser().contentDocument;
+  let contentDocument = browser.contentDocument;
+
+  let environment = {
+    chromeDocument: this._doc,
+    contentDocument: contentDocument
+  };
+
+  let requisition = new Requisition(environment, this.outputPanel.document);
+  requisition.commandOutputManager = new CommandOutputManager();
+
+  let focusManager = new FocusManager({
+    commandOutputManager: requisition.commandOutputManager
+  }, {
+    document: environment.chromeDocument
+  });
 
   this.display = gcli.createDisplay({
     contentDocument: contentDocument,
@@ -304,34 +325,36 @@ DeveloperToolbar.prototype._onload = function DT_onload(aFocus)
     backgroundElement: this._doc.querySelector(".gclitoolbar-stack-node"),
     outputDocument: this.outputPanel.document,
 
-    environment: {
-      chromeDocument: this._doc,
-      contentDocument: contentDocument
-    },
+    environment: environment,
+    focusManager: focusManager,
+    requisition: requisition,
 
     tooltipClass: 'gcliterm-tooltip',
     eval: null,
     scratchpad: null
   });
 
-  this.display.focusManager.addMonitoredElement(this.outputPanel._frame);
-  this.display.focusManager.addMonitoredElement(this._element);
+  focusManager.addMonitoredElement(this.outputPanel._frame);
+  focusManager.addMonitoredElement(this._element);
+  focusManager.onVisibilityChange.add(this.outputPanel._visibilityChanged,
+    this.outputPanel);
+  focusManager.onVisibilityChange.add(this.tooltipPanel._visibilityChanged,
+    this.tooltipPanel);
+  requisition.commandOutputManager.onOutput.add(this.outputPanel._outputChanged,
+    this.outputPanel);
 
   // Bind destructor to preserve context and call it when the browser begins
   // closing.
   this.destroy = this.destroy.bind(this);
   Services.obs.addObserver(this.destroy, "quit-application-requested", false);
 
-  this.display.onVisibilityChange.add(this.outputPanel._visibilityChanged, this.outputPanel);
-  this.display.onVisibilityChange.add(this.tooltipPanel._visibilityChanged, this.tooltipPanel);
-  this.display.onOutput.add(this.outputPanel._outputChanged, this.outputPanel);
 
-  this._chromeWindow.getBrowser().tabContainer.addEventListener("TabSelect", this, false);
-  this._chromeWindow.getBrowser().tabContainer.addEventListener("TabClose", this, false);
-  this._chromeWindow.getBrowser().addEventListener("load", this, true);
-  this._chromeWindow.getBrowser().addEventListener("beforeunload", this, true);
+  browser.tabContainer.addEventListener("TabSelect", this, false);
+  browser.tabContainer.addEventListener("TabClose", this, false);
+  browser.addEventListener("load", this, true);
+  browser.addEventListener("beforeunload", this, true);
 
-  this._initErrorsCount(this._chromeWindow.getBrowser().selectedTab);
+  this._initErrorsCount(browser.selectedTab);
 
   this._element.hidden = false;
 
