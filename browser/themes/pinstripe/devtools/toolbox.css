@@ -8,6 +8,7 @@ window {
 
 #toolbox-tabs {
   margin: 0;
+  border-right: 1px solid hsla(206,37%,4%,.45);
 }
 
 #toolbox-controls {
@@ -130,6 +131,12 @@ window {
   min-width: 88px;
   color: #b6babf;
   margin: 0;
+  background-image: linear-gradient(hsla(204,45%,98%,.05), hsla(204,45%,98%,.1)),
+                    linear-gradient(hsla(204,45%,98%,.05), hsla(204,45%,98%,.1));
+  background-size: 1px 100%;
+  background-repeat: no-repeat;
+  background-position: left, right;
+  border-left: 1px solid hsla(206,37%,4%,.45);
 }
 
 .devtools-tab > .radio-label-box {
@@ -151,7 +158,16 @@ window {
 }
 
 .devtools-tab:hover {
-  background-image: linear-gradient(hsla(206,37%,4%,.1), hsla(206,37%,4%,.2));
+  background-image: linear-gradient(hsla(204,45%,98%,.05), hsla(204,45%,98%,.1)),
+                    linear-gradient(hsla(204,45%,98%,.05), hsla(204,45%,98%,.1)),
+                    linear-gradient(hsla(206,37%,4%,.1), hsla(206,37%,4%,.2));
+  background size: 1px 100%,
+                   1px 100%,
+                   100%;
+  background-repeat: no-repeat,
+                     no-repeat,
+                     repeat-x;
+  background-position: left, right;
   color: #ced3d9;
 }
 .devtools-tab:hover:active {
@@ -163,28 +179,19 @@ window {
   color: #f5f7fa;
   background-image: radial-gradient(ellipse farthest-corner at center top, #9fdfff, hsla(200,100%,70%,.3)),
                     radial-gradient(ellipse farthest-side at center top, hsla(200,100%,70%,.4), hsla(200,100%,70%,0)),
+                    linear-gradient(hsla(204,45%,98%,.05), hsla(204,45%,98%,.1)),
+                    linear-gradient(hsla(204,45%,98%,.02), hsla(204,45%,98%,.04)),
                     linear-gradient(hsla(206,37%,4%,.2), hsla(206,37%,4%,.3));
   background-size: 100% 1px,
                    100% 5px,
+                   1px 100%,
+                   1px 100%,
                    100%;
   background-repeat: no-repeat,
                      no-repeat,
+                     no-repeat,
+                     no-repeat,
                      repeat-x;
-  background-position: top right, top left;
+  background-position: top right, top left, left, right;
   box-shadow: 1px -1px 0 hsla(206,37%,4%,.2) inset;
-}
-
-.devtools-tab::before {
-  content: "";
-  display: block;
-  margin: 0 -2px;
-  width: 3px;
-  min-width: 3px;
-  height: 32px;
-  background-image: linear-gradient(hsla(204,45%,98%,.05), hsla(204,45%,98%,.1)),
-                    linear-gradient(hsla(206,37%,4%,.3), hsla(206,37%,4%,.6)),
-                    linear-gradient(hsla(204,45%,98%,.05), hsla(204,45%,98%,.1));
-  background-size: 1px 32px;
-  background-repeat: no-repeat;
-  background-position: 0, 1px, 2px;
 }
