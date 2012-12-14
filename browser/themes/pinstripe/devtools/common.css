@@ -178,16 +178,16 @@
   margin: 0 4px;
 }
 
-.devtools-closebutton > .toolbarbutton-text {
-  display: none;
-}
-
 .devtools-closebutton:hover {
   -moz-image-region: rect(0, 32px, 16px, 16px);
 }
 
 .devtools-closebutton:active {
   -moz-image-region: rect(0, 48px, 16px, 32px);
+}
+
+.devtools-closebutton > .toolbarbutton-text {
+  display: none;
 }
 
 /* Splitters */

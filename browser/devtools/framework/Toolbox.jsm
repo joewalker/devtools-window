@@ -268,6 +268,9 @@ Toolbox.prototype = {
     radio.className = "toolbox-tab devtools-tab";
     radio.id = "toolbox-tab-" + id;
     radio.setAttribute("toolid", id);
+    if (toolDefinition.icon) {
+      radio.setAttribute("src", toolDefinition.icon);
+    }
 
     let ordinal = (typeof toolDefinition.ordinal == "number") ?
                   toolDefinition.ordinal : MAX_ORDINAL;

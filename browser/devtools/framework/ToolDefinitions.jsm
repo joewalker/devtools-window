@@ -59,7 +59,7 @@ let webConsoleDefinition = {
   accesskey: l10n("webConsoleCmd.accesskey", webConsoleStrings),
   modifiers: Services.appinfo.OS == "Darwin" ? "accel,alt" : "accel,shift",
   ordinal: 0,
-  icon: "chrome://browser/skin/devtools/webconsole-tool-icon.png",
+  icon: "chrome://browser/skin/devtools/tool-webconsole.png",
   url: "chrome://browser/content/devtools/webconsole.xul",
   label: l10n("ToolboxWebconsole.label", webConsoleStrings),
   isTargetSupported: function(target) {
@@ -77,7 +77,7 @@ let debuggerDefinition = {
   modifiers: osString == "Darwin" ? "accel,alt" : "accel,shift",
   ordinal: 1,
   killswitch: "devtools.debugger.enabled",
-  icon: "chrome://browser/skin/devtools/tools-icons-small.png",
+  icon: "chrome://browser/skin/devtools/tool-debugger.png",
   url: "chrome://browser/content/debugger.xul",
   label: l10n("ToolboxDebugger.label", debuggerStrings),
 
@@ -96,7 +96,7 @@ let inspectorDefinition = {
   key: l10n("inspector.commandkey", inspectorStrings),
   ordinal: 2,
   modifiers: osString == "Darwin" ? "accel,alt" : "accel,shift",
-  icon: "chrome://browser/skin/devtools/tools-icons-small.png",
+  icon: "chrome://browser/skin/devtools/tool-inspector.png",
   url: "chrome://browser/content/devtools/inspector/inspector.xul",
   label: l10n("inspector.label", inspectorStrings),
 
@@ -116,6 +116,7 @@ let styleEditorDefinition = {
   accesskey: l10n("open.accesskey", styleEditorStrings),
   modifiers: "shift",
   label: l10n("ToolboxStyleEditor.label", styleEditorStrings),
+  icon: "chrome://browser/skin/devtools/tool-styleeditor.png",
   url: "chrome://browser/content/styleeditor.xul",
 
   isTargetSupported: function(target) {
