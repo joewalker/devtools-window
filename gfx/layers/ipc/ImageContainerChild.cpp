@@ -12,6 +12,7 @@
 #include "ImageContainer.h"
 #include "GonkIOSurfaceImage.h"
 #include "GrallocImages.h"
+#include "SharedRGBImage.h"
 #include "mozilla/layers/ShmemYCbCrImage.h"
 #include "mozilla/ReentrantMonitor.h"
 
@@ -135,9 +136,11 @@ bool ImageContainerChild::CopyDataIntoSharedImage(Image* src, SharedImage* dest)
 
     ShmemYCbCrImage shmemImage(yuv.data(), yuv.offset());
 
+    MOZ_ASSERT(data->mCbSkip == data->mCrSkip);
     if (!shmemImage.CopyData(data->mYChannel, data->mCbChannel, data->mCrChannel,
                              data->mYSize, data->mYStride,
-                             data->mCbCrSize, data->mCbCrStride)) {
+                             data->mCbCrSize, data->mCbCrStride,
+                             data->mYSkip, data->mCbSkip)) {
       NS_WARNING("Failed to copy image data!");
       return false;
     }
@@ -515,10 +518,11 @@ public:
     mSize = mData.mPicSize;
 
     ShmemYCbCrImage shmImg(mShmem);
-
+    MOZ_ASSERT(aData.mCbSkip == aData.mCrSkip);
     if (!shmImg.CopyData(aData.mYChannel, aData.mCbChannel, aData.mCrChannel,
                          aData.mYSize, aData.mYStride,
-                         aData.mCbCrSize, aData.mCbCrStride)) {
+                         aData.mCbCrSize, aData.mCbCrStride,
+                         aData.mYSkip, aData.mCbSkip)) {
       NS_WARNING("Failed to copy image data!");
     }
     mData.mYChannel = shmImg.GetYData();
@@ -593,12 +597,13 @@ already_AddRefed<Image> ImageContainerChild::CreateImage(const uint32_t *aFormat
                                                          uint32_t aNumFormats)
 {
   nsRefPtr<Image> img;
-#ifdef MOZ_WIDGET_GONK
   for (uint32_t i = 0; i < aNumFormats; i++) {
     switch (aFormats[i]) {
       case PLANAR_YCBCR:
-#endif
         img = new SharedPlanarYCbCrImage(this);
+        return img.forget();
+      case SHARED_RGB:
+        img = new SharedRGBImage(this);
         return img.forget();
 #ifdef MOZ_WIDGET_GONK
       case GONK_IO_SURFACE:
@@ -607,11 +612,11 @@ already_AddRefed<Image> ImageContainerChild::CreateImage(const uint32_t *aFormat
       case GRALLOC_PLANAR_YCBCR:
         img = new GrallocPlanarYCbCrImage();
         return img.forget();
+#endif
     }
   }
 
   return nullptr;
-#endif
 }
 
 SharedImage* ImageContainerChild::AsSharedImage(Image* aImage)
@@ -632,6 +637,11 @@ SharedImage* ImageContainerChild::AsSharedImage(Image* aImage)
       = static_cast<PlanarYCbCrImage*>(aImage)->AsSharedPlanarYCbCrImage();
     if (sharedYCbCr) {
       return sharedYCbCr->ToSharedImage();
+    }
+  } else if (aImage->GetFormat() == SHARED_RGB) {
+    SharedRGBImage *rgbImage = static_cast<SharedRGBImage*>(aImage);
+    if (rgbImage) {
+      return rgbImage->ToSharedImage();
     }
   }
   return nullptr;

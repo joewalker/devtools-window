@@ -200,6 +200,8 @@ nsNPAPIPluginInstance::~nsNPAPIPluginInstance()
   }
 }
 
+uint32_t nsNPAPIPluginInstance::gInPluginCalls = 0;
+
 void
 nsNPAPIPluginInstance::Destroy()
 {
@@ -517,19 +519,6 @@ nsNPAPIPluginInstance::Start()
   // before returning. If the plugin returns failure, we'll clear it out below.
   mRunning = RUNNING;
 
-#if MOZ_WIDGET_ANDROID
-  // Flash creates some local JNI references during initialization (NPP_New). It does not
-  // remove these references later, so essentially they are leaked. AutoLocalJNIFrame
-  // prevents this by pushing a JNI frame. As a result, all local references created
-  // by Flash are contained in this frame. AutoLocalJNIFrame pops the frame once we
-  // go out of scope and the local references are deleted, preventing the leak.
-  JNIEnv* env = AndroidBridge::GetJNIEnv();
-  if (!env)
-    return NS_ERROR_FAILURE;
-
-  mozilla::AutoLocalJNIFrame frame(env);
-#endif
-
   nsresult newResult = library->NPP_New((char*)mimetype, &mNPP, (uint16_t)mode, count, (char**)names, (char**)values, NULL, &error);
   mInPluginInitCall = oldVal;
 
@@ -688,6 +677,7 @@ nsresult nsNPAPIPluginInstance::HandleEvent(void* event, int16_t* result)
 #if defined(XP_WIN) || defined(XP_OS2)
     NS_TRY_SAFE_CALL_RETURN(tmpResult, (*pluginFunctions->event)(&mNPP, event), this);
 #else
+    MAIN_THREAD_JNI_REF_GUARD;
     tmpResult = (*pluginFunctions->event)(&mNPP, event);
 #endif
     NPP_PLUGIN_LOG(PLUGIN_LOG_NOISY,
@@ -1394,28 +1384,6 @@ nsNPAPIPluginInstance::PrivateModeStateChanged(bool enabled)
   return (error == NPERR_NO_ERROR) ? NS_OK : NS_ERROR_FAILURE;
 }
 
-class DelayUnscheduleEvent : public nsRunnable {
-public:
-  nsRefPtr<nsNPAPIPluginInstance> mInstance;
-  uint32_t mTimerID;
-  DelayUnscheduleEvent(nsNPAPIPluginInstance* aInstance, uint32_t aTimerId)
-    : mInstance(aInstance)
-    , mTimerID(aTimerId)
-  {}
-
-  ~DelayUnscheduleEvent() {}
-
-  NS_IMETHOD Run();
-};
-
-NS_IMETHODIMP
-DelayUnscheduleEvent::Run()
-{
-  mInstance->UnscheduleTimer(mTimerID);
-  return NS_OK;
-}
-
-
 static void
 PluginTimerCallback(nsITimer *aTimer, void *aClosure)
 {
@@ -1423,11 +1391,10 @@ PluginTimerCallback(nsITimer *aTimer, void *aClosure)
   NPP npp = t->npp;
   uint32_t id = t->id;
 
-  // Some plugins (Flash on Android) calls unscheduletimer
-  // from this callback.
-  t->inCallback = true;
+  PLUGIN_LOG(PLUGIN_LOG_NOISY, ("nsNPAPIPluginInstance running plugin timer callback this=%p\n", npp->ndata));
+
+  MAIN_THREAD_JNI_REF_GUARD;
   (*(t->callback))(npp, id);
-  t->inCallback = false;
 
   // Make sure we still have an instance and the timer is still alive
   // after the callback.
@@ -1464,7 +1431,6 @@ nsNPAPIPluginInstance::ScheduleTimer(uint32_t interval, NPBool repeat, void (*ti
 
   nsNPAPITimer *newTimer = new nsNPAPITimer();
 
-  newTimer->inCallback = false;
   newTimer->npp = &mNPP;
 
   // generate ID that is unique to this instance
@@ -1501,12 +1467,6 @@ nsNPAPIPluginInstance::UnscheduleTimer(uint32_t timerID)
   nsNPAPITimer* t = TimerWithID(timerID, &index);
   if (!t)
     return;
-
-  if (t->inCallback) {
-    nsCOMPtr<nsIRunnable> e = new DelayUnscheduleEvent(this, timerID);
-    NS_DispatchToCurrentThread(e);
-    return;
-  }
 
   // cancel the timer
   t->timer->Cancel();

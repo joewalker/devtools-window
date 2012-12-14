@@ -19,7 +19,6 @@
 #include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "netCore.h"
-#include "prmem.h"
 #include "plstr.h"
 #include "prnetdb.h"
 #include "prerror.h"
@@ -2207,6 +2206,7 @@ NS_IMETHODIMP
 nsSocketTransport::SetConnectionFlags(uint32_t value)
 {
     mConnectionFlags = value;
+    mIsPrivate = value & nsISocketTransport::NO_PERMANENT_STORAGE;
     return NS_OK;
 }
 

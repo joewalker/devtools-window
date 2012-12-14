@@ -592,7 +592,7 @@ class Value
 #if !defined(_MSC_VER) && !defined(__sparc)
   /* To make jsval binary compatible when linking across C and C++ with MSVC,
    * JS::Value needs to be POD. Otherwise, jsval will be passed in memory
-   * in C++ but by value in C (bug 645111).
+   * in C++ but by value in C (bug 689101).
    * Same issue for SPARC ABI. (bug 737344).
    */
   private:
@@ -1621,12 +1621,12 @@ typedef JS::MutableHandle<JSString*>   JSMutableHandleString;
 typedef JS::MutableHandle<JS::Value>   JSMutableHandleValue;
 typedef JS::MutableHandle<jsid>        JSMutableHandleId;
 
-typedef JS::RawObject   JSRawObject;
-typedef JS::RawFunction JSRawFunction;
-typedef JS::RawScript   JSRawScript;
-typedef JS::RawString   JSRawString;
-typedef JS::RawId       JSRawId;
-typedef JS::RawValue    JSRawValue;
+typedef js::RawObject   JSRawObject;
+typedef js::RawFunction JSRawFunction;
+typedef js::RawScript   JSRawScript;
+typedef js::RawString   JSRawString;
+typedef js::RawId       JSRawId;
+typedef js::RawValue    JSRawValue;
 
 /* JSClass operation signatures. */
 
@@ -4915,6 +4915,7 @@ struct JS_PUBLIC_API(CompileOptions) {
     bool compileAndGo;
     bool noScriptRval;
     bool selfHostingMode;
+    bool userBit;
     enum SourcePolicy {
         NO_SOURCE,
         LAZY_SOURCE,
@@ -4932,6 +4933,7 @@ struct JS_PUBLIC_API(CompileOptions) {
     CompileOptions &setCompileAndGo(bool cng) { compileAndGo = cng; return *this; }
     CompileOptions &setNoScriptRval(bool nsr) { noScriptRval = nsr; return *this; }
     CompileOptions &setSelfHostingMode(bool shm) { selfHostingMode = shm; return *this; }
+    CompileOptions &setUserBit(bool bit) { userBit = bit; return *this; }
     CompileOptions &setSourcePolicy(SourcePolicy sp) { sourcePolicy = sp; return *this; }
 };
 
@@ -5358,13 +5360,6 @@ JS_NewDependentString(JSContext *cx, JSString *str, size_t start,
  */
 extern JS_PUBLIC_API(JSString *)
 JS_ConcatStrings(JSContext *cx, JSString *left, JSString *right);
-
-/*
- * Convert a dependent string into an independent one.  This function does not
- * change the string's mutability, so the thread safety comments above apply.
- */
-extern JS_PUBLIC_API(const jschar *)
-JS_UndependString(JSContext *cx, JSString *str);
 
 /*
  * For JS_DecodeBytes, set *dstlenp to the size of the destination buffer before

@@ -3,12 +3,12 @@
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
-#include "nsNSSComponent.h"
+
 #include "nsNSSCallbacks.h"
 
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
-
+#include "nsNSSComponent.h"
 #include "nsNSSIOLayer.h"
 #include "nsIWebProgressListener.h"
 #include "nsProtectedAuthThread.h"
@@ -19,9 +19,11 @@
 #include "nsIPrompt.h"
 #include "nsProxyRelease.h"
 #include "PSMRunnable.h"
+#include "ScopedNSSTypes.h"
 #include "nsIConsoleService.h"
 #include "nsIHttpChannelInternal.h"
 #include "nsCRT.h"
+#include "SharedSSLState.h"
 
 #include "ssl.h"
 #include "sslproto.h"
@@ -840,7 +842,8 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
 
   // If the handshake completed, then we know the site is TLS tolerant (if this
   // was a TLS connection).
-  nsSSLIOLayerHelpers::rememberTolerantSite(infoObject);
+  nsSSLIOLayerHelpers& ioLayerHelpers = infoObject->SharedState().IOLayerHelpers();
+  ioLayerHelpers.rememberTolerantSite(infoObject);
 
   if (SECSuccess != SSL_SecurityStatus(fd, &sslStatus, &cipherName, &keyLength,
                                        &encryptBits, &signer, nullptr)) {
@@ -858,7 +861,7 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
   if (SSL_HandshakeNegotiatedExtension(fd, ssl_renegotiation_info_xtn, &siteSupportsSafeRenego) != SECSuccess
       || !siteSupportsSafeRenego) {
 
-    bool wantWarning = (nsSSLIOLayerHelpers::getWarnLevelMissingRFC5746() > 0);
+    bool wantWarning = (ioLayerHelpers.getWarnLevelMissingRFC5746() > 0);
 
     nsCOMPtr<nsIConsoleService> console;
     if (infoObject && wantWarning) {
@@ -874,16 +877,15 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
         console->LogStringMessage(msg.get());
       }
     }
-    if (nsSSLIOLayerHelpers::treatUnsafeNegotiationAsBroken()) {
+    if (ioLayerHelpers.treatUnsafeNegotiationAsBroken()) {
       secStatus = nsIWebProgressListener::STATE_IS_BROKEN;
     }
   }
 
 
-  CERTCertificate *peerCert = SSL_PeerCertificate(fd);
+  ScopedCERTCertificate serverCert(SSL_PeerCertificate(fd));
   const char* caName = nullptr; // caName is a pointer only, no ownership
-  char* certOrgName = CERT_GetOrgName(&peerCert->issuer);
-  CERT_DestroyCertificate(peerCert);
+  char* certOrgName = CERT_GetOrgName(&serverCert->issuer);
   caName = certOrgName ? certOrgName : signer;
 
   const char* verisignName = "Verisign, Inc.";
@@ -917,12 +919,8 @@ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
     RememberCertErrorsTable::GetInstance().LookupCertErrorBits(infoObject,
                                                                status);
 
-    CERTCertificate *serverCert = SSL_PeerCertificate(fd);
     if (serverCert) {
       RefPtr<nsNSSCertificate> nssc(nsNSSCertificate::Create(serverCert));
-      CERT_DestroyCertificate(serverCert);
-      serverCert = nullptr;
-
       nsCOMPtr<nsIX509Cert> prevcert;
       infoObject->GetPreviousCert(getter_AddRefs(prevcert));
 

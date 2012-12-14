@@ -240,6 +240,26 @@ VideoData* VideoData::Create(VideoInfo& aInfo,
   return v.forget();
 }
 
+VideoData* VideoData::CreateFromImage(VideoInfo& aInfo,
+                                      ImageContainer* aContainer,
+                                      int64_t aOffset,
+                                      int64_t aTime,
+                                      int64_t aEndTime,
+                                      const nsRefPtr<Image>& aImage,
+                                      bool aKeyframe,
+                                      int64_t aTimecode,
+                                      nsIntRect aPicture)
+{
+  nsAutoPtr<VideoData> v(new VideoData(aOffset,
+                                       aTime,
+                                       aEndTime,
+                                       aKeyframe,
+                                       aTimecode,
+                                       aInfo.mDisplay));
+  v->mImage = aImage;
+  return v.forget();
+}
+
 #ifdef MOZ_WIDGET_GONK
 VideoData* VideoData::Create(VideoInfo& aInfo,
                              ImageContainer* aContainer,
@@ -337,8 +357,8 @@ nsresult MediaDecoderReader::ResetDecode()
 {
   nsresult res = NS_OK;
 
-  mVideoQueue.Reset();
-  mAudioQueue.Reset();
+  VideoQueue().Reset();
+  AudioQueue().Reset();
 
   return res;
 }
@@ -346,7 +366,7 @@ nsresult MediaDecoderReader::ResetDecode()
 VideoData* MediaDecoderReader::DecodeToFirstVideoData()
 {
   bool eof = false;
-  while (!eof && mVideoQueue.GetSize() == 0) {
+  while (!eof && VideoQueue().GetSize() == 0) {
     {
       ReentrantMonitorAutoEnter decoderMon(mDecoder->GetReentrantMonitor());
       if (mDecoder->IsShutdown()) {
@@ -357,13 +377,13 @@ VideoData* MediaDecoderReader::DecodeToFirstVideoData()
     eof = !DecodeVideoFrame(keyframeSkip, 0);
   }
   VideoData* d = nullptr;
-  return (d = mVideoQueue.PeekFront()) ? d : nullptr;
+  return (d = VideoQueue().PeekFront()) ? d : nullptr;
 }
 
 AudioData* MediaDecoderReader::DecodeToFirstAudioData()
 {
   bool eof = false;
-  while (!eof && mAudioQueue.GetSize() == 0) {
+  while (!eof && AudioQueue().GetSize() == 0) {
     {
       ReentrantMonitorAutoEnter decoderMon(mDecoder->GetReentrantMonitor());
       if (mDecoder->IsShutdown()) {
@@ -373,7 +393,7 @@ AudioData* MediaDecoderReader::DecodeToFirstAudioData()
     eof = !DecodeAudioData();
   }
   AudioData* d = nullptr;
-  return (d = mAudioQueue.PeekFront()) ? d : nullptr;
+  return (d = AudioQueue().PeekFront()) ? d : nullptr;
 }
 
 VideoData* MediaDecoderReader::FindStartTime(int64_t& aOutStartTime)
@@ -416,7 +436,7 @@ nsresult MediaDecoderReader::DecodeToTarget(int64_t aTarget)
     int64_t startTime = -1;
     nsAutoPtr<VideoData> video;
     while (HasVideo() && !eof) {
-      while (mVideoQueue.GetSize() == 0 && !eof) {
+      while (VideoQueue().GetSize() == 0 && !eof) {
         bool skip = false;
         eof = !DecodeVideoFrame(skip, 0);
         {
@@ -426,21 +446,21 @@ nsresult MediaDecoderReader::DecodeToTarget(int64_t aTarget)
           }
         }
       }
-      if (mVideoQueue.GetSize() == 0) {
+      if (VideoQueue().GetSize() == 0) {
         // Hit end of file, we want to display the last frame of the video.
         if (video) {
-          mVideoQueue.PushFront(video.forget());
+          VideoQueue().PushFront(video.forget());
         }
         break;
       }
-      video = mVideoQueue.PeekFront();
+      video = VideoQueue().PeekFront();
       // If the frame end time is less than the seek target, we won't want
       // to display this frame after the seek, so discard it.
       if (video && video->mEndTime <= aTarget) {
         if (startTime == -1) {
           startTime = video->mTime;
         }
-        mVideoQueue.PopFront();
+        VideoQueue().PopFront();
       } else {
         video.forget();
         break;
@@ -459,7 +479,7 @@ nsresult MediaDecoderReader::DecodeToTarget(int64_t aTarget)
     // Decode audio forward to the seek target.
     bool eof = false;
     while (HasAudio() && !eof) {
-      while (!eof && mAudioQueue.GetSize() == 0) {
+      while (!eof && AudioQueue().GetSize() == 0) {
         eof = !DecodeAudioData();
         {
           ReentrantMonitorAutoEnter decoderMon(mDecoder->GetReentrantMonitor());
@@ -468,7 +488,7 @@ nsresult MediaDecoderReader::DecodeToTarget(int64_t aTarget)
           }
         }
       }
-      const AudioData* audio = mAudioQueue.PeekFront();
+      const AudioData* audio = AudioQueue().PeekFront();
       if (!audio)
         break;
       CheckedInt64 startFrame = UsecsToFrames(audio->mTime, mInfo.mAudioRate);
@@ -479,7 +499,7 @@ nsresult MediaDecoderReader::DecodeToTarget(int64_t aTarget)
       if (startFrame.value() + audio->mFrames <= targetFrame.value()) {
         // Our seek target lies after the frames in this AudioData. Pop it
         // off the queue, and keep decoding forwards.
-        delete mAudioQueue.PopFront();
+        delete AudioQueue().PopFront();
         audio = nullptr;
         continue;
       }
@@ -526,8 +546,8 @@ nsresult MediaDecoderReader::DecodeToTarget(int64_t aTarget)
                                               frames,
                                               audioData.forget(),
                                               channels));
-      delete mAudioQueue.PopFront();
-      mAudioQueue.PushFront(data.forget());
+      delete AudioQueue().PopFront();
+      AudioQueue().PushFront(data.forget());
       break;
     }
   }
