@@ -4057,6 +4057,7 @@ exports.setDocument = function(document) {
  */
 exports.unsetDocument = function() {
   doc = undefined;
+  exports._empty = undefined;
 };
 
 /**
