@@ -245,28 +245,16 @@ CodeGenerator::visitRegExp(LRegExp *lir)
     return callVM(CloneRegExpObjectInfo, lir);
 }
 
-typedef bool (*ExecuteRegExpFn)(JSContext *cx, RegExpExecType type, HandleObject regexp,
-                                HandleString string, MutableHandleValue rval);
-static const VMFunction ExecuteRegExpInfo = FunctionInfo<ExecuteRegExpFn>(ExecuteRegExp);
+typedef bool (*RegExpTestRawFn)(JSContext *cx, HandleObject regexp,
+                                HandleString input, JSBool *result);
+static const VMFunction RegExpTestRawInfo = FunctionInfo<RegExpTestRawFn>(regexp_test_raw);
 
 bool
 CodeGenerator::visitRegExpTest(LRegExpTest *lir)
 {
     pushArg(ToRegister(lir->string()));
     pushArg(ToRegister(lir->regexp()));
-    pushArg(Imm32(RegExpTest));
-    if (!callVM(ExecuteRegExpInfo, lir))
-        return false;
-
-    Register output = ToRegister(lir->output());
-    Label notBool, end;
-    masm.branchTestBoolean(Assembler::NotEqual, JSReturnOperand, &notBool);
-    masm.unboxBoolean(JSReturnOperand, output);
-    masm.jump(&end);
-    masm.bind(&notBool);
-    masm.mov(Imm32(0), output);
-    masm.bind(&end);
-    return true;
+    return callVM(RegExpTestRawInfo, lir);
 }
 
 typedef JSObject *(*LambdaFn)(JSContext *, HandleFunction, HandleObject);
@@ -2353,8 +2341,8 @@ CodeGenerator::visitConcat(LConcat *lir)
     return true;
 }
 
-typedef bool (*EnsureLinearFn)(JSContext *, JSString *);
-static const VMFunction EnsureLinearInfo = FunctionInfo<EnsureLinearFn>(JSString::ensureLinear);
+typedef bool (*CharCodeAtFn)(JSContext *, HandleString, int32_t, uint32_t *);
+static const VMFunction CharCodeAtInfo = FunctionInfo<CharCodeAtFn>(ion::CharCodeAt);
 
 bool
 CodeGenerator::visitCharCodeAt(LCharCodeAt *lir)
@@ -2363,7 +2351,7 @@ CodeGenerator::visitCharCodeAt(LCharCodeAt *lir)
     Register index = ToRegister(lir->index());
     Register output = ToRegister(lir->output());
 
-    OutOfLineCode *ool = oolCallVM(EnsureLinearInfo, lir, (ArgList(), str), StoreNothing());
+    OutOfLineCode *ool = oolCallVM(CharCodeAtInfo, lir, (ArgList(), str, index), StoreRegisterTo(output));
     if (!ool)
         return false;
 
@@ -2371,13 +2359,13 @@ CodeGenerator::visitCharCodeAt(LCharCodeAt *lir)
     masm.loadPtr(lengthAndFlagsAddr, output);
 
     masm.branchTest32(Assembler::Zero, output, Imm32(JSString::FLAGS_MASK), ool->entry());
-    masm.bind(ool->rejoin());
 
     // getChars
     Address charsAddr(str, JSString::offsetOfChars());
     masm.loadPtr(charsAddr, output);
     masm.load16ZeroExtend(BaseIndex(output, index, TimesTwo, 0), output);
 
+    masm.bind(ool->rejoin());
     return true;
 }
 

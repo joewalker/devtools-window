@@ -39,6 +39,7 @@ def replaceFileIfChanged(filename, newContents):
     f = open(filename, 'wb')
     f.write(newContents)
     f.close()
+    return True
 
 def toStringBool(arg):
     return str(not not arg).lower()
@@ -1147,9 +1148,14 @@ class MethodDefiner(PropertyDefiner):
         # FIXME https://bugzilla.mozilla.org/show_bug.cgi?id=772822
         #       We should be able to check for special operations without an
         #       identifier. For now we check if the name starts with __
-        methods = [m for m in descriptor.interface.members if
-                   m.isMethod() and m.isStatic() == static and
-                   not m.isIdentifierLess()]
+
+        # Ignore non-static methods for callback interfaces
+        if not descriptor.interface.isCallback() or static:
+            methods = [m for m in descriptor.interface.members if
+                       m.isMethod() and m.isStatic() == static and
+                       not m.isIdentifierLess()]
+        else:
+            methods = []
         self.chrome = []
         self.regular = []
         for m in methods:
@@ -1231,9 +1237,13 @@ class AttrDefiner(PropertyDefiner):
         assert not (static and unforgeable)
         PropertyDefiner.__init__(self, descriptor, name)
         self.name = name
-        attributes = [m for m in descriptor.interface.members if
-                      m.isAttr() and m.isStatic() == static and
-                      m.isUnforgeable() == unforgeable]
+        # Ignore non-static attributes for callback interfaces
+        if not descriptor.interface.isCallback() or static:
+            attributes = [m for m in descriptor.interface.members if
+                          m.isAttr() and m.isStatic() == static and
+                          m.isUnforgeable() == unforgeable]
+        else:
+            attributes = []
         self.chrome = [m for m in attributes if isChromeOnly(m)]
         self.regular = [m for m in attributes if not isChromeOnly(m)]
         self.static = static
@@ -4177,18 +4187,25 @@ if (!obj) {
   return false;
 }
 
-if (js::IsWrapper(obj)) {
-  obj = XPCWrapper::Unwrap(cx, obj, false);
-  if (!obj) {
-    return Throw<%s>(cx, NS_ERROR_XPC_SECURITY_MANAGER_VETO);
-  }
-}
-
+// We have to be careful to leave "obj" in its existing compartment, even
+// while we grab our global from the real underlying object, because we
+// use it for unwrapping the other arguments later.
 nsISupports* global;
 xpc_qsSelfRef globalRef;
 {
   JS::Value val;
-  val.setObjectOrNull(JS_GetGlobalForObject(cx, obj));
+  Maybe<JSAutoCompartment> ac;
+  if (js::IsWrapper(obj)) {
+    JSObject* realObj = XPCWrapper::Unwrap(cx, obj, false);
+    if (!realObj) {
+      return Throw<%s>(cx, NS_ERROR_XPC_SECURITY_MANAGER_VETO);
+    }
+    ac.construct(cx, realObj);
+    val.setObject(*JS_GetGlobalForObject(cx, realObj));
+  } else {
+    val.setObject(*JS_GetGlobalForObject(cx, obj));
+  }
+
   nsresult rv = xpc_qsUnwrapArg<nsISupports>(cx, val, &global, &globalRef.ptr,
                                              &val);
   if (NS_FAILED(rv)) {
@@ -4216,6 +4233,7 @@ class CGGenericMethod(CGAbstractBindingMethod):
     def generate_code(self):
         return CGIndenter(CGGeneric(
             "const JSJitInfo *info = FUNCTION_VALUE_TO_JITINFO(JS_CALLEE(cx, vp));\n"
+            "MOZ_ASSERT(info->type == JSJitInfo::Method);\n"
             "JSJitMethodOp method = (JSJitMethodOp)info->op;\n"
             "return method(cx, obj, self, argc, vp);"))
 
@@ -4303,6 +4321,7 @@ class CGGenericGetter(CGAbstractBindingMethod):
     def generate_code(self):
         return CGIndenter(CGGeneric(
             "const JSJitInfo *info = FUNCTION_VALUE_TO_JITINFO(JS_CALLEE(cx, vp));\n"
+            "MOZ_ASSERT(info->type == JSJitInfo::Getter);\n"
             "JSJitPropertyOp getter = info->op;\n"
             "return getter(cx, obj, self, vp);"))
 
@@ -4376,18 +4395,18 @@ class CGGenericSetter(CGAbstractBindingMethod):
 
     def generate_code(self):
         return CGIndenter(CGGeneric(
-                "JS::Value* argv = JS_ARGV(cx, vp);\n"
-                "JS::Value undef = JS::UndefinedValue();\n"
                 "if (argc == 0) {\n"
-                "  argv = &undef;\n"
+                '  return ThrowErrorMessage(cx, MSG_MISSING_ARGUMENTS, "%s attribute setter");\n'
                 "}\n"
+                "JS::Value* argv = JS_ARGV(cx, vp);\n"
                 "const JSJitInfo *info = FUNCTION_VALUE_TO_JITINFO(JS_CALLEE(cx, vp));\n"
+                "MOZ_ASSERT(info->type == JSJitInfo::Setter);\n"
                 "JSJitPropertyOp setter = info->op;\n"
                 "if (!setter(cx, obj, self, argv)) {\n"
                 "  return false;\n"
                 "}\n"
                 "*vp = JSVAL_VOID;\n"
-                "return true;"))
+                "return true;" % self.descriptor.interface.identifier.name))
 
 class CGSpecializedSetter(CGAbstractStaticMethod):
     """
@@ -4477,7 +4496,7 @@ class CGMemberJITInfo(CGThing):
     def declare(self):
         return ""
 
-    def defineJitInfo(self, infoName, opName, infallible, constant):
+    def defineJitInfo(self, infoName, opName, opType, infallible, constant):
         protoID = "prototypes::id::%s" % self.descriptor.name
         depth = "PrototypeTraits<%s>::Depth" % protoID
         failstr = toStringBool(infallible)
@@ -4487,9 +4506,11 @@ class CGMemberJITInfo(CGThing):
                 "  %s,\n"
                 "  %s,\n"
                 "  %s,\n"
+                "  JSJitInfo::%s,\n"
                 "  %s,  /* isInfallible. False in setters. */\n"
                 "  %s  /* isConstant. Only relevant for getters. */\n"
-                "};\n" % (infoName, opName, protoID, depth, failstr, conststr))
+                "};\n" % (infoName, opName, protoID, depth, opType, failstr,
+                          conststr))
 
     def define(self):
         if self.member.isAttr():
@@ -4498,12 +4519,14 @@ class CGMemberJITInfo(CGThing):
             getterinfal = "infallible" in self.descriptor.getExtendedAttributes(self.member, getter=True)
             getterinfal = getterinfal and infallibleForMember(self.member, self.member.type, self.descriptor)
             getterconst = self.member.getExtendedAttribute("Constant")
-            result = self.defineJitInfo(getterinfo, getter, getterinfal, getterconst)
+            result = self.defineJitInfo(getterinfo, getter, "Getter",
+                                        getterinfal, getterconst)
             if not self.member.readonly or self.member.getExtendedAttribute("PutForwards") is not None:
                 setterinfo = ("%s_setterinfo" % self.member.identifier.name)
                 setter = ("(JSJitPropertyOp)set_%s" % self.member.identifier.name)
                 # Setters are always fallible, since they have to do a typed unwrap.
-                result += self.defineJitInfo(setterinfo, setter, False, False)
+                result += self.defineJitInfo(setterinfo, setter, "Setter",
+                                             False, False)
             return result
         if self.member.isMethod():
             methodinfo = ("%s_methodinfo" % self.member.identifier.name)
@@ -4524,7 +4547,8 @@ class CGMemberJITInfo(CGThing):
                     # No arguments and infallible return boxing
                     methodInfal = True
 
-            result = self.defineJitInfo(methodinfo, method, methodInfal, False)
+            result = self.defineJitInfo(methodinfo, method, "Method",
+                                        methodInfal, False)
             return result
         raise TypeError("Illegal member type to CGPropertyJITInfo")
 
@@ -7776,6 +7800,10 @@ class GlobalGenRoots():
         idEnum = CGWrapper(idEnum, post='\n')
 
         curr = CGList([idEnum])
+
+        # Let things know the maximum length of the prototype chain.
+        maxMacro = CGGeneric(declare="#define MAX_PROTOTYPE_CHAIN_LENGTH " + str(config.maxProtoChainLength))
+        curr.append(CGWrapper(maxMacro, post='\n\n'))
 
         # Constructor ID enum.
         constructors = [d.name for d in config.getDescriptors(hasInterfaceObject=True)]

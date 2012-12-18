@@ -516,7 +516,7 @@ checkReportFlags(JSContext *cx, unsigned *flags)
          * We assume that if the top frame is a native, then it is strict if
          * the nearest scripted frame is strict, see bug 536306.
          */
-        JSScript *script = cx->stack.currentScript();
+        UnrootedScript script = cx->stack.currentScript();
         if (script && script->strict)
             *flags &= ~JSREPORT_WARNING;
         else if (cx->hasStrictOption())
@@ -573,7 +573,7 @@ js::ReportUsageError(JSContext *cx, HandleObject callee, const char *msg)
 {
     const char *usageStr = "usage";
     PropertyName *usageAtom = Atomize(cx, usageStr, strlen(usageStr))->asPropertyName();
-    DebugOnly<Shape *> shape = callee->nativeLookup(cx, NameToId(usageAtom));
+    DebugOnly<RawShape> shape = static_cast<RawShape>(callee->nativeLookup(cx, NameToId(usageAtom)));
     JS_ASSERT(!shape->configurable());
     JS_ASSERT(!shape->writable());
     JS_ASSERT(shape->hasDefaultGetter());
@@ -1099,7 +1099,6 @@ JSContext::JSContext(JSRuntime *rt)
     localeCallbacks(NULL),
     resolvingList(NULL),
     generatingError(false),
-    compartment(NULL),
     enterCompartmentDepth_(0),
     savedFrameChains_(),
     defaultCompartmentObject_(NULL),
@@ -1129,6 +1128,9 @@ JSContext::JSContext(JSRuntime *rt)
 #endif
     activeCompilations(0)
 {
+    JS_ASSERT(static_cast<ContextFriendFields*>(this) ==
+              ContextFriendFields::get(this));
+
 #ifdef JSGC_ROOT_ANALYSIS
     PodArrayZero(thingGCRooters);
 #if defined(JS_GC_ZEAL) && defined(DEBUG) && !defined(JS_THREADSAFE)

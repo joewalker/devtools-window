@@ -24,6 +24,9 @@ function debug(aMsg) {
   //dump("-*-*- Webapps.jsm : " + aMsg + "\n");
 }
 
+// Minimum delay between two progress events while downloading, in ms.
+const MIN_PROGRESS_EVENT_DELAY = 1000;
+
 const WEBAPP_RUNTIME = Services.appinfo.ID == "webapprt@mozilla.org";
 
 XPCOMUtils.defineLazyGetter(this, "NetUtil", function() {
@@ -775,6 +778,10 @@ this.DOMApplicationRegistry = {
         this.doInstallPackage(msg, mm);
         break;
       case "Webapps:GetBasePath":
+        if (!this.webapps[msg.id]) {
+          debug("No webapp for " + msg.id);
+          return null;
+        }
         return this.webapps[msg.id].basePath;
         break;
       case "Webapps:RegisterForMessages":
@@ -1147,7 +1154,7 @@ this.DOMApplicationRegistry = {
           // Check if the appcache is updatable, and send "downloadavailable" or
           // "downloadapplied".
           let updateObserver = {
-            observe: function(aSubject, aTopic, aData) {
+            observe: function(aSubject, aTopic, aObsData) {
               aData.event =
                 aTopic == "offline-cache-update-available" ? "downloadavailable"
                                                            : "downloadapplied";
@@ -1622,6 +1629,7 @@ this.DOMApplicationRegistry = {
     // Here are the steps when installing a package:
     // - create a temp directory where to store the app.
     // - download the zip in this directory.
+    // - check the signature on the zip.
     // - extract the manifest from the zip and check it.
     // - ask confirmation to the user.
     // - add the new app to the registry.
@@ -1661,28 +1669,6 @@ this.DOMApplicationRegistry = {
                               app: app });
     }
 
-    function getInferedStatus() {
-      // XXX Update once we have digital signatures (bug 772365)
-      return Ci.nsIPrincipal.APP_STATUS_INSTALLED;
-    }
-
-    function getAppStatus(aManifest) {
-      let manifestStatus = AppsUtils.getAppManifestStatus(aManifest);
-      let inferedStatus = getInferedStatus();
-
-      return (Services.prefs.getBoolPref("dom.mozApps.dev_mode") ? manifestStatus
-                                                                : inferedStatus);
-    }
-    // Returns true if the privilege level from the manifest
-    // is lower or equal to the one we infered for the app.
-    function checkAppStatus(aManifest) {
-      if (Services.prefs.getBoolPref("dom.mozApps.dev_mode")) {
-        return true;
-      }
-
-      return (AppsUtils.getAppManifestStatus(aManifest) <= getInferedStatus());
-    }
-
     function download() {
       debug("About to download " + aManifest.fullPackagePath());
 
@@ -1693,6 +1679,8 @@ this.DOMApplicationRegistry = {
           appId: id,
           previousState: aIsUpdate ? "installed" : "pending"
         };
+
+      let lastProgressTime = 0;
       requestChannel.notificationCallbacks = {
         QueryInterface: function notifQI(aIID) {
           if (aIID.equals(Ci.nsISupports)          ||
@@ -1707,13 +1695,16 @@ this.DOMApplicationRegistry = {
         },
         onProgress: function notifProgress(aRequest, aContext,
                                            aProgress, aProgressMax) {
-          debug("onProgress: " + aProgress + "/" + aProgressMax);
           app.progress = aProgress;
-          self.broadcastMessage("Webapps:PackageEvent",
-                                { type: "progress",
-                                  manifestURL: aApp.manifestURL,
-                                  progress: aProgress,
-                                  app: app });
+          let now = Date.now();
+          if (now - lastProgressTime > MIN_PROGRESS_EVENT_DELAY) {
+            debug("onProgress: " + aProgress + "/" + aProgressMax);
+            self.broadcastMessage("Webapps:PackageEvent",
+                                  { type: "progress",
+                                    manifestURL: aApp.manifestURL,
+                                    app: app });
+            lastProgressTime = now;
+          }
         },
         onStatus: function notifStatus(aRequest, aContext, aStatus, aStatusArg) { },
 
@@ -1736,69 +1727,105 @@ this.DOMApplicationRegistry = {
       // installed apps should morph to 'updating'.
       app.installState = aIsUpdate ? "updating" : "pending";
 
-      NetUtil.asyncFetch(requestChannel, function(aInput, aResult, aRequest) {
-        if (!Components.isSuccessCode(aResult)) {
-          // We failed to fetch the zip.
-          cleanup("NETWORK_ERROR");
-          return;
-        }
-        // Copy the zip on disk.
-        let zipFile = FileUtils.getFile("TmpD",
-                                        ["webapps", id, "application.zip"], true);
-        let ostream = FileUtils.openSafeFileOutputStream(zipFile);
-        NetUtil.asyncCopy(aInput, ostream, function (aResult) {
-          if (!Components.isSuccessCode(aResult)) {
-            // We failed to save the zip.
-            cleanup("DOWNLOAD_ERROR");
+      // Staging the zip in TmpD until all the checks are done.
+      let zipFile = FileUtils.getFile("TmpD",
+                                      ["webapps", id, "application.zip"], true);
+
+      // We need an output stream to write the channel content to the zip file.
+      let outputStream = Cc["@mozilla.org/network/file-output-stream;1"]
+                           .createInstance(Ci.nsIFileOutputStream);
+      // write, create, truncate
+      outputStream.init(zipFile, 0x02 | 0x08 | 0x20, parseInt("0664", 8), 0);
+      let bufferedOutputStream = Cc['@mozilla.org/network/buffered-output-stream;1']
+                                   .createInstance(Ci.nsIBufferedOutputStream);
+      bufferedOutputStream.init(outputStream, 1024);
+
+      // Create a listener that will give data to the file output stream.
+      let listener = Cc["@mozilla.org/network/simple-stream-listener;1"]
+                       .createInstance(Ci.nsISimpleStreamListener);
+      listener.init(bufferedOutputStream, {
+        onStartRequest: function(aRequest, aContext) { },
+        onStopRequest: function(aRequest, aContext, aStatusCode) {
+          debug("onStopRequest " + aStatusCode);
+          bufferedOutputStream.close();
+          outputStream.close();
+
+          let certdb;
+          try {
+            certdb = Cc["@mozilla.org/security/x509certdb;1"]
+                       .getService(Ci.nsIX509CertDB);
+          } catch (e) {
+            cleanup("CERTDB_ERROR");
             return;
           }
 
-          let zipReader = Cc["@mozilla.org/libjar/zip-reader;1"]
-                          .createInstance(Ci.nsIZipReader);
-          try {
-            zipReader.open(zipFile);
-            if (!zipReader.hasEntry("manifest.webapp")) {
-              throw "MISSING_MANIFEST";
+          certdb.openSignedJARFileAsync(zipFile, function(aRv, aZipReader) {
+            let zipReader;
+            try {
+              let isSigned;
+              if (Components.isSuccessCode(aRv)) {
+                isSigned = true;
+                zipReader = aZipReader;
+              } else if (aRv != Cr.NS_ERROR_SIGNED_JAR_NOT_SIGNED) {
+                throw "INVALID_SIGNATURE";
+              } else {
+                isSigned = false;
+                zipReader = Cc["@mozilla.org/libjar/zip-reader;1"]
+                              .createInstance(Ci.nsIZipReader);
+                zipReader.open(zipFile);
+              }
+
+              if (!zipReader.hasEntry("manifest.webapp")) {
+                throw "MISSING_MANIFEST";
+              }
+
+              let istream = zipReader.getInputStream("manifest.webapp");
+
+              // Obtain a converter to read from a UTF-8 encoded input stream.
+              let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
+                                .createInstance(Ci.nsIScriptableUnicodeConverter);
+              converter.charset = "UTF-8";
+
+              let manifest = JSON.parse(converter.ConvertToUnicode(NetUtil.readInputStreamToString(istream,
+                                                                   istream.available()) || ""));
+
+              if (!AppsUtils.checkManifest(manifest)) {
+                throw "INVALID_MANIFEST";
+              }
+
+              if (!AppsUtils.checkInstallAllowed(manifest, aApp.installOrigin)) {
+                throw "INSTALL_FROM_DENIED";
+              }
+
+              let isDevMode = Services.prefs.getBoolPref("dom.mozApps.dev_mode");
+              let maxStatus = isDevMode ? Ci.nsIPrincipal.APP_STATUS_CERTIFIED
+                            : isSigned  ? Ci.nsIPrincipal.APP_STATUS_PRIVILEGED
+                                        : Ci.nsIPrincipal.APP_STATUS_INSTALLED;
+
+              if (AppsUtils.getAppManifestStatus(aManifest) > maxStatus) {
+                throw "INVALID_SECURITY_LEVEL";
+              }
+
+              if (aOnSuccess) {
+                aOnSuccess(id, manifest);
+              }
+              delete self.downloads[aApp.manifestURL];
+            } catch (e) {
+              // Something bad happened when reading the package.
+              if (typeof e == 'object') {
+                debug(e);
+                cleanup("INVALID_PACKAGE");
+              } else {
+                cleanup(e);
+              }
+            } finally {
+              zipReader.close();
             }
-
-            let istream = zipReader.getInputStream("manifest.webapp");
-
-            // Obtain a converter to read from a UTF-8 encoded input stream.
-            let converter = Cc["@mozilla.org/intl/scriptableunicodeconverter"]
-                            .createInstance(Ci.nsIScriptableUnicodeConverter);
-            converter.charset = "UTF-8";
-
-            let manifest = JSON.parse(converter.ConvertToUnicode(NetUtil.readInputStreamToString(istream,
-                                                                 istream.available()) || ""));
-
-            if (!AppsUtils.checkManifest(manifest)) {
-              throw "INVALID_MANIFEST";
-            }
-
-            if (!AppsUtils.checkInstallAllowed(manifest, aApp.installOrigin)) {
-              throw "INSTALL_FROM_DENIED";
-            }
-
-            if (!checkAppStatus(manifest)) {
-              throw "INVALID_SECURITY_LEVEL";
-            }
-
-            if (aOnSuccess) {
-              aOnSuccess(id, manifest);
-            }
-            delete self.downloads[aApp.manifestURL];
-          } catch (e) {
-            // Something bad happened when reading the package.
-            if (typeof e == 'object') {
-              cleanup("INVALID_PACKAGE");
-            } else {
-              cleanup(e);
-            }
-          } finally {
-            zipReader.close();
-          }
-        });
+          });
+        }
       });
+
+      requestChannel.asyncOpen(listener, null);
     };
 
     let deviceStorage = Services.wm.getMostRecentWindow("navigator:browser")
@@ -2260,6 +2287,7 @@ let AppcacheObserver = function(aApp) {
         " - " + aApp.installState);
   this.app = aApp;
   this.startStatus = aApp.installState;
+  this.lastProgressTime = 0;
 };
 
 AppcacheObserver.prototype = {
@@ -2305,8 +2333,14 @@ AppcacheObserver.prototype = {
         break;
       case Ci.nsIOfflineCacheUpdateObserver.STATE_DOWNLOADING:
       case Ci.nsIOfflineCacheUpdateObserver.STATE_ITEMSTARTED:
-      case Ci.nsIOfflineCacheUpdateObserver.STATE_ITEMPROGRESS:
         setStatus(this.startStatus);
+        break;
+      case Ci.nsIOfflineCacheUpdateObserver.STATE_ITEMPROGRESS:
+        let now = Date.now();
+        if (now - this.lastProgressTime > MIN_PROGRESS_EVENT_DELAY) {
+          setStatus(this.startStatus);
+          this.lastProgressTime = now;
+        }
         break;
     }
 

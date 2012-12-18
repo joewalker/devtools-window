@@ -65,7 +65,7 @@ class StaticScopeIter
 
     /* Return whether this static scope will be on the dynamic scope chain. */
     bool hasDynamicScopeObject() const;
-    Shape *scopeShape() const;
+    UnrootedShape scopeShape() const;
 
     enum Type { BLOCK, FUNCTION, NAMED_LAMBDA };
     Type type() const;
@@ -189,7 +189,7 @@ class CallObject : public ScopeObject
     create(JSContext *cx, HandleShape shape, HandleTypeObject type, HeapSlot *slots);
 
     static CallObject *
-    createTemplateObject(JSContext *cx, JSScript *script);
+    createTemplateObject(JSContext *cx, HandleScript script);
 
     static const uint32_t RESERVED_SLOTS = 2;
 
@@ -346,8 +346,8 @@ class StaticBlockObject : public BlockObject
     void initPrevBlockChainFromParser(StaticBlockObject *prev);
     void resetPrevBlockChainFromParser();
 
-    static Shape *addVar(JSContext *cx, Handle<StaticBlockObject*> block, HandleId id,
-                         int index, bool *redeclared);
+    static UnrootedShape addVar(JSContext *cx, Handle<StaticBlockObject*> block, HandleId id,
+                                int index, bool *redeclared);
 };
 
 class ClonedBlockObject : public BlockObject

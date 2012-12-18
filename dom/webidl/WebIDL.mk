@@ -21,7 +21,10 @@ webidl_files = \
   Blob.webidl \
   CanvasRenderingContext2D.webidl \
   ClientRectList.webidl \
+  CSSPrimitiveValue.webidl \
   CSSStyleDeclaration.webidl \
+  CSSValue.webidl \
+  CSSValueList.webidl \
   DelayNode.webidl \
   DOMImplementation.webidl \
   DOMParser.webidl \
@@ -46,6 +49,7 @@ webidl_files = \
   HTMLPropertiesCollection.webidl \
   ImageData.webidl \
   Node.webidl \
+  NodeFilter.webidl \
   NodeList.webidl \
   PaintRequestList.webidl \
   PannerNode.webidl \
@@ -66,6 +70,7 @@ webidl_files = \
   XMLHttpRequestEventTarget.webidl \
   XMLHttpRequestUpload.webidl \
   XMLSerializer.webidl \
+  XPathEvaluator.webidl \
   $(NULL)
 
 ifdef MOZ_WEBGL

@@ -2788,6 +2788,8 @@ class MPhi : public MDefinition, public InlineForwardListNode<MPhi>
     INSTRUCTION_HEADER(Phi)
     static MPhi *New(uint32_t slot);
 
+    void removeOperand(size_t index);
+
     MDefinition *getOperand(size_t index) const {
         return inputs_[index];
     }
@@ -2821,6 +2823,18 @@ class MPhi : public MDefinition, public InlineForwardListNode<MPhi>
         return AliasSet::None();
     }
     void computeRange();
+
+    MDefinition *operandIfRedundant() {
+        // If this phi is redundant (e.g., phi(a,a) or b=phi(a,this)),
+        // returns the operand that it will always be equal to (a, in
+        // those two cases).
+        MDefinition *first = getOperand(0);
+        for (size_t i = 1; i < numOperands(); i++) {
+            if (getOperand(i) != first && getOperand(i) != this)
+                return NULL;
+        }
+        return first;
+    }
 };
 
 // The goal of a Beta node is to split a def at a conditionally taken
@@ -3062,15 +3076,15 @@ class MRegExpTest
         return new MRegExpTest(regexp, string);
     }
 
-    TypePolicy *typePolicy() {
-        return this;
+    MDefinition *string() const {
+        return getOperand(0);
     }
-
     MDefinition *regexp() const {
         return getOperand(1);
     }
-    MDefinition *string() const {
-        return getOperand(0);
+
+    TypePolicy *typePolicy() {
+        return this;
     }
 };
 
@@ -4455,11 +4469,11 @@ class MBindNameCache
   : public MUnaryInstruction,
     public SingleObjectPolicy
 {
-    PropertyName *name_;
-    JSScript *script_;
+    CompilerRootPropertyName name_;
+    CompilerRootScript script_;
     jsbytecode *pc_;
 
-    MBindNameCache(MDefinition *scopeChain, PropertyName *name, JSScript *script, jsbytecode *pc)
+    MBindNameCache(MDefinition *scopeChain, PropertyName *name, UnrootedScript script, jsbytecode *pc)
       : MUnaryInstruction(scopeChain), name_(name), script_(script), pc_(pc)
     {
         setResultType(MIRType_Object);
@@ -4468,7 +4482,7 @@ class MBindNameCache
   public:
     INSTRUCTION_HEADER(BindNameCache)
 
-    static MBindNameCache *New(MDefinition *scopeChain, PropertyName *name, JSScript *script,
+    static MBindNameCache *New(MDefinition *scopeChain, PropertyName *name, UnrootedScript script,
                                jsbytecode *pc) {
         return new MBindNameCache(scopeChain, name, script, pc);
     }
@@ -4482,7 +4496,7 @@ class MBindNameCache
     PropertyName *name() const {
         return name_;
     }
-    JSScript *script() const {
+    UnrootedScript script() const {
         return script_;
     }
     jsbytecode *pc() const {
@@ -4495,10 +4509,10 @@ class MGuardShape
   : public MUnaryInstruction,
     public SingleObjectPolicy
 {
-    const Shape *shape_;
+    CompilerRootShape shape_;
     BailoutKind bailoutKind_;
 
-    MGuardShape(MDefinition *obj, const Shape *shape, BailoutKind bailoutKind)
+    MGuardShape(MDefinition *obj, UnrootedShape shape, BailoutKind bailoutKind)
       : MUnaryInstruction(obj),
         shape_(shape),
         bailoutKind_(bailoutKind)
@@ -4511,7 +4525,7 @@ class MGuardShape
   public:
     INSTRUCTION_HEADER(GuardShape)
 
-    static MGuardShape *New(MDefinition *obj, const Shape *shape, BailoutKind bailoutKind) {
+    static MGuardShape *New(MDefinition *obj, UnrootedShape shape, BailoutKind bailoutKind) {
         return new MGuardShape(obj, shape, bailoutKind);
     }
 
@@ -4521,7 +4535,7 @@ class MGuardShape
     MDefinition *obj() const {
         return getOperand(0);
     }
-    const Shape *shape() const {
+    const UnrootedShape shape() const {
         return shape_;
     }
     BailoutKind bailoutKind() const {
@@ -5661,7 +5675,7 @@ class MFunctionBoundary : public MNullaryInstruction
     Type type_;
     unsigned inlineLevel_;
 
-    MFunctionBoundary(JSScript *script, Type type, unsigned inlineLevel)
+    MFunctionBoundary(UnrootedScript script, Type type, unsigned inlineLevel)
       : script_(script), type_(type), inlineLevel_(inlineLevel)
     {
         JS_ASSERT_IF(type != Inline_Exit, script != NULL);
@@ -5672,12 +5686,12 @@ class MFunctionBoundary : public MNullaryInstruction
   public:
     INSTRUCTION_HEADER(FunctionBoundary)
 
-    static MFunctionBoundary *New(JSScript *script, Type type,
+    static MFunctionBoundary *New(UnrootedScript script, Type type,
                                   unsigned inlineLevel = 0) {
         return new MFunctionBoundary(script, type, inlineLevel);
     }
 
-    JSScript *script() {
+    UnrootedScript script() {
         return script_;
     }
 
