@@ -251,8 +251,6 @@ browser.jar:
   skin/classic/browser/devtools/tool-styleeditor.png        (devtools/tool-styleeditor.png)
   skin/classic/browser/devtools/close.png                   (devtools/close.png)
   skin/classic/browser/devtools/undock.png                  (devtools/undock.png)
-
-
 #ifdef MOZ_SERVICES_SYNC
   skin/classic/browser/sync-throbber.png
   skin/classic/browser/sync-16.png
