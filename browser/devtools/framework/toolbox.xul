@@ -15,7 +15,7 @@
     <toolbar class="devtools-tabbar">
 #ifdef XP_MACOSX
       <hbox id="toolbox-controls">
-        <toolbarbutton id="toolbox-close" class="devtools-closebutton"></toolbarbutton>
+        <toolbarbutton id="toolbox-close"></toolbarbutton>
         <hbox id="toolbox-dock-buttons"/>
       </hbox>
 #endif
