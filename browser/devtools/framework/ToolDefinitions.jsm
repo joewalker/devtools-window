@@ -142,7 +142,6 @@ let styleEditorDefinition = {
 let profilerDefinition = {
   id: "jsprofiler",
   killswitch: "devtools.profiler.enabled",
-  icon: "chrome://browser/skin/devtools/tools-icons-small.png",
   url: "chrome://browser/content/profiler.xul",
   label: l10n("profiler.label", profilerStrings),
 
