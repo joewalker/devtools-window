@@ -34,6 +34,11 @@ XPCOMUtils.defineLazyGetter(this, "prefBranch", function() {
           .QueryInterface(Components.interfaces.nsIPrefBranch2);
 });
 
+Components.utils.import("resource://gre/modules/devtools/Require.jsm");
+let Requisition = require('gcli/cli').Requisition;
+let CommandOutputManager = require('gcli/canon').CommandOutputManager;
+let FocusManager = require('gcli/ui/focus').FocusManager;
+
 /**
  * A collection of utilities to help working with commands
  */
@@ -295,9 +300,25 @@ DeveloperToolbar.prototype.show = function DT_show(aFocus, aCallback)
  */
 DeveloperToolbar.prototype._onload = function DT_onload(aFocus)
 {
+  let browser = this._chromeWindow.getBrowser();
+
   this._doc.getElementById("Tools:DevToolbar").setAttribute("checked", "true");
 
-  let contentDocument = this._chromeWindow.getBrowser().contentDocument;
+  let contentDocument = browser.contentDocument;
+
+  let environment = {
+    chromeDocument: this._doc,
+    contentDocument: contentDocument
+  };
+
+  let requisition = new Requisition(environment, this.outputPanel.document);
+  requisition.commandOutputManager = new CommandOutputManager();
+
+  let focusManager = new FocusManager({
+    commandOutputManager: requisition.commandOutputManager
+  }, {
+    document: environment.chromeDocument
+  });
 
   this.display = gcli.createDisplay({
     contentDocument: contentDocument,
@@ -310,29 +331,86 @@ DeveloperToolbar.prototype._onload = function DT_onload(aFocus)
     backgroundElement: this._doc.querySelector(".gclitoolbar-stack-node"),
     outputDocument: this.outputPanel.document,
 
-    environment: {
-      chromeDocument: this._doc,
-      contentDocument: contentDocument
-    },
+    environment: environment,
+    focusManager: focusManager,
+    requisition: requisition,
 
     tooltipClass: 'gcliterm-tooltip',
     eval: null,
     scratchpad: null
   });
 
-  this.display.focusManager.addMonitoredElement(this.outputPanel._frame);
-  this.display.focusManager.addMonitoredElement(this._element);
+  focusManager.addMonitoredElement(this.outputPanel._frame);
+  focusManager.addMonitoredElement(this._element);
+  focusManager.onVisibilityChange.add(this.outputPanel._visibilityChanged,
+    this.outputPanel);
+  focusManager.onVisibilityChange.add(this.tooltipPanel._visibilityChanged,
+    this.tooltipPanel);
+  requisition.commandOutputManager.onOutput.add(this.outputPanel._outputChanged,
+    this.outputPanel);
 
-  this.display.onVisibilityChange.add(this.outputPanel._visibilityChanged, this.outputPanel);
-  this.display.onVisibilityChange.add(this.tooltipPanel._visibilityChanged, this.tooltipPanel);
-  this.display.onOutput.add(this.outputPanel._outputChanged, this.outputPanel);
+  // Bind destructor to preserve context and call it when the browser begins
+  // closing.
+  this.destroy = this.destroy.bind(this);
+  this.destroyOnWindowClose = this.destroyOnWindowClose.bind(this);
 
-  this._chromeWindow.getBrowser().tabContainer.addEventListener("TabSelect", this, false);
-  this._chromeWindow.getBrowser().tabContainer.addEventListener("TabClose", this, false);
-  this._chromeWindow.getBrowser().addEventListener("load", this, true);
-  this._chromeWindow.getBrowser().addEventListener("beforeunload", this, true);
+  /**
+   * We leak in 3 situations:
+   * 1. Open browser -> Close browser
+   * 2. Open browser -> Open new tab -> Close browser
+   * 3. Open browser -> Open new browser window ->
+   *    Close new browser window -> Close browser
+   *
+   * #1 *should* be fixed using the quit-application-granted notifier.
+   *    This does not work even though quit-application-requested does
+   *    (which can be cancelled). We are using this listener until we can
+   *    work out why quit-application-granted fails to allow us to clean up.
+   * #2 is fixed by a combination of #1 and setting exports_empty = undefined
+   *    in gcli.jsm:exports.unsetDocument.
+   * #3 is the reason we have the horrible window counting code below. That
+   *    code just checks whether the browser window or a new browser window
+   *    opened from the main window adding the correct listener as appropriate.
+   *
+   * NOTE: Ideally we would just need to use onCloseWindow checking for
+   *       win.getBrowser and call our destructor from there but this fails for
+   *       reasons that seem to be far from obvious, hence the awful code from
+   *       line 373 - 399.
+   */
+  let numWins = 0;
+  let wm = Services.wm;
+  let enumerator = wm.getEnumerator("navigator:browser");
+  while(enumerator.hasMoreElements()) {
+    numWins++;
+    enumerator.getNext();
+  }
+  if (numWins == 1) {
+    // Listen for browser exit
+    this.destroyOnBrowserExit = this.destroyOnBrowserExit.bind(this);
+    Services.obs.addObserver(this.destroyOnBrowserExit,
+      "quit-application-requested", false);
+  } else {
+    // Listen for browser window close
+    let self = this;
+    this.windowCloseListener = {
+      onCloseWindow: function(win) {
+        let win = win.QueryInterface(Components.interfaces.nsIInterfaceRequestor)
+                                    .getInterface(Components.interfaces.nsIDOMWindow);
+        if (win.getBrowser) {
+          self.destroyOnWindowClose(self);
+        }
+      },
+      onOpenWindow: function(win) { },
+      onWindowTitleChange: function(win, newTitle){ }
+    };
+    Services.wm.addListener(this.windowCloseListener);
+  }
 
-  this._initErrorsCount(this._chromeWindow.getBrowser().selectedTab);
+  browser.tabContainer.addEventListener("TabSelect", this, false);
+  browser.tabContainer.addEventListener("TabClose", this, false);
+  browser.addEventListener("load", this, true);
+  browser.addEventListener("beforeunload", this, true);
+
+  this._initErrorsCount(browser.selectedTab);
 
   this._element.hidden = false;
 
@@ -433,29 +511,66 @@ DeveloperToolbar.prototype.hide = function DT_hide()
   Services.prefs.setBoolPref("devtools.toolbar.visible", false);
 
   this._doc.getElementById("Tools:DevToolbar").setAttribute("checked", "false");
-  this.destroy();
+  this.destroy(true);
 
   this._notify(NOTIFICATIONS.HIDE);
 };
 
 /**
+ * Hide the developer toolbar and clean up on secondary browser window close.
+ */
+DeveloperToolbar.prototype.destroyOnWindowClose = function DT_destroyOnWindowClose()
+{
+  // TODO: Remove this when we have a single event we can use to call destructor.
+  this.destroy();
+},
+
+/**
+ * Hide the developer toolbar and clean up on browser close.
+ */
+DeveloperToolbar.prototype.destroyOnBrowserExit = function DT_destroyOnBrowserExit()
+{
+  // TODO: Remove this when we have a single event we can use to call destructor.
+  this.destroy(true);
+},
+
+/**
  * Hide the developer toolbar
  */
-DeveloperToolbar.prototype.destroy = function DT_destroy()
+DeveloperToolbar.prototype.destroy = function DT_destroy(browserExit)
 {
-  this._chromeWindow.getBrowser().tabContainer.removeEventListener("TabSelect", this, false);
-  this._chromeWindow.getBrowser().removeEventListener("load", this, true); 
-  this._chromeWindow.getBrowser().removeEventListener("beforeunload", this, true);
+  let browser = this._chromeWindow.getBrowser();
 
-  let tabs = this._chromeWindow.getBrowser().tabs;
-  Array.prototype.forEach.call(tabs, this._stopErrorsCount, this);
+  if (browserExit) {
+    Services.obs.removeObserver(this.destroyOnBrowserExit,
+      "quit-application-requested");
+  }
+
+  if (this.windowCloseListener) {
+    Services.wm.removeListener(this.windowCloseListener);
+    delete this.windowCloseListener;
+  }
+
+  if (browser.tabContainer) {
+    browser.tabContainer.removeEventListener("TabSelect", this, false);
+  }
+  browser.removeEventListener("load", this, true);
+  browser.removeEventListener("beforeunload", this, true);
+
+  let tabs = browser.tabs;
+  if (tabs) {
+    Array.prototype.forEach.call(tabs, this._stopErrorsCount, this);
+  }
 
   this.display.focusManager.removeMonitoredElement(this.outputPanel._frame);
   this.display.focusManager.removeMonitoredElement(this._element);
 
-  this.display.onVisibilityChange.remove(this.outputPanel._visibilityChanged, this.outputPanel);
-  this.display.onVisibilityChange.remove(this.tooltipPanel._visibilityChanged, this.tooltipPanel);
+  this.display.onVisibilityChange.remove(this.outputPanel._visibilityChanged,
+    this.outputPanel);
+  this.display.onVisibilityChange.remove(this.tooltipPanel._visibilityChanged,
+    this.tooltipPanel);
   this.display.onOutput.remove(this.outputPanel._outputChanged, this.outputPanel);
+
   this.display.destroy();
   this.outputPanel.destroy();
   this.tooltipPanel.destroy();

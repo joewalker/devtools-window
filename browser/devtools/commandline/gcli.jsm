@@ -4057,6 +4057,7 @@ exports.setDocument = function(document) {
  */
 exports.unsetDocument = function() {
   doc = undefined;
+  exports._empty = undefined;
 };
 
 /**
@@ -9057,10 +9058,11 @@ function FFDisplay(options) {
   host.chromeWindow = options.chromeWindow;
 
   this.onOutput = commandOutputManager.onOutput;
-  this.requisition = new Requisition(options.environment, options.outputDocument);
+  this.requisition = options.requisition ||
+    new Requisition(options.environment, options.outputDocument);
 
   // Create a FocusManager for the various parts to register with
-  this.focusManager = new FocusManager(options, {
+  this.focusManager = options.focusManager || new FocusManager(options, {
     // TODO: can we kill chromeDocument here?
     document: options.chromeDocument
   });
