@@ -27,6 +27,7 @@
         <hbox id="toolbox-dock-buttons"/>
         <toolbarbutton id="toolbox-close" class="devtools-closebutton"></toolbarbutton>
       </hbox>
+      <vbox id="toolbox-controls-separator"/>
 #endif
     </toolbar>
     <deck id="toolbox-deck" flex="1">
