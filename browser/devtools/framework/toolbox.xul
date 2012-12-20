@@ -15,7 +15,7 @@
     <toolbar class="devtools-tabbar">
 #ifdef XP_MACOSX
       <hbox id="toolbox-controls">
-        <toolbarbutton id="toolbox-close" class="devtools-closebutton"></toolbarbutton>
+        <toolbarbutton id="toolbox-close"></toolbarbutton>
         <hbox id="toolbox-dock-buttons"/>
       </hbox>
 #endif
@@ -23,9 +23,10 @@
       </radiogroup>
       <hbox id="toolbox-buttons" flex="1" pack="end"/>
 #ifndef XP_MACOSX
+      <vbox id="toolbox-controls-separator"/>
       <hbox id="toolbox-controls">
         <hbox id="toolbox-dock-buttons"/>
-        <toolbarbutton id="toolbox-close" class="devtools-closebutton"></toolbarbutton>
+        <toolbarbutton id="toolbox-close"></toolbarbutton>
       </hbox>
 #endif
     </toolbar>

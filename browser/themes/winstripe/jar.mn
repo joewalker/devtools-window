@@ -201,6 +201,12 @@ browser.jar:
         skin/classic/browser/devtools/floating-scrollbars.css       (devtools/floating-scrollbars.css)
         skin/classic/browser/devtools/inspector.css                 (devtools/inspector.css)
         skin/classic/browser/devtools/toolbox.css                   (devtools/toolbox.css)
+        skin/classic/browser/devtools/tool-webconsole.png           (devtools/tool-webconsole.png)
+        skin/classic/browser/devtools/tool-debugger.png             (devtools/tool-debugger.png)
+        skin/classic/browser/devtools/tool-inspector.png            (devtools/tool-inspector.png)
+        skin/classic/browser/devtools/tool-styleeditor.png          (devtools/tool-styleeditor.png)
+        skin/classic/browser/devtools/close.png                     (devtools/close.png)
+        skin/classic/browser/devtools/undock.png                    (devtools/undock.png)
 #ifdef MOZ_SERVICES_SYNC
         skin/classic/browser/sync-throbber.png
         skin/classic/browser/sync-16.png
@@ -413,6 +419,12 @@ browser.jar:
         skin/classic/aero/browser/devtools/floating-scrollbars.css   (devtools/floating-scrollbars.css)
         skin/classic/aero/browser/devtools/inspector.css             (devtools/inspector.css)
         skin/classic/aero/browser/devtools/toolbox.css               (devtools/toolbox.css)
+        skin/classic/aero/browser/devtools/tool-webconsole.png       (devtools/tool-webconsole.png)
+        skin/classic/aero/browser/devtools/tool-debugger.png         (devtools/tool-debugger.png)
+        skin/classic/aero/browser/devtools/tool-inspector.png        (devtools/tool-inspector.png)
+        skin/classic/aero/browser/devtools/tool-styleeditor.png      (devtools/tool-styleeditor.png)
+        skin/classic/aero/browser/devtools/close.png                 (devtools/close.png)
+        skin/classic/aero/browser/devtools/undock.png                (devtools/undock.png)
 #ifdef MOZ_SERVICES_SYNC
         skin/classic/aero/browser/sync-throbber.png
         skin/classic/aero/browser/sync-16.png
