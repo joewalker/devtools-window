@@ -18,6 +18,7 @@ window {
 #toolbox-controls > toolbarbutton,
 #toolbox-dock-buttons > toolbarbutton {
   -moz-appearance: none;
+  border: none;
   margin: 0 4px;
   min-width: 16px;
   width: 16px;
@@ -70,8 +71,9 @@ window {
 
 .command-button {
   -moz-appearance: none;
-  padding: 0 8px;
+  border: none;
   margin: 0;
+  padding: 0 8px;
   width: 16px;
 }
 
@@ -153,7 +155,7 @@ window {
 }
 
 .devtools-tab > .radio-label-box {
-  -moz-appearance: none;
+  border: none;
   padding: 0 16px;
 }
 
@@ -196,7 +198,7 @@ window {
                     linear-gradient(hsla(204,45%,98%,.05), hsla(204,45%,98%,.1)),
                     linear-gradient(hsla(204,45%,98%,.02), hsla(204,45%,98%,.04)),
                     linear-gradient(hsla(206,37%,4%,.2), hsla(206,37%,4%,.3));
-  background-size: 100% 1px,
+  background-size: 100% 2px,
                    100% 5px,
                    1px 100%,
                    1px 100%,

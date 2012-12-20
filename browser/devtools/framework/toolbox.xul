@@ -26,7 +26,7 @@
       <vbox id="toolbox-controls-separator"/>
       <hbox id="toolbox-controls">
         <hbox id="toolbox-dock-buttons"/>
-        <toolbarbutton id="toolbox-close" class="devtools-closebutton"></toolbarbutton>
+        <toolbarbutton id="toolbox-close"></toolbarbutton>
       </hbox>
 #endif
     </toolbar>
