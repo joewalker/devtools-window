@@ -97,7 +97,6 @@ static const nsIntSize kDefaultViewportSize(980, 480);
 static const char CANCEL_DEFAULT_PAN_ZOOM[] = "cancel-default-pan-zoom";
 static const char BROWSER_ZOOM_TO_RECT[] = "browser-zoom-to-rect";
 static const char BEFORE_FIRST_PAINT[] = "before-first-paint";
-static const char DETECT_SCROLLABLE_SUBFRAME[] = "detect-scrollable-subframe";
 
 NS_IMETHODIMP
 ContentListener::HandleEvent(nsIDOMEvent* aEvent)
@@ -169,6 +168,7 @@ TabChild::TabChild(const TabContext& aContext, uint32_t aChromeFlags)
   , mNotified(false)
   , mContentDocumentIsDisplayed(false)
   , mTriedBrowserInit(false)
+  , mOrientation(eScreenOrientation_PortraitPrimary)
 {
     printf("creating %d!\n", NS_IsMainThread());
 }
@@ -242,12 +242,6 @@ TabChild::Observe(nsISupports *aSubject,
 
         HandlePossibleViewportChange();
       }
-    }
-  } else if (!strcmp(aTopic, DETECT_SCROLLABLE_SUBFRAME)) {
-    nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(aSubject));
-    nsCOMPtr<nsITabChild> tabChild(GetTabChildFrom(docShell));
-    if (tabChild == this) {
-      mRemoteFrame->DetectScrollableSubframe();
     }
   }
 
@@ -1126,7 +1120,7 @@ TabChild::RecvShow(const nsIntSize& size)
 }
 
 bool
-TabChild::RecvUpdateDimensions(const nsRect& rect, const nsIntSize& size)
+TabChild::RecvUpdateDimensions(const nsRect& rect, const nsIntSize& size, const ScreenOrientation& orientation)
 {
     if (!mRemoteFrame) {
         return true;
@@ -1137,6 +1131,7 @@ TabChild::RecvUpdateDimensions(const nsRect& rect, const nsIntSize& size)
     mOuterRect.width = rect.width;
     mOuterRect.height = rect.height;
 
+    mOrientation = orientation;
     mInnerSize = size;
     mWidget->Resize(0, 0, size.width, size.height,
                     true);
@@ -1687,7 +1682,6 @@ TabChild::RecvDestroy()
   observerService->RemoveObserver(this, CANCEL_DEFAULT_PAN_ZOOM);
   observerService->RemoveObserver(this, BROWSER_ZOOM_TO_RECT);
   observerService->RemoveObserver(this, BEFORE_FIRST_PAINT);
-  observerService->RemoveObserver(this, DETECT_SCROLLABLE_SUBFRAME);
 
   const InfallibleTArray<PIndexedDBChild*>& idbActors =
     ManagedPIndexedDBChild();
@@ -1699,6 +1693,14 @@ TabChild::RecvDestroy()
   DestroyWindow();
 
   return Send__delete__(this);
+}
+
+/* virtual */ bool
+TabChild::RecvSetAppType(const nsString& aAppType)
+{
+  MOZ_ASSERT_IF(!aAppType.IsEmpty(), HasOwnApp());
+  mAppType = aAppType;
+  return true;
 }
 
 PRenderFrameChild*
@@ -1814,9 +1816,6 @@ TabChild::InitRenderingState()
                                      false);
         observerService->AddObserver(this,
                                      BEFORE_FIRST_PAINT,
-                                     false);
-        observerService->AddObserver(this,
-                                     DETECT_SCROLLABLE_SUBFRAME,
                                      false);
     }
 

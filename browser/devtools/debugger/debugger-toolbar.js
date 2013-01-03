@@ -11,7 +11,6 @@
  */
 function ToolbarView() {
   dumpn("ToolbarView was instantiated");
-  this._onCloseClick = this._onCloseClick.bind(this);
   this._onTogglePanesPressed = this._onTogglePanesPressed.bind(this);
   this._onResumePressed = this._onResumePressed.bind(this);
   this._onStepOverPressed = this._onStepOverPressed.bind(this);
@@ -106,13 +105,6 @@ ToolbarView.prototype = {
    */
   toggleSourcesContainer: function DVT_toggleSourcesContainer(aVisibleFlag) {
     this._sources.setAttribute("hidden", !aVisibleFlag);
-  },
-
-  /**
-   * Listener handling the close button click event.
-   */
-  _onCloseClick: function DVT__onCloseClick() {
-    DebuggerController._shutdownDebugger();
   },
 
   /**
@@ -1064,6 +1056,7 @@ create({ constructor: FilteredSourcesView, proto: MenuContainer.prototype }, {
     let panel = this._panel = document.createElement("panel");
     panel.id = "filtered-sources-panel";
     panel.setAttribute("noautofocus", "true");
+    panel.setAttribute("level", "top");
     panel.setAttribute("position", FILTERED_SOURCES_POPUP_POSITION);
     document.documentElement.appendChild(panel);
 

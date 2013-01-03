@@ -68,6 +68,8 @@ InspectorPanel.prototype = {
     this._selection = new Selection();
     this.onNewSelection = this.onNewSelection.bind(this);
     this.selection.on("new-node", this.onNewSelection);
+    this.onDetached = this.onDetached.bind(this);
+    this.selection.on("detached", this.onDetached);
 
     this.breadcrumbs = new HTMLBreadcrumbs(this);
 
@@ -199,13 +201,21 @@ InspectorPanel.prototype = {
     this._destroyMarkup();
     this.isDirty = false;
     let self = this;
-    newWindow.addEventListener("DOMContentLoaded", function onDOMReady() {
-      newWindow.removeEventListener("DOMContentLoaded", onDOMReady, true);;
+
+    function onDOMReady() {
+      newWindow.removeEventListener("DOMContentLoaded", onDOMReady, true);
+
       if (!self.selection.node) {
         self.selection.setNode(newWindow.document.documentElement);
       }
       self._initMarkup();
-    }, true);
+    }
+
+    if (newWindow.document.readyState == "loading") {
+      newWindow.addEventListener("DOMContentLoaded", onDOMReady, true);
+    } else {
+      onDOMReady();
+    }
   },
 
   /**
@@ -218,7 +228,15 @@ InspectorPanel.prototype = {
 
     request.suspend();
 
-    let notificationBox = this._toolbox.getNotificationBox();
+    let notificationBox = null;
+    if (this.target.isLocalTab) {
+      let gBrowser = this.target.tab.ownerDocument.defaultView.gBrowser;
+      notificationBox = gBrowser.getNotificationBox();
+    }
+    else {
+      notificationBox = this._toolbox.getNotificationBox();
+    }
+
     let notification = notificationBox.
       getNotificationWithValue("inspector-page-navigation");
 
@@ -249,9 +267,7 @@ InspectorPanel.prototype = {
           if (request) {
             request.resume();
             request = null;
-            return true;
           }
-          return false;
         }.bind(this),
       },
       {
@@ -278,6 +294,15 @@ InspectorPanel.prototype = {
    */
   onNewSelection: function InspectorPanel_onNewSelection() {
     this.cancelLayoutChange();
+  },
+
+  /**
+   * When a node is deleted, select its parent node.
+   */
+  onDetached: function InspectorPanel_onDetached(event, parentNode) {
+    this.cancelLayoutChange();
+    this.breadcrumbs.cutAfter(this.breadcrumbs.indexOf(parentNode));
+    this.selection.setNode(parentNode, "detached");
   },
 
   /**
@@ -315,6 +340,7 @@ InspectorPanel.prototype = {
     this.nodemenu.removeEventListener("popuphiding", this._resetNodeMenu, true);
     this.breadcrumbs.destroy();
     this.selection.off("new-node", this.onNewSelection);
+    this.selection.off("detached", this.onDetached);
     this._destroyMarkup();
     this._selection.destroy();
     this._selection = null;

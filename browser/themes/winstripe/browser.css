@@ -2970,6 +2970,14 @@ html|*#gcli-output-frame {
 
 /* Developer Toolbar */
 
+#developer-toolbar-toolbox-button {
+  min-width: 18px;
+}
+
+#developer-toolbar-toolbox-button > .toolbarbutton-text {
+  display: none;
+}
+
 .developer-toolbar-button {
   -moz-appearance: none;
   min-width: 78px;
@@ -3018,6 +3026,9 @@ html|*#gcli-output-frame {
 }
 
 /* Social toolbar item */
+#social-provider-button {
+  -moz-image-region: rect(0, 16px, 16px, 0);
+}
 
 #social-provider-button > .toolbarbutton-menu-dropmarker {
   display: none;

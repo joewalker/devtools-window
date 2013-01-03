@@ -12,7 +12,6 @@ include $(DEPTH)/config/autoconf.mk
 
 _BROWSER_FILES = \
                  head.js \
-                 browser_social.js \
                  browser_social_toolbar.js \
                  browser_social_shareButton.js \
                  browser_social_sidebar.js \
@@ -20,7 +19,7 @@ _BROWSER_FILES = \
                  browser_social_mozSocial_API.js \
                  browser_social_isVisible.js \
                  browser_social_chatwindow.js \
-                 $(filter disabled-temporarily--bug-820489, browser_social_multiprovider.js) \
+                 browser_social_multiprovider.js \
                  social_panel.html \
                  social_share_image.png \
                  social_sidebar.html \
@@ -29,6 +28,12 @@ _BROWSER_FILES = \
                  social_window.html \
                  social_worker.js \
                  $(NULL)
+
+ifndef MOZ_PER_WINDOW_PRIVATE_BROWSING
+_BROWSER_FILES += \
+                browser_social.js \
+                $(NULL)
+endif
 
 include $(topsrcdir)/config/rules.mk
 
