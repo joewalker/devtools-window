@@ -675,6 +675,8 @@ protected:
 
     FrameType GetInheritedFrameType();
 
+    bool HasUnloadedParent();
+
     // hash of session storages, keyed by domain
     nsInterfaceHashtable<nsCStringHashKey, nsIDOMStorage> mStorages;
 
@@ -840,6 +842,7 @@ protected:
 #ifdef DEBUG
     bool                       mInEnsureScriptEnv;
 #endif
+    bool                       mAffectPrivateSessionLifetime;
     uint64_t                   mHistoryID;
 
     static nsIURIFixup *sURIFixup;

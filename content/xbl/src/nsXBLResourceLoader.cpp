@@ -29,13 +29,7 @@
 #include "nsStyleSet.h"
 #include "nsIScriptSecurityManager.h"
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXBLResourceLoader)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXBLResourceLoader)
-NS_IMPL_CYCLE_COLLECTION_UNLINK(mBoundElements)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsXBLResourceLoader)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBoundElements)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+NS_IMPL_CYCLE_COLLECTION_1(nsXBLResourceLoader, mBoundElements)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsXBLResourceLoader)
   NS_INTERFACE_MAP_ENTRY(nsICSSLoaderObserver)
@@ -167,7 +161,8 @@ nsXBLResourceLoader::StyleSheetLoaded(nsCSSStyleSheet* aSheet,
     // All stylesheets are loaded.  
     mResources->mRuleProcessor =
       new nsCSSRuleProcessor(mResources->mStyleSheetList, 
-                             nsStyleSet::eDocSheet);
+                             nsStyleSet::eDocSheet,
+                             nullptr);
 
     // XXX Check for mPendingScripts when scripts also come online.
     if (!mInLoadResourcesFunc)

@@ -4,6 +4,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/ClearOnShutdown.h"
 #include "mozilla/dom/ipc/ProcessPriorityManager.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/TabChild.h"
@@ -12,7 +13,9 @@
 #include "mozilla/Services.h"
 #include "mozilla/HalTypes.h"
 #include "mozilla/TimeStamp.h"
+#include "AudioChannelService.h"
 #include "prlog.h"
+#include "nsPrintfCString.h"
 #include "nsWeakPtr.h"
 #include "nsXULAppAPI.h"
 #include "nsIInterfaceRequestorUtils.h"
@@ -26,6 +29,7 @@
 #include "nsIDOMEventTarget.h"
 #include "nsIDOMDocument.h"
 #include "nsPIDOMWindow.h"
+#include "StaticPtr.h"
 
 #ifdef XP_WIN
 #include <process.h>
@@ -42,6 +46,8 @@ namespace ipc {
 
 namespace {
 static bool sInitialized = false;
+class ProcessPriorityManager;
+static StaticRefPtr<ProcessPriorityManager> sManager;
 
 // Some header defines a LOG macro, but we don't want it here.
 #ifdef LOG
@@ -76,6 +82,11 @@ GetPPMLog()
 ProcessPriority
 GetBackgroundPriority()
 {
+  AudioChannelService* service = AudioChannelService::GetAudioChannelService();
+  if (service->ContentOrNormalChannelIsActive()) {
+    return PROCESS_PRIORITY_BACKGROUND_PERCEIVABLE;
+  }
+
   bool isHomescreen = false;
 
   ContentChild* contentChild = ContentChild::GetSingleton();
@@ -95,6 +106,17 @@ GetBackgroundPriority()
   return isHomescreen ?
          PROCESS_PRIORITY_BACKGROUND_HOMESCREEN :
          PROCESS_PRIORITY_BACKGROUND;
+}
+
+/**
+ * Determine if the priority is a backround priority.
+ */
+bool
+IsBackgroundPriority(ProcessPriority aPriority)
+{
+  return (aPriority == PROCESS_PRIORITY_BACKGROUND ||
+          aPriority == PROCESS_PRIORITY_BACKGROUND_HOMESCREEN ||
+          aPriority == PROCESS_PRIORITY_BACKGROUND_PERCEIVABLE);
 }
 
 /**
@@ -118,40 +140,98 @@ GetBackgroundPriority()
 class ProcessPriorityManager MOZ_FINAL
   : public nsIObserver
   , public nsIDOMEventListener
+  , public nsITimerCallback
 {
 public:
   ProcessPriorityManager();
   void Init();
 
   NS_DECL_ISUPPORTS
+  NS_DECL_NSITIMERCALLBACK
   NS_DECL_NSIOBSERVER
   NS_DECL_NSIDOMEVENTLISTENER
 
-private:
-  void SetPriority(ProcessPriority aPriority);
-  void OnContentDocumentGlobalCreated(nsISupports* aOuterWindow);
-  void OnInnerWindowDestroyed();
-  void OnGracePeriodTimerFired();
-  void RecomputeNumVisibleWindows();
+  ProcessPriority GetPriority() const { return mProcessPriority; }
 
-  // mProcessPriority tracks the priority we've given this process in hal,
-  // except that, when the grace period timer is active, mProcessPriority ==
-  // BACKGROUND or HOMESCREEN_BACKGROUND even though hal still thinks we're a
-  // foreground process.
+  /**
+   * If this process is not already in the foreground, move it into the
+   * foreground and set a timer to call ResetPriorityNow() in a few seconds.
+   */
+  void TemporarilySetIsForeground();
+
+  /**
+   * Recompute this process's priority and apply it, potentially after a brief
+   * delay.
+   *
+   * If the new priority is FOREGROUND, it takes effect immediately.
+   *
+   * If the new priority is a BACKGROUND* priority and this process's priority
+   * is currently a BACKGROUND* priority, the new priority takes effect
+   * immediately.
+   *
+   * But if the new priority is a BACKGROUND* priority and this process is not
+   * currently in the background, we schedule a timer and run
+   * ResetPriorityNow() after a short period of time.
+   */
+  void ResetPriority();
+
+  /**
+   * Recompute this process's priority and apply it immediately.
+   */
+  void ResetPriorityNow();
+
+private:
+  void OnContentDocumentGlobalCreated(nsISupports* aOuterWindow);
+
+  /**
+   * Compute whether this process is in the foreground and return the result.
+   */
+  bool ComputeIsInForeground();
+
+  /**
+   * Set this process's priority to FOREGROUND immediately.
+   */
+  void SetIsForeground();
+
+  /**
+   * Set this process's priority to the appropriate BACKGROUND* priority
+   * immediately.
+   */
+  void SetIsBackgroundNow();
+
+  /**
+   * If mResetPriorityTimer is null (i.e., not running), create a timer and set
+   * it to invoke ResetPriorityNow() after
+   * dom.ipc.processPriorityManager.aTimeoutPref ms.
+   */
+  void
+  ScheduleResetPriority(const char* aTimeoutPref);
+
+  // mProcessPriority tracks the priority we've given this process in hal.
   ProcessPriority mProcessPriority;
 
   nsTArray<nsWeakPtr> mWindows;
-  nsCOMPtr<nsITimer> mGracePeriodTimer;
+
+  // When this timer expires, we set mResetPriorityTimer to null and run
+  // ResetPriorityNow().
+  nsCOMPtr<nsITimer> mResetPriorityTimer;
+
   nsWeakPtr mMemoryMinimizerRunnable;
-  TimeStamp mStartupTime;
 };
 
-NS_IMPL_ISUPPORTS2(ProcessPriorityManager, nsIObserver, nsIDOMEventListener);
+NS_IMPL_ISUPPORTS2(ProcessPriorityManager, nsIObserver, nsIDOMEventListener)
 
 ProcessPriorityManager::ProcessPriorityManager()
-  : mProcessPriority(PROCESS_PRIORITY_FOREGROUND)
-  , mStartupTime(TimeStamp::Now())
+  : mProcessPriority(ProcessPriority(-1))
 {
+  // When our parent process forked us, it set our priority either to
+  // FOREGROUND (if our parent launched this process to meet an immediate need)
+  // or one of the BACKGROUND priorities (if our parent launched this process
+  // to meet a future need).
+  //
+  // We don't know which situation we're in, so we set mProcessPriority to -1
+  // so that the next time ResetPriorityNow is run, we'll definitely call into
+  // hal and set our priority.
 }
 
 void
@@ -164,8 +244,7 @@ ProcessPriorityManager::Init()
   nsCOMPtr<nsIObserverService> os = services::GetObserverService();
   os->AddObserver(this, "content-document-global-created", /* ownsWeak = */ false);
   os->AddObserver(this, "inner-window-destroyed", /* ownsWeak = */ false);
-
-  SetPriority(PROCESS_PRIORITY_FOREGROUND);
+  os->AddObserver(this, "audio-channel-agent-changed", /* ownsWeak = */ false);
 }
 
 NS_IMETHODIMP
@@ -176,10 +255,9 @@ ProcessPriorityManager::Observe(
 {
   if (!strcmp(aTopic, "content-document-global-created")) {
     OnContentDocumentGlobalCreated(aSubject);
-  } else if (!strcmp(aTopic, "inner-window-destroyed")) {
-    OnInnerWindowDestroyed();
-  } else if (!strcmp(aTopic, "timer-callback")) {
-    OnGracePeriodTimerFired();
+  } else if (!strcmp(aTopic, "inner-window-destroyed") ||
+             !strcmp(aTopic, "audio-channel-agent-changed")) {
+    ResetPriority();
   } else {
     MOZ_ASSERT(false);
   }
@@ -191,7 +269,7 @@ ProcessPriorityManager::HandleEvent(
   nsIDOMEvent* aEvent)
 {
   LOG("Got visibilitychange.");
-  RecomputeNumVisibleWindows();
+  ResetPriority();
   return NS_OK;
 }
 
@@ -199,6 +277,7 @@ void
 ProcessPriorityManager::OnContentDocumentGlobalCreated(
   nsISupports* aOuterWindow)
 {
+  LOG("DocumentGlobalCreated");
   // Get the inner window (the topic of content-document-global-created is
   // the /outer/ window!).
   nsCOMPtr<nsPIDOMWindow> outerWindow = do_QueryInterface(aOuterWindow);
@@ -230,17 +309,35 @@ ProcessPriorityManager::OnContentDocumentGlobalCreated(
                                  /* wantsUntrusted = */ false);
 
   mWindows.AppendElement(weakWin);
-  RecomputeNumVisibleWindows();
+  ResetPriority();
 }
 
 void
-ProcessPriorityManager::OnInnerWindowDestroyed()
+ProcessPriorityManager::ResetPriority()
 {
-  RecomputeNumVisibleWindows();
+  if (ComputeIsInForeground()) {
+    SetIsForeground();
+  } else if (IsBackgroundPriority(mProcessPriority)) {
+    // If we're already in the background, recompute our background priority
+    // and set it immediately.
+    SetIsBackgroundNow();
+  } else {
+    ScheduleResetPriority("backgroundGracePeriodMS");
+  }
 }
 
 void
-ProcessPriorityManager::RecomputeNumVisibleWindows()
+ProcessPriorityManager::ResetPriorityNow()
+{
+  if (ComputeIsInForeground()) {
+    SetIsForeground();
+  } else {
+    SetIsBackgroundNow();
+  }
+}
+
+bool
+ProcessPriorityManager::ComputeIsInForeground()
 {
   // We could try to be clever and count the number of visible windows, instead
   // of iterating over mWindows every time one window's visibility state changes.
@@ -279,70 +376,38 @@ ProcessPriorityManager::RecomputeNumVisibleWindows()
     // but then we might not clean up all the weak refs.
   }
 
-  SetPriority(allHidden ?
-              GetBackgroundPriority() :
-              PROCESS_PRIORITY_FOREGROUND);
+  return !allHidden;
 }
 
 void
-ProcessPriorityManager::SetPriority(ProcessPriority aPriority)
+ProcessPriorityManager::SetIsForeground()
 {
-  if (aPriority == mProcessPriority) {
+  if (mProcessPriority == PROCESS_PRIORITY_FOREGROUND) {
     return;
   }
 
-  if (aPriority == PROCESS_PRIORITY_BACKGROUND ||
-      aPriority == PROCESS_PRIORITY_BACKGROUND_HOMESCREEN) {
-    // If this is a foreground --> background transition, give ourselves a
-    // grace period before informing hal.
-    uint32_t gracePeriodMS = Preferences::GetUint("dom.ipc.processPriorityManager.gracePeriodMS", 1000);
-    if (mGracePeriodTimer) {
-      LOG("Grace period timer already active.");
-      return;
-    }
-
-    LOG("Initializing grace period timer.");
-    mProcessPriority = aPriority;
-    mGracePeriodTimer = do_CreateInstance("@mozilla.org/timer;1");
-    mGracePeriodTimer->Init(this, gracePeriodMS, nsITimer::TYPE_ONE_SHOT);
-
-  } else if (aPriority == PROCESS_PRIORITY_FOREGROUND) {
-    // If this is a background --> foreground transition, do it immediately, and
-    // cancel the outstanding grace period timer, if there is one.
-    if (mGracePeriodTimer) {
-      mGracePeriodTimer->Cancel();
-      mGracePeriodTimer = nullptr;
-    }
-
-    // Cancel the memory minimization procedure we might have started.
-    nsCOMPtr<nsICancelableRunnable> runnable =
-      do_QueryReferent(mMemoryMinimizerRunnable);
-    if (runnable) {
-      runnable->Cancel();
-    }
-
-    LOG("Setting priority to %d.", aPriority);
-    mProcessPriority = aPriority;
-    hal::SetProcessPriority(getpid(), aPriority);
-
-  } else {
-    MOZ_ASSERT(false);
+  // Cancel the memory minimization procedure we might have started.
+  nsCOMPtr<nsICancelableRunnable> runnable =
+    do_QueryReferent(mMemoryMinimizerRunnable);
+  if (runnable) {
+    runnable->Cancel();
   }
+
+  LOG("Setting priority to FOREGROUND.");
+  mProcessPriority = PROCESS_PRIORITY_FOREGROUND;
+  hal::SetProcessPriority(getpid(), PROCESS_PRIORITY_FOREGROUND);
 }
 
 void
-ProcessPriorityManager::OnGracePeriodTimerFired()
+ProcessPriorityManager::SetIsBackgroundNow()
 {
-  LOG("Grace period timer fired; setting priority to %d.",
-      mProcessPriority);
+  ProcessPriority backgroundPriority = GetBackgroundPriority();
+  if (mProcessPriority == backgroundPriority) {
+    return;
+  }
 
-  // mProcessPriority should already be one of the BACKGROUND values: We set it
-  // in SetPriority(BACKGROUND), and we canceled this timer if there was an
-  // intervening SetPriority(FOREGROUND) call.
-  MOZ_ASSERT(mProcessPriority == PROCESS_PRIORITY_BACKGROUND ||
-             mProcessPriority == PROCESS_PRIORITY_BACKGROUND_HOMESCREEN);
-
-  mGracePeriodTimer = nullptr;
+  mProcessPriority = backgroundPriority;
+  LOG("Setting priority to BACKGROUND (type %d)", mProcessPriority);
   hal::SetProcessPriority(getpid(), mProcessPriority);
 
   // We're in the background; dump as much memory as we can.
@@ -363,6 +428,46 @@ ProcessPriorityManager::OnGracePeriodTimerFired()
   }
 }
 
+void
+ProcessPriorityManager::ScheduleResetPriority(const char* aTimeoutPref)
+{
+  if (mResetPriorityTimer) {
+    // The timer is already running.
+    return;
+  }
+
+  uint32_t timeout = Preferences::GetUint(
+    nsPrintfCString("dom.ipc.processPriorityManager.%s", aTimeoutPref).get());
+  LOG("Scheduling reset timer to fire in %dms.", timeout);
+  mResetPriorityTimer = do_CreateInstance("@mozilla.org/timer;1");
+  mResetPriorityTimer->InitWithCallback(this, timeout, nsITimer::TYPE_ONE_SHOT);
+}
+
+NS_IMETHODIMP
+ProcessPriorityManager::Notify(nsITimer* aTimer)
+{
+  LOG("Reset priority timer callback; about to ResetPriorityNow.");
+  ResetPriorityNow();
+  mResetPriorityTimer = nullptr;
+  return NS_OK;
+}
+
+void
+ProcessPriorityManager::TemporarilySetIsForeground()
+{
+  LOG("TemporarilySetIsForeground");
+  SetIsForeground();
+
+  // Each call to TemporarilySetIsForeground guarantees us temporaryPriorityMS
+  // in the foreground.  So cancel our timer if it's running (which is due to a
+  // previous call to either TemporarilySetIsForeground() or ResetPriority()).
+  if (mResetPriorityTimer) {
+    mResetPriorityTimer->Cancel();
+    mResetPriorityTimer = nullptr;
+  }
+  ScheduleResetPriority("temporaryPriorityMS");
+}
+
 } // anonymous namespace
 
 void
@@ -375,6 +480,7 @@ InitProcessPriorityManager()
   // If IPC tabs aren't enabled at startup, don't bother with any of this.
   if (!Preferences::GetBool("dom.ipc.processPriorityManager.enabled") ||
       Preferences::GetBool("dom.ipc.tabs.disabled")) {
+    LOG("InitProcessPriorityManager bailing due to prefs.");
     return;
   }
 
@@ -389,9 +495,32 @@ InitProcessPriorityManager()
     return;
   }
 
-  // This object is held alive by the observer service.
-  nsRefPtr<ProcessPriorityManager> mgr = new ProcessPriorityManager();
-  mgr->Init();
+  sManager = new ProcessPriorityManager();
+  sManager->Init();
+  ClearOnShutdown(&sManager);
+}
+
+bool
+CurrentProcessIsForeground()
+{
+  // The process priority manager is the only thing which changes our priority,
+  // so if the manager does not exist, then we must be in the foreground.
+  if (!sManager) {
+    return true;
+  }
+
+  return sManager->GetPriority() >= PROCESS_PRIORITY_FOREGROUND;
+}
+
+void
+TemporarilySetProcessPriorityToForeground()
+{
+  if (sManager) {
+    sManager->TemporarilySetIsForeground();
+  } else {
+    LOG("TemporarilySetProcessPriorityToForeground called before "
+        "InitProcessPriorityManager.  Bailing.");
+  }
 }
 
 } // namespace ipc

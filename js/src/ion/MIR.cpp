@@ -248,43 +248,70 @@ MDefinition::removeUse(MUseIterator use)
 }
 
 MUseIterator
-MNode::replaceOperand(MUseIterator use, MDefinition *ins)
+MNode::replaceOperand(MUseIterator use, MDefinition *def)
 {
-    MDefinition *used = getOperand(use->index());
-    if (used == ins)
+    JS_ASSERT(def != NULL);
+    uint32_t index = use->index();
+    MDefinition *prev = use->producer();
+
+    JS_ASSERT(use->index() < numOperands());
+    JS_ASSERT(use->producer() == getOperand(index));
+    JS_ASSERT(use->consumer() == this);
+
+    if (prev == def)
         return use;
 
-    MUse *save = *use;
-    MUseIterator result(used->removeUse(use));
-    if (ins) {
-        setOperand(save->index(), ins);
-        ins->linkUse(save);
-    }
+    MUseIterator result(prev->removeUse(use));
+    setOperand(index, def);
     return result;
 }
 
 void
 MNode::replaceOperand(size_t index, MDefinition *def)
 {
-    MDefinition *d = getOperand(index);
-    for (MUseIterator i(d->usesBegin()); i != d->usesEnd(); i++) {
-        if (i->index() == index && i->node() == this) {
-            replaceOperand(i, def);
-            return;
-        }
-    }
+    JS_ASSERT(def != NULL);
+    MUse *use = getUseFor(index);
+    MDefinition *prev = use->producer();
 
-    JS_NOT_REACHED("could not find use");
+    JS_ASSERT(use->index() == index);
+    JS_ASSERT(use->index() < numOperands());
+    JS_ASSERT(use->producer() == getOperand(index));
+    JS_ASSERT(use->consumer() == this);
+
+    if (prev == def)
+        return;
+
+    prev->removeUse(use);
+    setOperand(index, def);
+}
+
+void
+MNode::discardOperand(size_t index)
+{
+    MUse *use = getUseFor(index);
+
+    JS_ASSERT(use->index() == index);
+    JS_ASSERT(use->producer() == getOperand(index));
+    JS_ASSERT(use->consumer() == this);
+
+    use->producer()->removeUse(use);
+
+#ifdef DEBUG
+    // Causes any producer/consumer lookups to trip asserts.
+    use->set(NULL, NULL, index);
+#endif
 }
 
 void
 MDefinition::replaceAllUsesWith(MDefinition *dom)
 {
-    for (MUseIterator i(uses_.begin()); i != uses_.end(); ) {
-        MUse *use = *i;
-        i = uses_.removeAt(i);
-        use->node()->setOperand(use->index(), dom);
-        dom->linkUse(use);
+    JS_ASSERT(dom != NULL);
+    if (dom == this)
+        return;
+
+    for (MUseIterator i(usesBegin()); i != usesEnd(); ) {
+        JS_ASSERT(i->producer() == this);
+        i = i->consumer()->replaceOperand(i, dom);
     }
 }
 
@@ -344,6 +371,22 @@ MConstant::printOpcode(FILE *fp)
         fprintf(fp, "%f", value().toDouble());
         break;
       case MIRType_Object:
+        if (value().toObject().isFunction()) {
+            JSFunction *fun = value().toObject().toFunction();
+            if (fun->displayAtom()) {
+                fputs("function ", fp);
+                FileEscapedString(fp, fun->displayAtom(), 0);
+            } else {
+                fputs("unnamed function", fp);
+            }
+            if (fun->hasScript()) {
+                UnrootedScript script = fun->nonLazyScript();
+                fprintf(fp, " (%s:%u)",
+                        script->filename ? script->filename : "", script->lineno);
+            }
+            fprintf(fp, " at %p", (void *) fun);
+            break;
+        }
         fprintf(fp, "object %p (%s)", (void *)&value().toObject(),
                 value().toObject().getClass()->name);
         break;
@@ -367,7 +410,7 @@ MConstantElements::printOpcode(FILE *fp)
 }
 
 MParameter *
-MParameter::New(int32_t index, const types::TypeSet *types)
+MParameter::New(int32_t index, const types::StackTypeSet *types)
 {
     return new MParameter(index, types);
 }
@@ -395,10 +438,11 @@ MParameter::congruentTo(MDefinition * const &ins) const
 }
 
 MCall *
-MCall::New(JSFunction *target, size_t maxArgc, size_t numActualArgs, bool construct)
+MCall::New(JSFunction *target, size_t maxArgc, size_t numActualArgs, bool construct,
+           types::StackTypeSet *calleeTypes)
 {
     JS_ASSERT(maxArgc >= numActualArgs);
-    MCall *ins = new MCall(target, numActualArgs, construct);
+    MCall *ins = new MCall(target, numActualArgs, construct, calleeTypes);
     if (!ins->init(maxArgc + NumNonArgumentOperands))
         return NULL;
     return ins;
@@ -457,18 +501,27 @@ MPhi::New(uint32_t slot)
 void
 MPhi::removeOperand(size_t index)
 {
+    MUse *use = getUseFor(index);
+
     JS_ASSERT(index < inputs_.length());
     JS_ASSERT(inputs_.length() > 1);
+
+    JS_ASSERT(use->index() == index);
+    JS_ASSERT(use->producer() == getOperand(index));
+    JS_ASSERT(use->consumer() == this);
+
+    // Remove use from producer's use chain.
+    use->producer()->removeUse(use);
 
     // If we have phi(..., a, b, c, d, ..., z) and we plan
     // on removing a, then first shift downward so that we have
     // phi(..., b, c, d, ..., z, z):
     size_t length = inputs_.length();
-    for (size_t i = index + 1; i < length; i++)
-        replaceOperand(i - 1, getOperand(i));
-
-    // remove the final operand that now appears twice:
-    replaceOperand(length - 1, NULL);
+    for (size_t i = index; i < length - 1; i++) {
+        MUse *next = MPhi::getUseFor(i + 1);
+        next->producer()->removeUse(next);
+        MPhi::setOperand(i, next->producer());
+    }
 
     // truncate the inputs_ list:
     inputs_.shrinkBy(1);
@@ -506,17 +559,56 @@ MPhi::congruentTo(MDefinition *const &ins) const
 }
 
 bool
-MPhi::addInput(MDefinition *ins)
+MPhi::initLength(size_t length)
 {
-    ins->addUse(this, inputs_.length());
-    return inputs_.append(ins);
+    // Initializes a new MPhi to have an Operand vector of at least the given
+    // length. This permits use of setOperand() instead of addInputSlow(), the
+    // latter of which may call realloc().
+    JS_ASSERT(numOperands() == 0);
+    return inputs_.resizeUninitialized(length);
+}
+
+bool
+MPhi::addInputSlow(MDefinition *ins)
+{
+    // The list of inputs to an MPhi is given as a vector of MUse nodes,
+    // each of which is in the list of the producer MDefinition.
+    // Because appending to a vector may reallocate the vector, it is possible
+    // that this operation may cause the producers' linked lists to reference
+    // invalid memory. Therefore, in the event of moving reallocation, each
+    // MUse must be removed and reinserted from/into its producer's use chain.
+    uint32_t index = inputs_.length();
+    bool performingRealloc = !inputs_.canAppendWithoutRealloc(1);
+
+    // Remove all MUses from all use lists, in case realloc() moves.
+    if (performingRealloc) {
+        for (uint32_t i = 0; i < index; i++) {
+            MUse *use = &inputs_[i];
+            use->producer()->removeUse(use);
+        }
+    }
+
+    // Insert the new input.
+    if (!inputs_.append(MUse()))
+        return false;
+    MPhi::setOperand(index, ins);
+
+    // Add all previously-removed MUses back.
+    if (performingRealloc) {
+        for (uint32_t i = 0; i < index; i++) {
+            MUse *use = &inputs_[i];
+            use->producer()->addUse(use);
+        }
+    }
+
+    return true;
 }
 
 uint32_t
 MPrepareCall::argc() const
 {
     JS_ASSERT(useCount() == 1);
-    MCall *call = usesBegin()->node()->toDefinition()->toCall();
+    MCall *call = usesBegin()->consumer()->toDefinition()->toCall();
     return call->numStackArgs();
 }
 
@@ -538,7 +630,7 @@ MCall::addArg(size_t argnum, MPassArg *arg)
     // The operand vector is initialized in reverse order by the IonBuilder.
     // It cannot be checked for consistency until all arguments are added.
     arg->setArgnum(argnum);
-    MNode::initOperand(argnum + NumNonArgumentOperands, arg->toDefinition());
+    setOperand(argnum + NumNonArgumentOperands, arg->toDefinition());
 }
 
 void
@@ -630,10 +722,10 @@ NeedNegativeZeroCheck(MDefinition *def)
 {
     // Test if all uses have the same semantics for -0 and 0
     for (MUseIterator use = def->usesBegin(); use != def->usesEnd(); use++) {
-        if (use->node()->isResumePoint())
+        if (use->consumer()->isResumePoint())
             continue;
 
-        MDefinition *use_def = use->node()->toDefinition();
+        MDefinition *use_def = use->consumer()->toDefinition();
         switch (use_def->op()) {
           case MDefinition::Op_Add: {
             // If add is truncating -0 and 0 are observed as the same.
@@ -785,16 +877,16 @@ MDiv::analyzeEdgeCasesForward()
 
     // Try removing divide by zero check
     if (rhs()->isConstant() && !rhs()->toConstant()->value().isInt32(0))
-        canBeDivideByZero_ =  false;
+        canBeDivideByZero_ = false;
 
     // If lhs is a constant int != INT32_MIN, then
     // negative overflow check can be skipped.
     if (lhs()->isConstant() && !lhs()->toConstant()->value().isInt32(INT32_MIN))
-        setCanBeNegativeZero(false);
+        canBeNegativeOverflow_ = false;
 
     // If rhs is a constant int != -1, likewise.
     if (rhs()->isConstant() && !rhs()->toConstant()->value().isInt32(-1))
-        setCanBeNegativeZero(false);
+        canBeNegativeOverflow_ = false;
 
     // If lhs is != 0, then negative zero check can be skipped.
     if (lhs()->isConstant() && !lhs()->toConstant()->value().isInt32(0))
@@ -818,8 +910,8 @@ MDiv::analyzeEdgeCasesBackward()
 void
 MDiv::analyzeTruncateBackward()
 {
-    if (!isTruncated() && js::ion::EdgeCaseAnalysis::AllUsesTruncate(this))
-        setTruncated(true);
+    if (!isTruncated())
+        setTruncated(js::ion::EdgeCaseAnalysis::AllUsesTruncate(this));
 }
 
 bool
@@ -829,8 +921,17 @@ MDiv::updateForReplacement(MDefinition *ins_)
     MDiv *ins = ins_->toDiv();
     // Since EdgeCaseAnalysis is not being run before GVN, its information does
     // not need to be merged here.
-    setTruncated(isTruncated() && ins->isTruncated());
+    if (isTruncated() && ins->isTruncated())
+        setTruncated(Max(isTruncated(), ins->isTruncated()));
+    else
+        setTruncated(0);
     return true;
+}
+
+bool
+MDiv::fallible()
+{
+    return !isTruncated();
 }
 
 static inline MDefinition *
@@ -850,51 +951,53 @@ MMod::foldsTo(bool useValueNumbers)
     if (MDefinition *folded = EvaluateConstantOperands(this))
         return folded;
 
-    JSRuntime *rt = GetIonContext()->compartment->rt;
-    double NaN = rt->NaNValue.toDouble();
-    double Inf = rt->positiveInfinityValue.toDouble();
-
-    // Extract double constants.
-    bool lhsConstant = lhs()->isConstant() && lhs()->toConstant()->value().isNumber();
-    bool rhsConstant = rhs()->isConstant() && rhs()->toConstant()->value().isNumber();
-
-    double lhsd = lhsConstant ? lhs()->toConstant()->value().toNumber() : 0;
-    double rhsd = rhsConstant ? rhs()->toConstant()->value().toNumber() : 0;
-
-    // NaN % x -> NaN
-    if (lhsConstant && lhsd == NaN)
-        return lhs();
-
-    // x % NaN -> NaN
-    if (rhsConstant && rhsd == NaN)
-        return rhs();
-
-    // x % y -> NaN (where y == 0 || y == -0)
-    if (rhsConstant && (rhsd == 0))
-        return TryFold(this, MConstant::New(rt->NaNValue));
-
-    // NOTE: y cannot be NaN, 0, or -0 at this point
-    // x % y -> x (where x == 0 || x == -0)
-    if (lhsConstant && (lhsd == 0))
-        return TryFold(this, lhs());
-
-    // x % y -> NaN (where x == Inf || x == -Inf)
-    if (lhsConstant && (lhsd == Inf || lhsd == -Inf))
-        return TryFold(this, MConstant::New(rt->NaNValue));
-
-    // NOTE: y cannot be NaN, Inf, or -Inf at this point
-    // x % y -> x (where y == Inf || y == -Inf)
-    if (rhsConstant && (rhsd == Inf || rhsd == -Inf))
-        return TryFold(this, lhs());
-
     return this;
+}
+
+void
+MMod::analyzeTruncateBackward()
+{
+    if (!isTruncated())
+        setTruncated(js::ion::EdgeCaseAnalysis::AllUsesTruncate(this));
+}
+
+bool
+MMod::updateForReplacement(MDefinition *ins_)
+{
+    JS_ASSERT(ins_->isMod());
+    MMod *ins = ins_->toMod();
+    if (isTruncated() && ins->isTruncated())
+        setTruncated(Max(isTruncated(), ins->isTruncated()));
+    else
+        setTruncated(0);
+    return true;
+}
+
+bool
+MMod::fallible()
+{
+    return !isTruncated();
 }
 
 void
 MAdd::analyzeTruncateBackward()
 {
-    if (!isTruncated() && js::ion::EdgeCaseAnalysis::AllUsesTruncate(this))
-        setTruncated(true);
+    if (!isTruncated()) {
+        setTruncated(js::ion::EdgeCaseAnalysis::AllUsesTruncate(this));
+    }
+    if (isTruncated() && isTruncated() < 20) {
+        // Super obvious optimization... If this operation is a double
+        // BUT it happens to look like a large precision int that eventually
+        // gets truncated, then just call it an int.
+        // This can arise if we have x+y | 0, and x and y are both INT_MAX,
+        // TI will observe an overflow, thus marking the addition as double-like
+        // but we'll have MTruncate(MAddD(toDouble(x), toDouble(y))), which we know
+        // we'll be able to convert to MAddI(x,y)
+        if (isBigInt_ && type() == MIRType_Double) {
+            specialization_ = MIRType_Int32;
+            setResultType(MIRType_Int32);
+        }
+    }
 }
 
 bool
@@ -902,21 +1005,31 @@ MAdd::updateForReplacement(MDefinition *ins_)
 {
     JS_ASSERT(ins_->isAdd());
     MAdd *ins = ins_->toAdd();
-    setTruncated(isTruncated() && ins->isTruncated());
+    if (isTruncated() && ins->isTruncated())
+        setTruncated(Max(isTruncated(), ins->isTruncated()));
+    else
+        setTruncated(0);
     return true;
 }
 
 bool
 MAdd::fallible()
 {
-    return !isTruncated() && (!range() || !range()->isFinite());
+    // the add is fallible if range analysis does not say that it is finite, AND
+    // either the truncation analysis shows that there are non-truncated uses, or
+    // there are more than 20 operations before it gets truncated. 20 was chosen
+    // for two reasons. First, it is a nice sane number. Second, the largest int32
+    // can be (about) 2^31. The smallest integer that cannot be exactly represented
+    // as a double is 2^53 + 1  by doing something simple, like x = x + x, it takes
+    // 23 additions toget from 2^31 to 2^53 + 1. 20 is simply a conservative estimate of that.
+    return (!isTruncated() || isTruncated() > 20) && (!range() || !range()->isFinite());
 }
 
 void
 MSub::analyzeTruncateBackward()
 {
-    if (!isTruncated() && js::ion::EdgeCaseAnalysis::AllUsesTruncate(this))
-        setTruncated(true);
+    if (!isTruncated())
+        setTruncated(js::ion::EdgeCaseAnalysis::AllUsesTruncate(this));
 }
 
 bool
@@ -924,14 +1037,18 @@ MSub::updateForReplacement(MDefinition *ins_)
 {
     JS_ASSERT(ins_->isSub());
     MSub *ins = ins_->toSub();
-    setTruncated(isTruncated() && ins->isTruncated());
+    if (isTruncated() && ins->isTruncated())
+        setTruncated(Max(isTruncated(), ins->isTruncated()));
+    else
+        setTruncated(0);
     return true;
 }
 
 bool
 MSub::fallible()
 {
-    return !isTruncated() && (!range() || !range()->isFinite());
+    // see comment in MAdd::fallible()
+    return (!isTruncated() || isTruncated() > 20) && (!range() || !range()->isFinite());
 }
 
 MDefinition *
@@ -1084,6 +1201,100 @@ SafelyCoercesToDouble(JSContext *cx, types::StackTypeSet *types)
     return false;
 }
 
+static bool
+CanDoValueBitwiseCmp(JSContext *cx, types::StackTypeSet *lhs, types::StackTypeSet *rhs, bool looseEq)
+{
+    // Only primitive (not double/string) or objects are supported.
+    // I.e. Undefined/Null/Boolean/Int32 and Object
+    if (!lhs->knownPrimitiveOrObject() ||
+        lhs->hasAnyFlag(types::TYPE_FLAG_STRING) ||
+        lhs->hasAnyFlag(types::TYPE_FLAG_DOUBLE) ||
+        !rhs->knownPrimitiveOrObject() ||
+        rhs->hasAnyFlag(types::TYPE_FLAG_STRING) ||
+        rhs->hasAnyFlag(types::TYPE_FLAG_DOUBLE))
+    {
+        return false;
+    }
+
+    // Objects with special equality or that emulates undefined are not supported.
+    if (lhs->maybeObject() &&
+        (lhs->hasObjectFlags(cx, types::OBJECT_FLAG_SPECIAL_EQUALITY) ||
+         lhs->hasObjectFlags(cx, types::OBJECT_FLAG_EMULATES_UNDEFINED)))
+    {
+        return false;
+    }
+    if (rhs->maybeObject() &&
+        (rhs->hasObjectFlags(cx, types::OBJECT_FLAG_SPECIAL_EQUALITY) ||
+         rhs->hasObjectFlags(cx, types::OBJECT_FLAG_EMULATES_UNDEFINED)))
+    {
+        return false;
+    }
+
+    // In the loose comparison more values could be the same,
+    // but value comparison reporting otherwise.
+    if (looseEq) {
+
+        // Undefined compared loosy to Null is not supported,
+        // because tag is different, but value can be the same (undefined == null).
+        if ((lhs->hasAnyFlag(types::TYPE_FLAG_UNDEFINED) &&
+             rhs->hasAnyFlag(types::TYPE_FLAG_NULL)) ||
+            (lhs->hasAnyFlag(types::TYPE_FLAG_NULL) &&
+             rhs->hasAnyFlag(types::TYPE_FLAG_UNDEFINED)))
+        {
+            return false;
+        }
+
+        // Int32 compared loosy to Boolean is not supported,
+        // because tag is different, but value can be the same (1 == true).
+        if ((lhs->hasAnyFlag(types::TYPE_FLAG_INT32) &&
+             rhs->hasAnyFlag(types::TYPE_FLAG_BOOLEAN)) ||
+            (lhs->hasAnyFlag(types::TYPE_FLAG_BOOLEAN) &&
+             rhs->hasAnyFlag(types::TYPE_FLAG_INT32)))
+        {
+            return false;
+        }
+
+        // For loosy comparison of an object with a Boolean/Number/String
+        // the valueOf the object is taken. Therefore not supported.
+        types::TypeFlags numbers = types::TYPE_FLAG_BOOLEAN |
+                                   types::TYPE_FLAG_INT32;
+        if ((lhs->maybeObject() && rhs->hasAnyFlag(numbers)) ||
+            (rhs->maybeObject() && lhs->hasAnyFlag(numbers)))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+MIRType
+MCompare::inputType()
+{
+    switch(compareType_) {
+      case Compare_Undefined:
+        return MIRType_Undefined;
+      case Compare_Null:
+        return MIRType_Null;
+      case Compare_Boolean:
+        return MIRType_Boolean;
+      case Compare_Int32:
+        return MIRType_Int32;
+      case Compare_Double:
+        return MIRType_Double;
+      case Compare_String:
+        return MIRType_String;
+      case Compare_Object:
+        return MIRType_Object;
+      case Compare_Unknown:
+      case Compare_Value:
+        return MIRType_Value;
+      default:
+        JS_NOT_REACHED("No known conversion");
+        return MIRType_None;
+    }
+}
+
 void
 MCompare::infer(const TypeOracle::BinaryTypes &b, JSContext *cx)
 {
@@ -1098,86 +1309,95 @@ MCompare::infer(const TypeOracle::BinaryTypes &b, JSContext *cx)
     MIRType lhs = MIRTypeFromValueType(b.lhsTypes->getKnownTypeTag());
     MIRType rhs = MIRTypeFromValueType(b.rhsTypes->getKnownTypeTag());
 
-    // Strict integer or boolean comparisons may be treated as Int32.
+    bool looseEq = jsop() == JSOP_EQ || jsop() == JSOP_NE;
+    bool strictEq = jsop() == JSOP_STRICTEQ || jsop() == JSOP_STRICTNE;
+    bool relationalEq = !(looseEq || strictEq);
+
+    // Integer to integer or boolean to boolean comparisons may be treated as Int32.
     if ((lhs == MIRType_Int32 && rhs == MIRType_Int32) ||
         (lhs == MIRType_Boolean && rhs == MIRType_Boolean))
     {
-        specialization_ = MIRType_Int32;
+        compareType_ = Compare_Int32;
         return;
     }
 
-    // Loose cross-integer/boolean comparisons may be treated as Int32.
-    if (jsop() != JSOP_STRICTEQ && jsop() != JSOP_STRICTNE &&
+    // Loose/relational cross-integer/boolean comparisons may be treated as Int32.
+    if (!strictEq &&
         (lhs == MIRType_Int32 || lhs == MIRType_Boolean) &&
         (rhs == MIRType_Int32 || rhs == MIRType_Boolean))
     {
-        specialization_ = MIRType_Int32;
+        compareType_ = Compare_Int32;
         return;
     }
 
     // Numeric comparisons against a double coerce to double.
     if (IsNumberType(lhs) && IsNumberType(rhs)) {
-        specialization_ = MIRType_Double;
+        compareType_ = Compare_Double;
         return;
     }
 
-    // Handle double comparisons against something that safely coerces to double.
-    if (jsop() != JSOP_STRICTEQ && jsop() != JSOP_STRICTNE &&
+    // Any comparison is allowed except strict eq.
+    if (!strictEq &&
         ((lhs == MIRType_Double && SafelyCoercesToDouble(cx, b.rhsTypes)) ||
          (rhs == MIRType_Double && SafelyCoercesToDouble(cx, b.lhsTypes))))
     {
-        specialization_ = MIRType_Double;
+        compareType_ = Compare_Double;
         return;
     }
 
-    if (jsop() == JSOP_STRICTEQ || jsop() == JSOP_EQ ||
-        jsop() == JSOP_STRICTNE || jsop() == JSOP_NE)
-    {
-        if (lhs == MIRType_Object && rhs == MIRType_Object) {
-            if (b.lhsTypes->hasObjectFlags(cx, types::OBJECT_FLAG_SPECIAL_EQUALITY) ||
-                b.rhsTypes->hasObjectFlags(cx, types::OBJECT_FLAG_SPECIAL_EQUALITY))
-            {
-                return;
-            }
-            specialization_ = MIRType_Object;
+    // Handle object comparison.
+    if (!relationalEq && lhs == MIRType_Object && rhs == MIRType_Object) {
+        if (b.lhsTypes->hasObjectFlags(cx, types::OBJECT_FLAG_SPECIAL_EQUALITY) ||
+            b.rhsTypes->hasObjectFlags(cx, types::OBJECT_FLAG_SPECIAL_EQUALITY))
+        {
             return;
         }
 
-        if (lhs == MIRType_String && rhs == MIRType_String) {
-            // We don't yet want to optimize relational string compares.
-            specialization_ = MIRType_String;
-            return;
-        }
-
-        // Swap null/undefined lhs to rhs so we can test for it only on lhs.
-        if (IsNullOrUndefined(lhs)) {
-            MIRType tmp = lhs;
-            lhs = rhs;
-            rhs = tmp;
-            swapOperands();
-        }
-
-        if (IsNullOrUndefined(rhs)) {
-            specialization_ = rhs;
-            return;
-        }
+        compareType_ = Compare_Object;
+        return;
     }
 
-    if (jsop() == JSOP_STRICTEQ || jsop() == JSOP_STRICTNE) {
+    // Handle string comparisons. (Relational string compares are still unsupported).
+    if (!relationalEq && lhs == MIRType_String && rhs == MIRType_String) {
+        compareType_ = Compare_String;
+        return;
+    }
+
+    // Handle compare with lhs being Undefined or Null.
+    if (!relationalEq && IsNullOrUndefined(lhs)) {
+        // Lowering expects the rhs to be null/undefined, so we have to
+        // swap the operands. This is necessary since we may not know which
+        // operand was null/undefined during lowering (both operands may have
+        // MIRType_Value).
+        compareType_ = (lhs == MIRType_Null) ? Compare_Null : Compare_Undefined;
+        swapOperands();
+        return;
+    }
+
+    // Handle compare with rhs being Undefined or Null.
+    if (!relationalEq && IsNullOrUndefined(rhs)) {
+        compareType_ = (rhs == MIRType_Null) ? Compare_Null : Compare_Undefined;
+        return;
+    }
+
+    // Handle strict comparison with lhs/rhs being typed Boolean.
+    if (strictEq && (lhs == MIRType_Boolean || rhs == MIRType_Boolean)) {
         // bool/bool case got an int32 specialization earlier.
         JS_ASSERT(!(lhs == MIRType_Boolean && rhs == MIRType_Boolean));
 
-        if (lhs == MIRType_Boolean) {
-            // Ensure the boolean is on the right so that the type policy knows
-            // which side to unbox.
-            swapOperands();
-            specialization_ = MIRType_Boolean;
-            return;
-        }
-        if (rhs == MIRType_Boolean) {
-            specialization_ = MIRType_Boolean;
-            return;
-        }
+        // Ensure the boolean is on the right so that the type policy knows
+        // which side to unbox.
+        if (lhs == MIRType_Boolean)
+             swapOperands();
+
+        compareType_ = Compare_Boolean;
+        return;
+    }
+
+    // Determine if we can do the compare based on a quick value check.
+    if (!relationalEq && CanDoValueBitwiseCmp(cx, b.lhsTypes, b.rhsTypes, looseEq)) {
+        compareType_ = Compare_Value;
+        return;
     }
 }
 
@@ -1282,7 +1502,7 @@ MResumePoint *
 MResumePoint::New(MBasicBlock *block, jsbytecode *pc, MResumePoint *parent, Mode mode)
 {
     MResumePoint *resume = new MResumePoint(block, pc, parent, mode);
-    if (!resume->init(block))
+    if (!resume->init())
         return NULL;
     resume->inherit(block);
     return resume;
@@ -1299,15 +1519,6 @@ MResumePoint::MResumePoint(MBasicBlock *block, jsbytecode *pc, MResumePoint *cal
 {
 }
 
-bool
-MResumePoint::init(MBasicBlock *block)
-{
-    operands_ = block->graph().allocate<MDefinition *>(stackDepth());
-    if (!operands_)
-        return false;
-    return true;
-}
-
 void
 MResumePoint::inherit(MBasicBlock *block)
 {
@@ -1317,7 +1528,7 @@ MResumePoint::inherit(MBasicBlock *block)
         // and LStackArg does not define a value.
         if (def->isPassArg())
             def = def->toPassArg()->getArgument();
-        initOperand(i, def);
+        setOperand(i, def);
     }
 }
 
@@ -1395,7 +1606,7 @@ MCompare::tryFold(bool *result)
 {
     JSOp op = jsop();
 
-    if (IsNullOrUndefined(specialization())) {
+    if (compareType_ == Compare_Null || compareType_ == Compare_Undefined) {
         JS_ASSERT(op == JSOP_EQ || op == JSOP_STRICTEQ ||
                   op == JSOP_NE || op == JSOP_STRICTNE);
 
@@ -1405,7 +1616,7 @@ MCompare::tryFold(bool *result)
             return false;
           case MIRType_Undefined:
           case MIRType_Null:
-            if (lhs()->type() == specialization()) {
+            if (lhs()->type() == inputType()) {
                 // Both sides have the same type, null or undefined.
                 *result = (op == JSOP_EQ || op == JSOP_STRICTEQ);
             } else {
@@ -1430,7 +1641,7 @@ MCompare::tryFold(bool *result)
         }
     }
 
-    if (specialization_ == MIRType_Boolean) {
+    if (compareType_ == Compare_Boolean) {
         JS_ASSERT(op == JSOP_STRICTEQ || op == JSOP_STRICTNE);
         JS_ASSERT(rhs()->type() == MIRType_Boolean);
 
@@ -1617,4 +1828,20 @@ MBeta::computeRange()
     } else {
         setRange(range);
     }
+}
+
+bool
+MLoadFixedSlot::mightAlias(MDefinition *store)
+{
+    if (store->isStoreFixedSlot() && store->toStoreFixedSlot()->slot() != slot())
+        return false;
+    return true;
+}
+
+bool
+MLoadSlot::mightAlias(MDefinition *store)
+{
+    if (store->isStoreSlot() && store->toStoreSlot()->slot() != slot())
+        return false;
+    return true;
 }

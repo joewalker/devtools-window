@@ -63,7 +63,7 @@
 #include "nsISecurityEventSink.h"
 #include "nsIChannelEventSink.h"
 #include "imgIRequest.h"
-#include "nsIDOMDOMImplementation.h"
+#include "mozilla/dom/DOMImplementation.h"
 #include "nsIDOMTouchEvent.h"
 #include "nsIInlineEventHandlers.h"
 #include "nsDataHashtable.h"
@@ -93,6 +93,13 @@ class nsHTMLCSSStyleSheet;
 class nsDOMNavigationTiming;
 class nsWindowSizes;
 class nsHtml5TreeOpExecutor;
+class nsDocumentOnStack;
+
+namespace mozilla {
+namespace dom {
+class UndoManager;
+}
+}
 
 /**
  * Right now our identifier map entries contain information for 'name'
@@ -477,6 +484,7 @@ class nsDocument : public nsIDocument,
 {
 public:
   typedef mozilla::dom::Element Element;
+  using nsIDocument::GetElementsByTagName;
 
   NS_DECL_CYCLE_COLLECTING_ISUPPORTS
 
@@ -561,12 +569,14 @@ public:
    * shared among multiple presentation shell's).
    */
   virtual nsresult CreateShell(nsPresContext* aContext,
-                               nsIViewManager* aViewManager,
+                               nsViewManager* aViewManager,
                                nsStyleSet* aStyleSet,
                                nsIPresShell** aInstancePtrResult);
   virtual void DeleteShell();
 
   virtual nsresult GetAllowPlugins(bool* aAllowPlugins);
+
+  virtual already_AddRefed<mozilla::dom::UndoManager> GetUndoManager();
 
   virtual nsresult SetSubDocumentFor(Element* aContent,
                                      nsIDocument* aSubDoc);
@@ -624,7 +634,7 @@ public:
 
   virtual void SetScriptHandlingObject(nsIScriptGlobalObject* aScriptObject);
 
-  virtual nsIScriptGlobalObject* GetScopeObject();
+  virtual nsIScriptGlobalObject* GetScopeObject() const;
 
   /**
    * Get the script loader for this document
@@ -660,7 +670,6 @@ public:
   virtual void EndLoad();
 
   virtual void SetReadyStateInternal(ReadyState rs);
-  virtual ReadyState GetReadyStateEnum();
 
   virtual void ContentStateChanged(nsIContent* aContent,
                                    nsEventStates aStateMask);
@@ -730,6 +739,10 @@ public:
   nsRadioGroupStruct* GetRadioGroup(const nsAString& aName) const;
   nsRadioGroupStruct* GetOrCreateRadioGroup(const nsAString& aName);
 
+  virtual nsViewportInfo GetViewportInfo(uint32_t aDisplayWidth,
+                                         uint32_t aDisplayHeight);
+
+
 private:
   nsRadioGroupStruct* GetRadioGroupInternal(const nsAString& aName) const;
 
@@ -775,12 +788,6 @@ public:
                               int32_t aNamespaceID,
                               nsIContent **aResult);
 
-  nsresult CreateElement(const nsAString& aTagName,
-                         nsIContent** aReturn);
-  nsresult CreateElementNS(const nsAString& aNamespaceURI,
-                           const nsAString& aQualifiedName,
-                           nsIContent** aReturn);
-
   nsresult CreateTextNode(const nsAString& aData, nsIContent** aReturn);
 
   virtual NS_HIDDEN_(nsresult) Sanitize();
@@ -806,15 +813,14 @@ public:
                                                    nsIDOMNodeList** aResult);
   virtual NS_HIDDEN_(nsresult) GetContentListFor(nsIContent* aContent,
                                                  nsIDOMNodeList** aResult);
-  virtual NS_HIDDEN_(nsIContent*)
+  virtual NS_HIDDEN_(Element*)
     GetAnonymousElementByAttribute(nsIContent* aElement,
                                    nsIAtom* aAttrName,
                                    const nsAString& aAttrValue) const;
 
-  virtual NS_HIDDEN_(nsresult) ElementFromPointHelper(float aX, float aY,
+  virtual NS_HIDDEN_(Element*) ElementFromPointHelper(float aX, float aY,
                                                       bool aIgnoreRootScrollFrame,
-                                                      bool aFlushLayout,
-                                                      nsIDOMElement** aReturn);
+                                                      bool aFlushLayout);
 
   virtual NS_HIDDEN_(nsresult) NodesFromRectHelper(float aX, float aY,
                                                    float aTopSize, float aRightSize,
@@ -899,18 +905,12 @@ public:
   virtual void ResetScrolledToRefAlready();
   virtual void SetChangeScrollPosWhenScrollingToRef(bool aValue);
 
-  already_AddRefed<nsContentList>
-  GetElementsByTagName(const nsAString& aTagName) {
-    return NS_GetContentList(this, kNameSpaceID_Unknown, aTagName);
-  }
-  already_AddRefed<nsContentList>
-    GetElementsByTagNameNS(const nsAString& aNamespaceURI,
-                           const nsAString& aLocalName);
-
   virtual Element *GetElementById(const nsAString& aElementId);
   virtual const nsSmallVoidArray* GetAllElementsForId(const nsAString& aElementId) const;
 
   virtual Element *LookupImageElement(const nsAString& aElementId);
+  virtual void MozSetImageElement(const nsAString& aImageElementId,
+                                  Element* aElement);
 
   virtual NS_HIDDEN_(nsresult) AddImage(imgIRequest* aImage);
   virtual NS_HIDDEN_(nsresult) RemoveImage(imgIRequest* aImage, uint32_t aFlags);
@@ -990,6 +990,10 @@ public:
   // Returns the top element from the full-screen stack.
   Element* FullScreenStackTop();
 
+  // DOM-exposed fullscreen API
+  virtual bool MozFullScreenEnabled();
+  virtual Element* GetMozFullScreenElement(mozilla::ErrorResult& rv);
+
   void RequestPointerLock(Element* aElement);
   bool ShouldLockPointer(Element* aElement);
   bool SetPointerLock(Element* aElement, int aCursorStyle);
@@ -1005,8 +1009,32 @@ public:
   // DocSizeOfIncludingThis is inherited from nsIDocument.
 
   virtual nsIDOMNode* AsDOMNode() { return this; }
+
+  // WebIDL bits
+  virtual mozilla::dom::DOMImplementation*
+    GetImplementation(mozilla::ErrorResult& rv);
+  virtual nsIDOMStyleSheetList* StyleSheets();
+  virtual void SetSelectedStyleSheetSet(const nsAString& aSheetSet);
+  virtual void GetLastStyleSheetSet(nsString& aSheetSet);
+  virtual nsIDOMDOMStringList* StyleSheetSets();
+  virtual void EnableStyleSheetsForSet(const nsAString& aSheetSet);
+
 protected:
   friend class nsNodeUtils;
+  friend class nsDocumentOnStack;
+
+  void IncreaseStackRefCnt()
+  {
+    ++mStackRefCnt;
+  }
+
+  void DecreaseStackRefCnt()
+  {
+    if (--mStackRefCnt == 0 && mNeedsReleaseAfterStackRefCntRelease) {
+      mNeedsReleaseAfterStackRefCntRelease = false;
+      NS_RELEASE_THIS();
+    }
+  }
 
   // Returns true if a request for DOM full-screen is currently enabled in
   // this document. This returns true if there are no windowed plugins in this
@@ -1037,7 +1065,7 @@ protected:
 
   void RetrieveRelevantHeaders(nsIChannel *aChannel);
 
-  bool TryChannelCharset(nsIChannel *aChannel,
+  void TryChannelCharset(nsIChannel *aChannel,
                          int32_t& aCharsetSource,
                          nsACString& aCharset,
                          nsHtml5TreeOpExecutor* aExecutor);
@@ -1052,12 +1080,6 @@ protected:
   nsIContent* GetFirstBaseNodeWithHref();
   nsresult SetFirstBaseNodeWithHref(nsIContent *node);
 
-  inline void
-  SetDocumentDirectionality(mozilla::Directionality aDir)
-  {
-    mDirectionality = aDir;
-  }
-
   // Get the first <title> element with the given IsNodeOfType type, or
   // return null if there isn't one
   nsIContent* GetTitleContent(uint32_t aNodeType);
@@ -1065,12 +1087,19 @@ protected:
   // append the concatenation of its text node children to aTitle. Do
   // nothing if there is no such element.
   void GetTitleFromElement(uint32_t aNodeType, nsAString& aTitle);
+public:
+  // Get our title
+  virtual void GetTitle(nsString& aTitle);
+  // Set our title
+  virtual void SetTitle(const nsAString& aTitle, mozilla::ErrorResult& rv);
 
+protected:
   nsresult doCreateShell(nsPresContext* aContext,
-                         nsIViewManager* aViewManager, nsStyleSet* aStyleSet,
+                         nsViewManager* aViewManager, nsStyleSet* aStyleSet,
                          nsCompatibility aCompatMode,
                          nsIPresShell** aInstancePtrResult);
 
+  void RemoveDocStyleSheetsFromStyleSets();
   void RemoveStyleSheetsFromStyleSets(nsCOMArray<nsIStyleSheet>& aSheets, 
                                       nsStyleSet::sheetType aType);
   nsresult ResetStylesheetsToURI(nsIURI* aURI);
@@ -1100,9 +1129,6 @@ protected:
   virtual ~nsDocument();
 
   void EnsureOnloadBlocker();
-
-  nsCString mReferrer;
-  nsString mLastModified;
 
   nsTArray<nsIObserver*> mCharSetObservers;
 
@@ -1196,10 +1222,6 @@ protected:
 
   bool mSynchronousDOMContentLoaded:1;
 
-  // If true, we have an input encoding.  If this is false, then the
-  // document was created entirely in memory
-  bool mHaveInputEncoding:1;
-
   bool mInXBLUpdate:1;
 
   // Whether we're currently holding a lock on all of our images.
@@ -1258,14 +1280,8 @@ protected:
   nsRefPtr<nsDOMNavigationTiming> mTiming;
 private:
   friend class nsUnblockOnloadEvent;
-  // This needs to stay in sync with the list in GetVisibilityState.
-  enum VisibilityState {
-    eHidden = 0,
-    eVisible,
-    eVisibilityStateCount
-  };
   // Recomputes the visibility state but doesn't set the new value.
-  VisibilityState GetVisibilityState() const;
+  mozilla::dom::VisibilityState GetVisibilityState() const;
 
   void PostUnblockOnloadEvent();
   void DoUnblockOnload();
@@ -1322,7 +1338,6 @@ private:
   // Onload blockers which haven't been activated yet
   uint32_t mAsyncOnloadBlockCount;
   nsCOMPtr<nsIRequest> mOnloadBlocker;
-  ReadyState mReadyState;
 
   // A hashtable of styled links keyed by address pointer.
   nsTHashtable<nsPtrHashKey<mozilla::dom::Link> > mStyledLinks;
@@ -1348,7 +1363,7 @@ private:
   // All images in process of being preloaded
   nsCOMArray<imgIRequest> mPreloadingImages;
 
-  nsCOMPtr<nsIDOMDOMImplementation> mDOMImplementation;
+  nsRefPtr<mozilla::dom::DOMImplementation> mDOMImplementation;
 
   nsRefPtr<nsContentList> mImageMaps;
 
@@ -1362,12 +1377,45 @@ private:
   // Tracking for plugins in the document.
   nsTHashtable< nsPtrHashKey<nsIObjectLoadingContent> > mPlugins;
 
-  VisibilityState mVisibilityState;
+  nsRefPtr<mozilla::dom::UndoManager> mUndoManager;
+
+  enum ViewportType {
+    DisplayWidthHeight,
+    Specified,
+    Unknown
+  };
+
+  ViewportType mViewportType;
+
+  // These member variables cache information about the viewport so we don't have to
+  // recalculate it each time.
+  bool mValidWidth, mValidHeight;
+  float mScaleMinFloat, mScaleMaxFloat, mScaleFloat, mPixelRatio;
+  bool mAutoSize, mAllowZoom, mValidScaleFloat, mValidMaxScale, mScaleStrEmpty, mWidthStrEmpty;
+  uint32_t mViewportWidth, mViewportHeight;
+
+  nsrefcnt mStackRefCnt;
+  bool mNeedsReleaseAfterStackRefCntRelease;
 
 #ifdef DEBUG
 protected:
   bool mWillReparent;
 #endif
+};
+
+class nsDocumentOnStack
+{
+public:
+  nsDocumentOnStack(nsDocument* aDoc) : mDoc(aDoc)
+  {
+    mDoc->IncreaseStackRefCnt();
+  }
+  ~nsDocumentOnStack()
+  {
+    mDoc->DecreaseStackRefCnt();
+  }
+private:
+  nsDocument* mDoc;
 };
 
 #define NS_DOCUMENT_INTERFACE_TABLE_BEGIN(_class)                             \

@@ -44,7 +44,6 @@
 #include "nsIDOMAttr.h"
 #include "nsISMILAttr.h"
 #include "nsClientRect.h"
-#include "nsIDOMDOMTokenList.h"
 #include "nsEvent.h"
 
 class nsIDOMEventListener;
@@ -116,6 +115,7 @@ namespace mozilla {
 namespace dom {
 
 class Link;
+class UndoManager;
 
 // IID for the dom::Element interface
 #define NS_ELEMENT_IID \
@@ -338,7 +338,7 @@ public:
   // false
   inline bool HasDirAuto() const {
     return (!HasFixedDir() &&
-            (HasValidDir() || NodeInfo()->Equals(nsGkAtoms::bdi)));
+            (HasValidDir() || IsHTML(nsGkAtoms::bdi)));
   }
 
 protected:
@@ -696,6 +696,29 @@ public:
            0;
   }
 
+  virtual already_AddRefed<mozilla::dom::UndoManager> GetUndoManager()
+  {
+    return nullptr;
+  }
+
+  virtual bool UndoScope()
+  {
+    return false;
+  }
+
+  virtual void SetUndoScope(bool aUndoScope, mozilla::ErrorResult& aError)
+  {
+  }
+
+  virtual void GetInnerHTML(nsAString& aInnerHTML,
+                            mozilla::ErrorResult& aError);
+  virtual void SetInnerHTML(const nsAString& aInnerHTML,
+                            mozilla::ErrorResult& aError);
+  void GetOuterHTML(nsAString& aOuterHTML, mozilla::ErrorResult& aError);
+  void SetOuterHTML(const nsAString& aOuterHTML, mozilla::ErrorResult& aError);
+  void InsertAdjacentHTML(const nsAString& aPosition, const nsAString& aText,
+                          mozilla::ErrorResult& aError);
+
   //----------------------------------------
 
   /**
@@ -839,10 +862,38 @@ public:
   nsresult
     GetElementsByClassName(const nsAString& aClassNames,
                            nsIDOMHTMLCollection** aResult);
-  void GetClassList(nsIDOMDOMTokenList** aClassList);
+  void GetClassList(nsISupports** aClassList);
 
   virtual JSObject* WrapObject(JSContext *aCx, JSObject *aScope,
                                bool *aTriedToWrap) MOZ_FINAL;
+
+  /**
+   * Locate an nsIEditor rooted at this content node, if there is one.
+   */
+  nsIEditor* GetEditorInternal();
+
+  /**
+   * Helper method for NS_IMPL_BOOL_ATTR macro.
+   * Gets value of boolean attribute. Only works for attributes in null
+   * namespace.
+   *
+   * @param aAttr    name of attribute.
+   * @param aValue   Boolean value of attribute.
+   */
+  NS_HIDDEN_(bool) GetBoolAttr(nsIAtom* aAttr) const
+  {
+    return HasAttr(kNameSpaceID_None, aAttr);
+  }
+
+  /**
+   * Helper method for NS_IMPL_BOOL_ATTR macro.
+   * Sets value of boolean attribute by removing attribute or setting it to
+   * the empty string. Only works for attributes in null namespace.
+   *
+   * @param aAttr    name of attribute.
+   * @param aValue   Boolean value of attribute.
+   */
+  NS_HIDDEN_(nsresult) SetBoolAttr(nsIAtom* aAttr, bool aValue);
 
 protected:
   /*
@@ -985,13 +1036,6 @@ protected:
    */
   virtual Element* GetOffsetRect(nsRect& aRect);
 
-  /**
-   * Retrieve the size of the padding rect of this element.
-   *
-   * @param aSize the size of the padding rect
-   */
-  nsIntSize GetPaddingRectSize();
-
   nsIFrame* GetStyledFrame();
 
   virtual Element* GetNameSpaceElement()
@@ -1081,6 +1125,8 @@ private:
   nsRect GetClientAreaRect();
 
   nsIScrollableFrame* GetScrollFrame(nsIFrame **aStyledFrame = nullptr);
+
+  nsresult GetMarkup(bool aIncludeSelf, nsAString& aMarkup);
 
   // Data members
   nsEventStates mState;
@@ -1184,6 +1230,24 @@ _elementName::Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const        \
     return SetAttr(kNameSpaceID_None, nsGkAtoms::_atom, nullptr, aValue, true); \
   }
 
+/**
+ * A macro to implement the getter and setter for a given boolean
+ * valued content property. The method uses the GetBoolAttr and
+ * SetBoolAttr methods.
+ */
+#define NS_IMPL_BOOL_ATTR(_class, _method, _atom)                     \
+  NS_IMETHODIMP                                                       \
+  _class::Get##_method(bool* aValue)                                  \
+  {                                                                   \
+    *aValue = GetBoolAttr(nsGkAtoms::_atom);                          \
+    return NS_OK;                                                     \
+  }                                                                   \
+  NS_IMETHODIMP                                                       \
+  _class::Set##_method(bool aValue)                                   \
+  {                                                                   \
+    return SetBoolAttr(nsGkAtoms::_atom, aValue);                     \
+  }
+
 #define NS_FORWARD_NSIDOMELEMENT_TO_GENERIC                                   \
 typedef mozilla::dom::Element Element;                                        \
 NS_IMETHOD GetTagName(nsAString& aTagName) MOZ_FINAL                          \
@@ -1191,7 +1255,7 @@ NS_IMETHOD GetTagName(nsAString& aTagName) MOZ_FINAL                          \
   Element::GetTagName(aTagName);                                              \
   return NS_OK;                                                               \
 }                                                                             \
-NS_IMETHOD GetClassList(nsIDOMDOMTokenList** aClassList) MOZ_FINAL            \
+NS_IMETHOD GetClassList(nsISupports** aClassList) MOZ_FINAL                   \
 {                                                                             \
   Element::GetClassList(aClassList);                                          \
   return NS_OK;                                                               \

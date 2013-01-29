@@ -21,6 +21,7 @@ SDK_XPIDLSRCS = 				\
 	nsIDOMCSSStyleDeclaration.idl		\
 	nsIDOMCSSStyleSheet.idl			\
 	nsIDOMCSSValue.idl			\
+	nsIDOMCSSValueList.idl			\
 	nsIDOMElementCSSInlineStyle.idl		\
 	$(NULL)
 
@@ -39,9 +40,7 @@ XPIDLSRCS =					\
 	nsIDOMCSSStyleRule.idl			\
 	nsIDOMCSSUnknownRule.idl		\
 	nsIDOMCounter.idl			\
-	nsIDOMRGBColor.idl			\
 	nsIDOMRect.idl				\
-	nsIDOMNSRGBAColor.idl			\
 	$(NULL)
 
 include $(topsrcdir)/config/rules.mk

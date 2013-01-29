@@ -56,7 +56,7 @@ const MEM_HISTOGRAMS = {
   "js-compartments/system": "MEMORY_JS_COMPARTMENTS_SYSTEM",
   "js-compartments/user": "MEMORY_JS_COMPARTMENTS_USER",
   "explicit": "MEMORY_EXPLICIT",
-  "resident": "MEMORY_RESIDENT",
+  "resident-fast": "MEMORY_RESIDENT",
   "vsize": "MEMORY_VSIZE",
   "storage-sqlite": "MEMORY_STORAGE_SQLITE",
   "images-content-used-uncompressed":
@@ -255,12 +255,17 @@ TelemetryPing.prototype = {
       bucket_count: r.length,
       histogram_type: hgram.histogram_type,
       values: {},
-      sum: hgram.sum,
-      sum_squares_lo: hgram.sum_squares_lo,
-      sum_squares_hi: hgram.sum_squares_hi,
-      log_sum: hgram.log_sum,
-      log_sum_squares: hgram.log_sum_squares
+      sum: hgram.sum
     };
+
+    if (hgram.histogram_type == Telemetry.HISTOGRAM_EXPONENTIAL) {
+      retgram.log_sum = hgram.log_sum;
+      retgram.log_sum_squares = hgram.log_sum_squares;
+    } else {
+      retgram.sum_squares_lo = hgram.sum_squares_lo;
+      retgram.sum_squares_hi = hgram.sum_squares_hi;
+    }
+
     let first = true;
     let last = 0;
 
@@ -513,6 +518,7 @@ TelemetryPing.prototype = {
       histograms: this.getHistograms(Telemetry.histogramSnapshots),
       slowSQL: Telemetry.slowSQL,
       chromeHangs: Telemetry.chromeHangs,
+      lateWrites: Telemetry.lateWrites,
       addonHistograms: this.getAddonHistograms()
     };
 
@@ -541,8 +547,8 @@ TelemetryPing.prototype = {
   getCurrentSessionPayloadAndSlug: function getCurrentSessionPayloadAndSlug(reason) {
     let isTestPing = (reason == "test-ping");
     let payloadObj = this.getCurrentSessionPayload(reason);
-    let slug = (isTestPing ? reason : this._uuid);
-    return { slug: slug, payload: JSON.stringify(payloadObj) };
+    let slug = this._uuid;
+    return { slug: slug, reason: reason, payload: JSON.stringify(payloadObj) };
   },
 
   getPayloads: function getPayloads(reason) {
@@ -553,7 +559,7 @@ TelemetryPing.prototype = {
         let data = this._pendingPings.pop();
         // Send persisted pings to the test URL too.
         if (reason == "test-ping") {
-          data.slug = reason;
+          data.reason = reason;
         }
         yield data;
       }
@@ -639,7 +645,9 @@ TelemetryPing.prototype = {
   },
 
   doPing: function doPing(server, ping, onSuccess, onError) {
-    let submitPath = "/submit/telemetry/" + ping.slug;
+    let submitPath = "/submit/telemetry/" + (ping.reason == "test-ping"
+                                             ? "test-ping"
+                                             : ping.slug);
     let url = server + submitPath;
     let request = Cc["@mozilla.org/xmlextras/xmlhttprequest;1"]
                   .createInstance(Ci.nsIXMLHttpRequest);
@@ -712,6 +720,15 @@ TelemetryPing.prototype = {
    * Initializes telemetry within a timer. If there is no PREF_SERVER set, don't turn on telemetry.
    */
   setup: function setup() {
+#ifdef MOZILLA_OFFICIAL
+    if (!Telemetry.canSend) {
+      // We can't send data; no point in initializing observers etc.
+      // Only do this for official builds so that e.g. developer builds
+      // still enable Telemetry based on prefs.
+      Telemetry.canRecord = false;
+      return;
+    }
+#endif
     let enabled = false; 
     try {
       enabled = Services.prefs.getBoolPref(PREF_ENABLED);
@@ -741,6 +758,7 @@ TelemetryPing.prototype = {
     this._timer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
     function timerCallback() {
       this._initialized = true;
+      this.loadSavedPings(false);
       this.attachObservers();
       this.gatherMemory();
 
@@ -750,7 +768,6 @@ TelemetryPing.prototype = {
     }
     this._timer.initWithCallback(timerCallback.bind(this), TELEMETRY_DELAY,
                                  Ci.nsITimer.TYPE_ONE_SHOT);
-    this.loadSavedPings(false);
   },
 
   verifyPingChecksum: function verifyPingChecksum(ping) {
@@ -1072,7 +1089,7 @@ TelemetryPing.prototype = {
   },
 
   classID: Components.ID("{55d6a5fa-130e-4ee6-a158-0133af3b86ba}"),
-  QueryInterface: XPCOMUtils.generateQI([Ci.nsITelemetryPing]),
+  QueryInterface: XPCOMUtils.generateQI([Ci.nsITelemetryPing, Ci.nsIObserver]),
 };
 
 this.NSGetFactory = XPCOMUtils.generateNSGetFactory([TelemetryPing]);

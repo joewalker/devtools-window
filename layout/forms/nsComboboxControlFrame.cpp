@@ -23,8 +23,8 @@
 #include "nsPIDOMWindow.h"
 #include "nsIPresShell.h"
 #include "nsContentList.h"
-#include "nsIView.h"
-#include "nsIViewManager.h"
+#include "nsView.h"
+#include "nsViewManager.h"
 #include "nsEventDispatcher.h"
 #include "nsEventListenerManager.h"
 #include "nsIDOMNode.h"
@@ -55,6 +55,7 @@
 #include "mozilla/Preferences.h"
 #include "nsContentList.h"
 #include "mozilla/Likely.h"
+#include <algorithm>
 
 using namespace mozilla;
 
@@ -142,7 +143,7 @@ public:
   }
 
 private:
-  nsIWidget* GetWidget(nsIView** aOutView = nullptr) const;
+  nsIWidget* GetWidget(nsView** aOutView = nullptr) const;
 
 private:
   nsCOMPtr<nsIContent> mCombobox;
@@ -151,7 +152,7 @@ private:
 
 NS_IMETHODIMP DestroyWidgetRunnable::Run()
 {
-  nsIView* view = nullptr;
+  nsView* view = nullptr;
   nsIWidget* currentWidget = GetWidget(&view);
   // Make sure that we are destroying the same widget as what was requested
   // when the event was fired.
@@ -161,14 +162,14 @@ NS_IMETHODIMP DestroyWidgetRunnable::Run()
   return NS_OK;
 }
 
-nsIWidget* DestroyWidgetRunnable::GetWidget(nsIView** aOutView) const
+nsIWidget* DestroyWidgetRunnable::GetWidget(nsView** aOutView) const
 {
   nsIFrame* primaryFrame = mCombobox->GetPrimaryFrame();
   nsIComboboxControlFrame* comboboxFrame = do_QueryFrame(primaryFrame);
   if (comboboxFrame) {
     nsIFrame* dropdown = comboboxFrame->GetDropDown();
     if (dropdown) {
-      nsIView* view = dropdown->GetView();
+      nsView* view = dropdown->GetView();
       NS_ASSERTION(view, "nsComboboxControlFrame view is null");
       if (aOutView) {
         *aOutView = view;
@@ -355,8 +356,8 @@ nsComboboxControlFrame::SetFocus(bool aOn, bool aRepaint)
 void
 nsComboboxControlFrame::ShowPopup(bool aShowPopup)
 {
-  nsIView* view = mDropdownFrame->GetView();
-  nsIViewManager* viewManager = view->GetViewManager();
+  nsView* view = mDropdownFrame->GetView();
+  nsViewManager* viewManager = view->GetViewManager();
 
   if (aShowPopup) {
     nsRect rect = mDropdownFrame->GetRect();
@@ -388,7 +389,7 @@ nsComboboxControlFrame::ShowList(bool aShowList)
   nsWeakFrame weakFrame(this);
 
   if (aShowList) {
-    nsIView* view = mDropdownFrame->GetView();
+    nsView* view = mDropdownFrame->GetView();
     NS_ASSERTION(!view->HasWidget(),
                  "We shouldn't have a widget before we need to display the popup");
 
@@ -422,7 +423,7 @@ nsComboboxControlFrame::ShowList(bool aShowList)
 
   nsIFrame* listFrame = do_QueryFrame(mListControlFrame);
   if (listFrame) {
-    nsIView* view = listFrame->GetView();
+    nsView* view = listFrame->GetView();
     NS_ASSERTION(view, "nsComboboxControlFrame view is null");
     if (view) {
       nsIWidget* widget = view->GetWidget();
@@ -504,13 +505,13 @@ nsComboboxControlFrame::ReflowDropdown(nsPresContext*  aPresContext,
   nscoord forcedWidth = aReflowState.ComputedWidth() +
     aReflowState.mComputedBorderPadding.LeftRight() -
     kidReflowState.mComputedBorderPadding.LeftRight();
-  kidReflowState.SetComputedWidth(NS_MAX(kidReflowState.ComputedWidth(),
+  kidReflowState.SetComputedWidth(std::max(kidReflowState.ComputedWidth(),
                                          forcedWidth));
 
   // ensure we start off hidden
   if (GetStateBits() & NS_FRAME_FIRST_REFLOW) {
-    nsIView* view = mDropdownFrame->GetView();
-    nsIViewManager* viewManager = view->GetViewManager();
+    nsView* view = mDropdownFrame->GetView();
+    nsViewManager* viewManager = view->GetViewManager();
     viewManager->SetViewVisibility(view, nsViewVisibility_kHide);
     nsRect emptyRect(0, 0, 0, 0);
     viewManager->ResizeView(view, emptyRect);
@@ -684,7 +685,7 @@ nsComboboxControlFrame::AbsolutelyPositionDropDown()
   if (above <= 0 && below <= 0) {
     if (IsDroppedDown()) {
       // Hide the view immediately to minimize flicker.
-      nsIView* view = mDropdownFrame->GetView();
+      nsView* view = mDropdownFrame->GetView();
       view->GetViewManager()->SetViewVisibility(view, nsViewVisibility_kHide);
       NS_DispatchToCurrentThread(new nsAsyncRollup(this));
     }
@@ -692,7 +693,7 @@ nsComboboxControlFrame::AbsolutelyPositionDropDown()
   }
 
   nsSize dropdownSize = mDropdownFrame->GetSize();
-  nscoord height = NS_MAX(above, below);
+  nscoord height = std::max(above, below);
   nsListControlFrame* lcf = static_cast<nsListControlFrame*>(mDropdownFrame);
   if (height < dropdownSize.height) {
     if (lcf->GetNumDisplayRows() > 1) {
@@ -802,7 +803,7 @@ nsComboboxControlFrame::GetIntrinsicWidth(nsRenderingContext* aRenderingContext,
                                                      scrollbarWidth,
                                                      nscoord_MAX);
 
-    displayWidth = NS_MAX(dropdownContentWidth, displayWidth);
+    displayWidth = std::max(dropdownContentWidth, displayWidth);
   }
 
   // add room for the dropmarker button if there is one
@@ -1457,7 +1458,7 @@ nsComboboxControlFrame::DestroyFrom(nsIFrame* aDestructRoot)
     // Get parent view
     nsIFrame * listFrame = do_QueryFrame(mListControlFrame);
     if (listFrame) {
-      nsIView* view = listFrame->GetView();
+      nsView* view = listFrame->GetView();
       NS_ASSERTION(view, "nsComboboxControlFrame view is null");
       if (view) {
         nsIWidget* widget = view->GetWidget();
@@ -1540,7 +1541,7 @@ nsComboboxControlFrame::GetRollupWidget()
   if (!listFrame)
     return nullptr;
 
-  nsIView* view = listFrame->GetView();
+  nsView* view = listFrame->GetView();
   MOZ_ASSERT(view);
   return view->GetWidget();
 }

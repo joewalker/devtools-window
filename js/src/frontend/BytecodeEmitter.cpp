@@ -27,7 +27,6 @@
 #include "jsfun.h"
 #include "jsnum.h"
 #include "jsopcode.h"
-#include "jsscope.h"
 #include "jsscript.h"
 #include "jsautooplen.h"        // generated headers last
 
@@ -37,14 +36,15 @@
 #include "frontend/TokenStream.h"
 #include "vm/Debugger.h"
 #include "vm/RegExpObject.h"
+#include "vm/Shape.h"
 
 #include "jsatominlines.h"
-#include "jsscopeinlines.h"
 #include "jsscriptinlines.h"
 
 #include "frontend/ParseMaps-inl.h"
 #include "frontend/ParseNode-inl.h"
 #include "frontend/SharedContext-inl.h"
+#include "vm/Shape-inl.h"
 
 /* Allocation chunk counts, must be powers of two in general. */
 #define BYTECODE_CHUNK_LENGTH  1024    /* initial bytecode chunk length */
@@ -100,7 +100,7 @@ struct frontend::StmtInfoBCE : public StmtInfoBase
 };
 
 BytecodeEmitter::BytecodeEmitter(BytecodeEmitter *parent, Parser *parser, SharedContext *sc,
-                                 HandleScript script, StackFrame *callerFrame, bool hasGlobalScope,
+                                 HandleScript script, AbstractFramePtr callerFrame, bool hasGlobalScope,
                                  unsigned lineno, bool selfHostingMode)
   : sc(sc),
     parent(parent),
@@ -119,6 +119,7 @@ BytecodeEmitter::BytecodeEmitter(BytecodeEmitter *parent, Parser *parser, Shared
     typesetCount(0),
     hasSingletons(false),
     emittingForInit(false),
+    emittingRunOnceLambda(false),
     hasGlobalScope(hasGlobalScope),
     selfHostingMode(selfHostingMode)
 {
@@ -699,12 +700,12 @@ EnclosingStaticScope(BytecodeEmitter *bce)
     if (bce->blockChain)
         return bce->blockChain;
 
-    if (!bce->sc->isFunction) {
+    if (!bce->sc->isFunctionBox()) {
         JS_ASSERT(!bce->parent);
         return NULL;
     }
 
-    return bce->sc->asFunbox()->function();
+    return bce->sc->asFunctionBox()->function();
 }
 
 // Push a block scope statement and link blockObj into bce->blockChain.
@@ -920,7 +921,7 @@ EmitAliasedVarOp(JSContext *cx, JSOp op, ParseNode *pn, BytecodeEmitter *bce)
          */
         for (unsigned i = pn->pn_cookie.level(); i; i--) {
             skippedScopes += ClonedBlockDepth(bceOfDef);
-            JSFunction *funOfDef = bceOfDef->sc->asFunbox()->function();
+            JSFunction *funOfDef = bceOfDef->sc->asFunctionBox()->function();
             if (funOfDef->isHeavyweight()) {
                 skippedScopes++;
                 if (funOfDef->isNamedLambda())
@@ -1082,7 +1083,7 @@ static int
 AdjustBlockSlot(JSContext *cx, BytecodeEmitter *bce, int slot)
 {
     JS_ASSERT((unsigned) slot < bce->maxStackDepth);
-    if (bce->sc->isFunction) {
+    if (bce->sc->isFunctionBox()) {
         slot += bce->script->bindings.numVars();
         if ((unsigned) slot >= SLOTNO_LIMIT) {
             bce->reportError(NULL, JSMSG_TOO_MANY_LOCALS);
@@ -1180,12 +1181,12 @@ TryConvertToGname(BytecodeEmitter *bce, ParseNode *pn, JSOp *op)
     }
     if (bce->script->compileAndGo &&
         bce->hasGlobalScope &&
-        !(bce->sc->isFunction && bce->sc->asFunbox()->mightAliasLocals()) &&
+        !(bce->sc->isFunctionBox() && bce->sc->asFunctionBox()->mightAliasLocals()) &&
         !pn->isDeoptimized() &&
         !bce->sc->strict)
     {
         // If you change anything here, you might also need to change
-        // js::CheckUndeclaredVarAssignment.
+        // js::ReportIfUndeclaredVarAssignment.
         switch (*op) {
           case JSOP_NAME:     *op = JSOP_GETGNAME; break;
           case JSOP_SETNAME:  *op = JSOP_SETGNAME; break;
@@ -1280,8 +1281,7 @@ BindNameToSlot(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
     }
 
     if (dn->pn_cookie.isFree()) {
-        StackFrame *caller = bce->callerFrame;
-        if (caller) {
+        if (AbstractFramePtr caller = bce->callerFrame) {
             JS_ASSERT(bce->script->compileAndGo);
 
             /*
@@ -1295,7 +1295,7 @@ BindNameToSlot(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
              * If this is an eval in the global scope, then unbound variables
              * must be globals, so try to use GNAME ops.
              */
-            if (caller->isGlobalFrame() && TryConvertToGname(bce, pn, &op)) {
+            if (caller.isGlobalFrame() && TryConvertToGname(bce, pn, &op)) {
                 pn->setOp(op);
                 pn->pn_dflags |= PND_BOUND;
                 return true;
@@ -1382,7 +1382,7 @@ BindNameToSlot(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
         if (dn->pn_cookie.level() != bce->script->staticLevel)
             return true;
 
-        RootedFunction fun(cx, bce->sc->asFunbox()->function());
+        RootedFunction fun(cx, bce->sc->asFunctionBox()->function());
         JS_ASSERT(fun->isLambda());
         JS_ASSERT(pn->pn_atom == fun->atom());
 
@@ -1445,7 +1445,7 @@ BindNameToSlot(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
         BytecodeEmitter *bceSkipped = bce;
         for (unsigned i = 0; i < skip; i++)
             bceSkipped = bceSkipped->parent;
-        if (!bceSkipped->sc->isFunction)
+        if (!bceSkipped->sc->isFunctionBox())
             return true;
     }
 
@@ -1501,6 +1501,9 @@ CheckSideEffects(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn, bool *answe
              */
             for (pn2 = pn->pn_head; pn2; pn2 = pn2->pn_next)
                 ok &= CheckSideEffects(cx, bce, pn2, answer);
+        } else if (pn->isKind(PNK_GENEXP)) {
+            /* Generator-expressions are harmless if the result is ignored. */
+            *answer = false;
         } else {
             /*
              * All invocation operations (construct: PNK_NEW, call: PNK_CALL)
@@ -1655,14 +1658,20 @@ CheckSideEffects(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn, bool *answe
 }
 
 bool
-BytecodeEmitter::checkSingletonContext()
+BytecodeEmitter::isInLoop()
 {
-    if (!script->compileAndGo || sc->isFunction)
-        return false;
     for (StmtInfoBCE *stmt = topStmt; stmt; stmt = stmt->down) {
         if (stmt->isLoop())
-            return false;
+            return true;
     }
+    return false;
+}
+
+bool
+BytecodeEmitter::checkSingletonContext()
+{
+    if (!script->compileAndGo || sc->isFunctionBox() || isInLoop())
+        return false;
     hasSingletons = true;
     return true;
 }
@@ -1673,11 +1682,14 @@ BytecodeEmitter::needsImplicitThis()
     if (!script->compileAndGo)
         return true;
 
-    if (sc->isFunction) {
-        if (sc->asFunbox()->inWith)
+    if (sc->isModuleBox()) {
+        /* Modules can never occur inside a with-statement */
+        return false;
+    } if (sc->isFunctionBox()) {
+        if (sc->asFunctionBox()->inWith)
             return true;
     } else {
-        JSObject *scope = sc->asGlobal()->scopeChain();
+        JSObject *scope = sc->asGlobalSharedContext()->scopeChain();
         while (scope) {
             if (scope->isWith())
                 return true;
@@ -2181,20 +2193,6 @@ EmitNumberOp(JSContext *cx, double dval, BytecodeEmitter *bce)
     return EmitIndex32(cx, JSOP_DOUBLE, bce->constList.length() - 1, bce);
 }
 
-/*
- * To avoid bloating all parse nodes for the special case of switch, values are
- * allocated in the temp pool and pointed to by the parse node. These values
- * are not currently recycled (like parse nodes) and the temp pool is only
- * flushed at the end of compiling a script, so these values are technically
- * leaked. This would only be a problem for scripts containing a large number
- * of large switches, which seems unlikely.
- */
-static Value *
-AllocateSwitchConstant(JSContext *cx)
-{
-    return cx->tempLifoAlloc().new_<Value>();
-}
-
 static inline void
 SetJumpOffsetAt(BytecodeEmitter *bce, ptrdiff_t off)
 {
@@ -2213,7 +2211,7 @@ EmitSwitch(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
     bool hasDefault;
     ptrdiff_t top, off, defaultOffset;
     ParseNode *pn2, *pn3, *pn4;
-    int32_t i, low, high;
+    int32_t low, high;
     int noteIndex;
     size_t switchSize;
     jsbytecode *pc;
@@ -2274,7 +2272,7 @@ EmitSwitch(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
 
     uint32_t caseCount = pn2->pn_count;
     uint32_t tableLength = 0;
-    js::ScopedFreePtr<ParseNode*> table(NULL);
+    ScopedJSFreePtr<ParseNode*> table(NULL);
 
     if (caseCount == 0 ||
         (caseCount == 1 &&
@@ -2303,48 +2301,23 @@ EmitSwitch(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
             if (switchOp == JSOP_CONDSWITCH)
                 continue;
 
+            JS_ASSERT(switchOp == JSOP_TABLESWITCH);
+
             pn4 = pn3->pn_left;
-            Value constVal;
-            switch (pn4->getKind()) {
-              case PNK_NUMBER:
-                constVal.setNumber(pn4->pn_dval);
-                break;
-              case PNK_STRING:
-                constVal.setString(pn4->pn_atom);
-                break;
-              case PNK_TRUE:
-                constVal.setBoolean(true);
-                break;
-              case PNK_FALSE:
-                constVal.setBoolean(false);
-                break;
-              case PNK_NULL:
-                constVal.setNull();
-                break;
-              case PNK_NAME:
-              default:
+
+            if (pn4->getKind() != PNK_NUMBER) {
                 switchOp = JSOP_CONDSWITCH;
                 continue;
             }
-            JS_ASSERT(constVal.isPrimitive());
 
-            pn3->pn_pval = AllocateSwitchConstant(cx);
-            if (!pn3->pn_pval) {
-                ok = false;
-                goto release;
-            }
-
-            *pn3->pn_pval = constVal;
-
-            if (switchOp != JSOP_TABLESWITCH)
-                continue;
-            if (!pn3->pn_pval->isInt32()) {
-                switchOp = JSOP_LOOKUPSWITCH;
+            int32_t i;
+            if (!MOZ_DOUBLE_IS_INT32(pn4->pn_dval, &i)) {
+                switchOp = JSOP_CONDSWITCH;
                 continue;
             }
-            i = pn3->pn_pval->toInt32();
+
             if ((unsigned)(i + (int)JS_BIT(15)) >= (unsigned)JS_BIT(16)) {
-                switchOp = JSOP_LOOKUPSWITCH;
+                switchOp = JSOP_CONDSWITCH;
                 continue;
             }
             if (i < low)
@@ -2353,7 +2326,7 @@ EmitSwitch(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
                 high = i;
 
             /*
-             * Check for duplicates, which require a JSOP_LOOKUPSWITCH.
+             * Check for duplicates, which require a JSOP_CONDSWITCH.
              * We bias i by 65536 if it's negative, and hope that's a rare
              * case (because it requires a malloc'd bitmap).
              */
@@ -2376,34 +2349,24 @@ EmitSwitch(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
                 memset(intmap, 0, intmap_bitlen >> JS_BITS_PER_BYTE_LOG2);
             }
             if (JS_TEST_BIT(intmap, i)) {
-                switchOp = JSOP_LOOKUPSWITCH;
+                switchOp = JSOP_CONDSWITCH;
                 continue;
             }
             JS_SET_BIT(intmap, i);
         }
 
-      release:
         if (intmap && intmap != intmap_space)
             js_free(intmap);
         if (!ok)
             return false;
 
         /*
-         * Compute table length and select lookup instead if overlarge or
+         * Compute table length and select condswitch instead if overlarge or
          * more than half-sparse.
          */
         if (switchOp == JSOP_TABLESWITCH) {
             tableLength = (uint32_t)(high - low + 1);
             if (tableLength >= JS_BIT(16) || tableLength > 2 * caseCount)
-                switchOp = JSOP_LOOKUPSWITCH;
-        } else if (switchOp == JSOP_LOOKUPSWITCH) {
-            /*
-             * Lookup switch supports only atom indexes below 64K limit.
-             * Conservatively estimate the maximum possible index during
-             * switch generation and use conditional switch if it exceeds
-             * the limit.
-             */
-            if (caseCount + bce->constList.length() > JS_BIT(16))
                 switchOp = JSOP_CONDSWITCH;
         }
     }
@@ -2421,19 +2384,11 @@ EmitSwitch(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
          * 0 bytes of immediate for unoptimized ECMAv2 switch.
          */
         switchSize = 0;
-    } else if (switchOp == JSOP_TABLESWITCH) {
-        /*
-         * 3 offsets (len, low, high) before the table, 1 per entry.
-         */
-        switchSize = (size_t)(JUMP_OFFSET_LEN * (3 + tableLength));
     } else {
-        /*
-         * JSOP_LOOKUPSWITCH:
-         * 1 offset (len) and 1 atom index (npairs) before the table,
-         * 1 atom index and 1 jump offset per entry.
-         */
-        switchSize = (size_t)(JUMP_OFFSET_LEN + UINT16_LEN +
-                              (UINT32_INDEX_LEN + JUMP_OFFSET_LEN) * caseCount);
+        JS_ASSERT(switchOp == JSOP_TABLESWITCH);
+
+        /* 3 offsets (len, low, high) before the table, 1 per entry. */
+        switchSize = (size_t)(JUMP_OFFSET_LEN * (3 + tableLength));
     }
 
     /* Emit switchOp followed by switchSize bytes of jump or lookup table. */
@@ -2498,38 +2453,39 @@ EmitSwitch(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
         if (defaultOffset < 0)
             return false;
     } else {
+        JS_ASSERT(switchOp == JSOP_TABLESWITCH);
         pc = bce->code(top + JUMP_OFFSET_LEN);
 
-        if (switchOp == JSOP_TABLESWITCH) {
-            /* Fill in switch bounds, which we know fit in 16-bit offsets. */
-            SET_JUMP_OFFSET(pc, low);
-            pc += JUMP_OFFSET_LEN;
-            SET_JUMP_OFFSET(pc, high);
-            pc += JUMP_OFFSET_LEN;
+        /* Fill in switch bounds, which we know fit in 16-bit offsets. */
+        SET_JUMP_OFFSET(pc, low);
+        pc += JUMP_OFFSET_LEN;
+        SET_JUMP_OFFSET(pc, high);
+        pc += JUMP_OFFSET_LEN;
 
-            /*
-             * Use malloc to avoid arena bloat for programs with many switches.
-             * ScopedFreePtr takes care of freeing it on exit.
-             */
-            if (tableLength != 0) {
-                table = cx->pod_calloc<ParseNode*>(tableLength);
-                if (!table)
-                    return false;
-                for (pn3 = pn2->pn_head; pn3; pn3 = pn3->pn_next) {
-                    if (pn3->isKind(PNK_DEFAULT))
-                        continue;
-                    i = pn3->pn_pval->toInt32();
-                    i -= low;
-                    JS_ASSERT((uint32_t)i < tableLength);
-                    table[i] = pn3;
-                }
+        /*
+         * Use malloc to avoid arena bloat for programs with many switches.
+         * ScopedJSFreePtr takes care of freeing it on exit.
+         */
+        if (tableLength != 0) {
+            table = cx->pod_calloc<ParseNode*>(tableLength);
+            if (!table)
+                return false;
+            for (pn3 = pn2->pn_head; pn3; pn3 = pn3->pn_next) {
+                if (pn3->isKind(PNK_DEFAULT))
+                    continue;
+
+                JS_ASSERT(pn3->isKind(PNK_CASE));
+
+                pn4 = pn3->pn_left;
+                JS_ASSERT(pn4->getKind() == PNK_NUMBER);
+
+                int32_t i = int32_t(pn4->pn_dval);
+                JS_ASSERT(double(i) == pn4->pn_dval);
+
+                i -= low;
+                JS_ASSERT(uint32_t(i) < tableLength);
+                table[i] = pn3;
             }
-        } else {
-            JS_ASSERT(switchOp == JSOP_LOOKUPSWITCH);
-
-            /* Fill in the number of cases. */
-            SET_UINT16(pc, caseCount);
-            pc += UINT16_LEN;
         }
     }
 
@@ -2574,25 +2530,9 @@ EmitSwitch(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
         pc += 2 * JUMP_OFFSET_LEN;
 
         /* Fill in the jump table, if there is one. */
-        for (i = 0; i < (int)tableLength; i++) {
+        for (uint32_t i = 0; i < tableLength; i++) {
             pn3 = table[i];
             off = pn3 ? pn3->pn_offset - top : 0;
-            SET_JUMP_OFFSET(pc, off);
-            pc += JUMP_OFFSET_LEN;
-        }
-    } else if (switchOp == JSOP_LOOKUPSWITCH) {
-        /* Skip over the already-initialized number of cases. */
-        pc += UINT16_LEN;
-
-        for (pn3 = pn2->pn_head; pn3; pn3 = pn3->pn_next) {
-            if (pn3->isKind(PNK_DEFAULT))
-                continue;
-            if (!bce->constList.append(*pn3->pn_pval))
-                return false;
-            SET_UINT32_INDEX(pc, bce->constList.length() - 1);
-            pc += UINT32_INDEX_LEN;
-
-            off = pn3->pn_offset - top;
             SET_JUMP_OFFSET(pc, off);
             pc += JUMP_OFFSET_LEN;
         }
@@ -2619,7 +2559,7 @@ frontend::EmitFunctionScript(JSContext *cx, BytecodeEmitter *bce, ParseNode *bod
      * execution starts from script->code, so this has no semantic effect.
      */
 
-    FunctionBox *funbox = bce->sc->asFunbox();
+    FunctionBox *funbox = bce->sc->asFunctionBox();
     if (funbox->argumentsHasLocalBinding()) {
         JS_ASSERT(bce->next() == bce->base());  /* See JSScript::argumentsBytecode. */
         bce->switchToProlog();
@@ -2662,12 +2602,27 @@ frontend::EmitFunctionScript(JSContext *cx, BytecodeEmitter *bce, ParseNode *bod
     if (!JSScript::fullyInitFromEmitter(cx, bce->script, bce))
         return false;
 
+    /*
+     * If this function is only expected to run once, mark the script so that
+     * initializers created within it may be given more precise types.
+     */
+    if (bce->parent && bce->parent->emittingRunOnceLambda)
+        bce->script->treatAsRunOnce = true;
 
-    /* Mark functions which will only be executed once as singletons. */
+    /*
+     * Mark as singletons any function which will only be executed once, or
+     * which is inner to a lambda we only expect to run once. In the latter
+     * case, if the lambda runs multiple times then CloneFunctionObject will
+     * make a deep clone of its contents.
+     */
     bool singleton =
         cx->typeInferenceEnabled() &&
+        bce->script->compileAndGo &&
         bce->parent &&
-        bce->parent->checkSingletonContext();
+        (bce->parent->checkSingletonContext() ||
+         (!bce->parent->isInLoop() &&
+          bce->parent->parent &&
+          bce->parent->parent->emittingRunOnceLambda));
 
     /* Initialize fun->script() so that the debugger has a valid fun->script(). */
     RootedFunction fun(cx, bce->script->function());
@@ -2696,7 +2651,7 @@ MaybeEmitVarDecl(JSContext *cx, BytecodeEmitter *bce, JSOp prologOp, ParseNode *
     }
 
     if (JOF_OPTYPE(pn->getOp()) == JOF_ATOM &&
-        (!bce->sc->isFunction || bce->sc->asFunbox()->function()->isHeavyweight()))
+        (!bce->sc->isFunctionBox() || bce->sc->asFunctionBox()->function()->isHeavyweight()))
     {
         bce->switchToProlog();
         if (!UpdateSourceCoordNotes(cx, bce, pn->pn_pos.begin))
@@ -3790,7 +3745,7 @@ ParseNode::getConstantValue(JSContext *cx, bool strictChecks, Value *vp)
                 RootedId id(cx);
                 if (idvalue.isInt32() && INT_FITS_IN_JSID(idvalue.toInt32()))
                     id = INT_TO_JSID(idvalue.toInt32());
-                else if (!InternNonIntElementId(cx, obj, idvalue, id.address()))
+                else if (!InternNonIntElementId<CanGC>(cx, obj, idvalue, &id))
                     return false;
                 if (!JSObject::defineGeneric(cx, obj, id, value, NULL, NULL, JSPROP_ENUMERATE))
                     return false;
@@ -4472,7 +4427,7 @@ EmitLexicalScope(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
         (stmtInfo.down
          ? stmtInfo.down->type == STMT_BLOCK &&
            (!stmtInfo.down->down || stmtInfo.down->down->type != STMT_FOR_IN_LOOP)
-         : !bce->sc->isFunction))
+         : !bce->sc->isFunctionBox()))
     {
         /* There must be no source note already output for the next op. */
         JS_ASSERT(bce->noteCount() == 0 ||
@@ -4865,7 +4820,7 @@ EmitFunc(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
          * comments in EmitStatementList.
          */
         JS_ASSERT(pn->functionIsHoisted());
-        JS_ASSERT(bce->sc->isFunction);
+        JS_ASSERT(bce->sc->isFunctionBox());
         return EmitFunctionDefNop(cx, bce, pn->pn_index);
     }
 
@@ -4873,7 +4828,7 @@ EmitFunc(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
         SharedContext *outersc = bce->sc;
         FunctionBox *funbox = pn->pn_funbox;
 
-        if (outersc->isFunction && outersc->asFunbox()->mightAliasLocals())
+        if (outersc->isFunctionBox() && outersc->asFunctionBox()->mightAliasLocals())
             funbox->setMightAliasLocals();      // inherit mightAliasLocals from parent
         JS_ASSERT_IF(outersc->strict, funbox->strict);
 
@@ -4926,7 +4881,7 @@ EmitFunc(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
      * invocation of the emitter and calls to EmitTree for function
      * definitions can be scheduled before generating the rest of code.
      */
-    if (!bce->sc->isFunction) {
+    if (!bce->sc->isFunctionBox()) {
         JS_ASSERT(pn->pn_cookie.isFree());
         JS_ASSERT(pn->getOp() == JSOP_NOP);
         JS_ASSERT(!bce->topStmt);
@@ -5219,7 +5174,7 @@ EmitStatement(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
      */
     bool wantval = false;
     bool useful = false;
-    if (bce->sc->isFunction) {
+    if (bce->sc->isFunctionBox()) {
         JS_ASSERT(!bce->script->noScriptRval);
     } else {
         useful = wantval = !bce->script->noScriptRval;
@@ -5429,6 +5384,29 @@ EmitCallOrNew(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn, ptrdiff_t top)
         callop = true;          /* suppress JSOP_UNDEFINED after */
         break;
 #endif
+      case PNK_FUNCTION:
+        /*
+         * Top level lambdas which are immediately invoked should be
+         * treated as only running once. Every time they execute we will
+         * create new types and scripts for their contents, to increase
+         * the quality of type information within them and enable more
+         * backend optimizations. Note that this does not depend on the
+         * lambda being invoked at most once (it may be named or be
+         * accessed via foo.caller indirection), as multiple executions
+         * will just cause the inner scripts to be repeatedly cloned.
+         */
+        JS_ASSERT(!bce->emittingRunOnceLambda);
+        if (bce->checkSingletonContext()) {
+            bce->emittingRunOnceLambda = true;
+            if (!EmitTree(cx, bce, pn2))
+                return false;
+            bce->emittingRunOnceLambda = false;
+        } else {
+            if (!EmitTree(cx, bce, pn2))
+                return false;
+        }
+        callop = false;
+        break;
       default:
         if (!EmitTree(cx, bce, pn2))
             return false;
@@ -5436,7 +5414,8 @@ EmitCallOrNew(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn, ptrdiff_t top)
         break;
     }
     if (!callop) {
-        if (Emit1(cx, bce, JSOP_UNDEFINED) < 0)
+        JSOp thisop = pn->isKind(PNK_GENEXP) ? JSOP_THIS : JSOP_UNDEFINED;
+        if (Emit1(cx, bce, thisop) < 0)
             return false;
         if (Emit1(cx, bce, JSOP_NOTEARG) < 0)
             return false;
@@ -6034,7 +6013,7 @@ frontend::EmitTree(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
 
       case PNK_ARGSBODY:
       {
-        RootedFunction fun(cx, bce->sc->asFunbox()->function());
+        RootedFunction fun(cx, bce->sc->asFunctionBox()->function());
         ParseNode *pnlast = pn->last();
 
         // Carefully emit everything in the right order:
@@ -6072,7 +6051,7 @@ frontend::EmitTree(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
             ParseNode *rest = NULL;
             bool restIsDefn = false;
             if (fun->hasRest()) {
-                JS_ASSERT(!bce->sc->asFunbox()->argumentsHasLocalBinding());
+                JS_ASSERT(!bce->sc->asFunctionBox()->argumentsHasLocalBinding());
                 // Defaults with a rest parameter need special handling. The
                 // rest parameter needs to be undefined while defaults are being
                 // processed. To do this, we create the rest argument and let it
@@ -6117,7 +6096,7 @@ frontend::EmitTree(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
                 return false;
             if (pn2->pn_next == pnlast && fun->hasRest() && !fun->hasDefaults()) {
                 // Fill rest parameter. We handled the case with defaults above.
-                JS_ASSERT(!bce->sc->asFunbox()->argumentsHasLocalBinding());
+                JS_ASSERT(!bce->sc->asFunctionBox()->argumentsHasLocalBinding());
                 bce->switchToProlog();
                 if (Emit1(cx, bce, JSOP_REST) < 0)
                     return false;
@@ -6187,7 +6166,7 @@ frontend::EmitTree(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
 
 #if JS_HAS_GENERATORS
       case PNK_YIELD:
-        JS_ASSERT(bce->sc->isFunction);
+        JS_ASSERT(bce->sc->isFunctionBox());
         if (pn->pn_kid) {
             if (!EmitTree(cx, bce, pn->pn_kid))
                 return false;
@@ -6449,6 +6428,7 @@ frontend::EmitTree(JSContext *cx, BytecodeEmitter *bce, ParseNode *pn)
 
       case PNK_NEW:
       case PNK_CALL:
+      case PNK_GENEXP:
         ok = EmitCallOrNew(cx, bce, pn, top);
         break;
 

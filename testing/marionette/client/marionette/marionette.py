@@ -2,8 +2,10 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+import datetime
 import socket
 import sys
+import time
 import traceback
 
 from client import MarionetteClient
@@ -95,12 +97,15 @@ class Marionette(object):
 
     CONTEXT_CHROME = 'chrome'
     CONTEXT_CONTENT = 'content'
+    TIMEOUT_SEARCH = 'implicit'
+    TIMEOUT_SCRIPT = 'script'
+    TIMEOUT_PAGE = 'page load'
 
     def __init__(self, host='localhost', port=2828, bin=None, profile=None,
                  emulator=None, sdcard=None, emulatorBinary=None,
                  emulatorImg=None, emulator_res='480x800', gecko_path=None,
                  connectToRunningEmulator=False, homedir=None, baseurl=None,
-                 noWindow=False, logcat_dir=None, busybox=None, load_early=False):
+                 noWindow=False, logcat_dir=None, busybox=None):
         self.host = host
         self.port = self.local_port = port
         self.bin = bin
@@ -124,7 +129,7 @@ class Marionette(object):
             self.instance = GeckoInstance(host=self.host, port=self.port,
                                           bin=self.bin, profile=self.profile)
             self.instance.start()
-            assert(self.instance.wait_for_port())
+            assert(self.wait_for_port())
 
         if emulator:
             self.emulator = Emulator(homedir=homedir,
@@ -149,10 +154,9 @@ class Marionette(object):
         self.client = MarionetteClient(self.host, self.port)
 
         if emulator:
-            self.emulator.setup(self, gecko_path=gecko_path,
-                                load_early=load_early)
-            if busybox:
-                self.emulator.install_busybox(busybox)
+            self.emulator.setup(self,
+                                gecko_path=gecko_path,
+                                busybox=busybox)
 
     def __del__(self):
         if self.emulator:
@@ -194,6 +198,22 @@ class Marionette(object):
             # flagging the error.
             sys.exit()
 
+    def wait_for_port(self, timeout=3000):
+        starttime = datetime.datetime.now()
+        while datetime.datetime.now() - starttime < datetime.timedelta(seconds=timeout):
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.connect((self.host, self.port))
+                data = sock.recv(16)
+                sock.close()
+                if '"from"' in data:
+                    time.sleep(5)
+                    return True
+            except socket.error:
+                pass
+            time.sleep(1)
+        return False
+
     def _send_message(self, command, response_key, **kwargs):
         if not self.session and command not in ('newSession', 'getStatus'):
             raise MarionetteException(message="Please start a session")
@@ -210,10 +230,6 @@ class Marionette(object):
             self.session = None
             self.window = None
             self.client.close()
-            if self.emulator:
-                port = self.emulator.restart(self.local_port)
-                if port is not None:
-                    self.port = self.client.port = port
             raise TimeoutException(message='socket.timeout', status=ErrorCodes.TIMEOUT, stacktrace=None)
 
         # Process any emulator commands that are sent from a script
@@ -296,7 +312,7 @@ class Marionette(object):
             # should be here.
             pass
         if returncode is not None:
-            print ('TEST-UNEXPECTED-FAIL - PROCESS CRASH - %s has terminated with exit code %d' %
+            print ('PROCESS-CRASH | %s | abnormal termination with exit code %d' %
                 (name, returncode))
         return returncode is not None
 
@@ -389,6 +405,11 @@ class Marionette(object):
 
     def navigate(self, url):
         response = self._send_message('goUrl', 'ok', value=url)
+        return response
+
+    def timeouts(self, timeout_type, ms):
+        assert(timeout_type == self.TIMEOUT_SEARCH or timeout_type == self.TIMEOUT_SCRIPT or timeout_type == self.TIMEOUT_PAGE)
+        response = self._send_message('timeouts', 'ok', timeoutType=timeout_type, ms=ms)
         return response
 
     def go_back(self):
@@ -492,6 +513,10 @@ class Marionette(object):
         for x in response:
             elements.append(HTMLElement(self, x))
         return elements
+
+    def get_active_element(self):
+        response = self._send_message('getActiveElement', 'value')
+        return HTMLElement(self, response)
 
     def log(self, msg, level=None):
         return self._send_message('log', 'ok', value=msg, level=level)

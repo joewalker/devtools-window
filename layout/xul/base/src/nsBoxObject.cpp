@@ -13,7 +13,7 @@
 #include "nsIDocShell.h"
 #include "nsReadableUtils.h"
 #include "nsDOMClassInfoID.h"
-#include "nsIView.h"
+#include "nsView.h"
 #ifdef MOZ_XUL
 #include "nsIDOMXULElement.h"
 #else
@@ -31,8 +31,6 @@ using namespace mozilla::dom;
 // Static member variable initialization
 
 // Implement our nsISupports methods
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsBoxObject)
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsBoxObject)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsBoxObject)

@@ -103,6 +103,7 @@ protected:
   virtual void GetStyleSheetInfo(nsAString& aTitle,
                                  nsAString& aType,
                                  nsAString& aMedia,
+                                 bool* aIsScoped,
                                  bool* aIsAlternate);
   virtual CORSMode GetCORSMode() const;
 protected:
@@ -124,7 +125,6 @@ nsHTMLLinkElement::~nsHTMLLinkElement()
 {
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsHTMLLinkElement)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsHTMLLinkElement,
                                                   nsGenericHTMLElement)
   tmp->nsStyleLinkElement::Traverse(cb);
@@ -431,11 +431,13 @@ void
 nsHTMLLinkElement::GetStyleSheetInfo(nsAString& aTitle,
                                      nsAString& aType,
                                      nsAString& aMedia,
+                                     bool* aIsScoped,
                                      bool* aIsAlternate)
 {
   aTitle.Truncate();
   aType.Truncate();
   aMedia.Truncate();
+  *aIsScoped = false;
   *aIsAlternate = false;
 
   nsAutoString rel;

@@ -181,6 +181,20 @@ InstLDR::asTHIS(Instruction &i)
     return NULL;
 }
 
+InstNOP *
+InstNOP::asTHIS(Instruction &i)
+{
+    if (isTHIS(i))
+        return (InstNOP*) (&i);
+    return NULL;
+}
+
+bool
+InstNOP::isTHIS(const Instruction &i)
+{
+    return (i.encode() & 0x0fffffff) == NopInst;
+}
+
 bool
 InstBranchReg::isTHIS(const Instruction &i)
 {
@@ -461,6 +475,12 @@ Assembler::finish()
         int real_offset = offset + m_buffer.poolSizeBefore(offset);
         jumpRelocations_.writeUnsigned(real_offset);
     }
+
+    for (unsigned int i = 0; i < tmpPreBarriers_.length(); i++) {
+        int offset = tmpPreBarriers_[i].getOffset();
+        int real_offset = offset + m_buffer.poolSizeBefore(offset);
+        preBarriers_.writeUnsigned(real_offset);
+    }
 }
 
 void
@@ -699,6 +719,13 @@ Assembler::copyDataRelocationTable(uint8_t *dest)
 {
     if (dataRelocations_.length())
         memcpy(dest, dataRelocations_.buffer(), dataRelocations_.length());
+}
+
+void
+Assembler::copyPreBarrierTable(uint8_t *dest)
+{
+    if (preBarriers_.length())
+        memcpy(dest, preBarriers_.buffer(), preBarriers_.length());
 }
 
 void
@@ -1107,7 +1134,11 @@ VFPRegister::isMissing()
 bool
 Assembler::oom() const
 {
-    return m_buffer.oom() || !enoughMemory_ || jumpRelocations_.oom();
+    return m_buffer.oom() ||
+        !enoughMemory_ ||
+        jumpRelocations_.oom() ||
+        dataRelocations_.oom() ||
+        preBarriers_.oom();
 }
 
 bool
@@ -1146,6 +1177,12 @@ Assembler::dataRelocationTableBytes() const
     return dataRelocations_.length();
 }
 
+size_t
+Assembler::preBarrierTableBytes() const
+{
+    return preBarriers_.length();
+}
+
 // Size of the data table, in bytes.
 size_t
 Assembler::dataSize() const
@@ -1158,8 +1195,10 @@ Assembler::bytesNeeded() const
     return size() +
         dataSize() +
         jumpRelocationTableBytes() +
-        dataRelocationTableBytes();
+        dataRelocationTableBytes() +
+        preBarrierTableBytes();
 }
+
 // write a blob of binary into the instruction stream
 BufferOffset
 Assembler::writeInst(uint32_t x, uint32_t *dest)
@@ -2444,6 +2483,31 @@ Assembler::ToggleToCmp(CodeLocationLabel inst_)
     *ptr = (*ptr & ~(0xff << 20)) | (0x35 << 20);
 
     AutoFlushCache::updateTop((uintptr_t)ptr, 4);
+}
+
+void
+Assembler::ToggleCall(CodeLocationLabel inst_, bool enabled)
+{
+    Instruction *inst = (Instruction *)inst_.raw();
+    JS_ASSERT(inst->is<InstMovW>());
+
+    inst = inst->next();
+    JS_ASSERT(inst->is<InstMovT>());
+
+    inst = inst->next();
+    JS_ASSERT(inst->is<InstNOP>() || inst->is<InstBLXReg>());
+
+    if (enabled == inst->is<InstBLXReg>()) {
+        // Nothing to do.
+        return;
+    }
+
+    if (enabled)
+        *inst = InstBLXReg(ScratchRegister, Always);
+    else
+        *inst = InstNOP();
+
+    AutoFlushCache::updateTop(uintptr_t(inst), 4);
 }
 
 void

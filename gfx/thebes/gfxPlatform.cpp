@@ -129,7 +129,6 @@ SRGBOverrideObserver::Observe(nsISupports *aSubject,
 }
 
 #define GFX_DOWNLOADABLE_FONTS_ENABLED "gfx.downloadable_fonts.enabled"
-#define GFX_DOWNLOADABLE_FONTS_SANITIZE "gfx.downloadable_fonts.sanitize"
 
 #define GFX_PREF_HARFBUZZ_SCRIPTS "gfx.font_rendering.harfbuzz.scripts"
 #define HARFBUZZ_SCRIPTS_DEFAULT  mozilla::unicode::SHAPING_DEFAULT
@@ -174,7 +173,7 @@ FontPrefsObserver::Observe(nsISupports *aSubject,
     return NS_OK;
 }
 
-class OrientationSyncPrefsObserver : public nsIObserver
+class OrientationSyncPrefsObserver MOZ_FINAL : public nsIObserver
 {
 public:
     NS_DECL_ISUPPORTS
@@ -240,7 +239,6 @@ gfxPlatform::gfxPlatform()
 {
     mUseHarfBuzzScripts = UNINITIALIZED_VALUE;
     mAllowDownloadableFonts = UNINITIALIZED_VALUE;
-    mDownloadableFontsSanitize = UNINITIALIZED_VALUE;
     mFallbackUsesCmaps = UNINITIALIZED_VALUE;
 
 #ifdef MOZ_GRAPHITE
@@ -817,17 +815,6 @@ gfxPlatform::DownloadableFontsEnabled()
     }
 
     return mAllowDownloadableFonts;
-}
-
-bool
-gfxPlatform::SanitizeDownloadedFonts()
-{
-    if (mDownloadableFontsSanitize == UNINITIALIZED_VALUE) {
-        mDownloadableFontsSanitize =
-            Preferences::GetBool(GFX_DOWNLOADABLE_FONTS_SANITIZE, true);
-    }
-
-    return mDownloadableFontsSanitize;
 }
 
 bool
@@ -1601,8 +1588,7 @@ gfxPlatform::SetupClusterBoundaries(gfxTextRun *aTextRun, const PRUnichar *aStri
         return;
     }
 
-    gfxShapedWord::SetupClusterBoundaries(aTextRun->GetCharacterGlyphs(),
-                                          aString, aTextRun->GetLength());
+    aTextRun->SetupClusterBoundaries(0, aString, aTextRun->GetLength());
 }
 
 int32_t
@@ -1620,8 +1606,6 @@ gfxPlatform::FontsPrefsChanged(const char *aPref)
     NS_ASSERTION(aPref != nullptr, "null preference");
     if (!strcmp(GFX_DOWNLOADABLE_FONTS_ENABLED, aPref)) {
         mAllowDownloadableFonts = UNINITIALIZED_VALUE;
-    } else if (!strcmp(GFX_DOWNLOADABLE_FONTS_SANITIZE, aPref)) {
-        mDownloadableFontsSanitize = UNINITIALIZED_VALUE;
     } else if (!strcmp(GFX_PREF_FALLBACK_USE_CMAPS, aPref)) {
         mFallbackUsesCmaps = UNINITIALIZED_VALUE;
 #ifdef MOZ_GRAPHITE

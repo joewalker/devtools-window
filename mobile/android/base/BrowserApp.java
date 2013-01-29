@@ -48,8 +48,6 @@ import java.io.InputStream;
 import java.net.URL;
 import java.util.EnumSet;
 import java.util.Vector;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 abstract public class BrowserApp extends GeckoApp
                                  implements TabsPanel.TabsLayoutChangeListener,
@@ -234,6 +232,8 @@ abstract public class BrowserApp extends GeckoApp
         super.onDestroy();
         if (mAboutHomeContent != null)
             mAboutHomeContent.onDestroy();
+        if (mBrowserToolbar != null)
+            mBrowserToolbar.onDestroy();
 
         unregisterEventListener("CharEncoding:Data");
         unregisterEventListener("CharEncoding:State");
@@ -495,8 +495,12 @@ abstract public class BrowserApp extends GeckoApp
         }
     }
 
-    void addTab() {
+    public void addTab() {
         showAwesomebar(AwesomeBar.Target.NEW_TAB);
+    }
+
+    public void addPrivateTab() {
+        Tabs.getInstance().loadUrl("about:privatebrowsing", Tabs.LOADURL_NEW_TAB | Tabs.LOADURL_PRIVATE);
     }
 
     public void showNormalTabs() {
@@ -969,7 +973,7 @@ abstract public class BrowserApp extends GeckoApp
         if (aMenu == null)
             return false;
 
-        if (!checkLaunchState(LaunchState.GeckoRunning))
+        if (!GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoRunning))
             aMenu.findItem(R.id.settings).setEnabled(false);
 
         Tab tab = Tabs.getInstance().getSelectedTab();
@@ -1025,6 +1029,24 @@ abstract public class BrowserApp extends GeckoApp
         charEncoding.setVisible(GeckoPreferences.getCharEncodingState());
 
         return true;
+    }
+
+    @Override
+    public boolean onContextItemSelected(MenuItem item) {
+        switch (item.getItemId()) {
+            case R.id.abouthome_topsites_edit:
+                mAboutHomeContent.editSite();
+                return true;
+
+            case R.id.abouthome_topsites_unpin:
+                mAboutHomeContent.unpinSite();
+                return true;
+
+            case R.id.abouthome_topsites_pin:
+                mAboutHomeContent.pinSite();
+                return true;
+        }
+        return super.onContextItemSelected(item);
     }
 
     @Override
@@ -1098,7 +1120,7 @@ abstract public class BrowserApp extends GeckoApp
                 addTab();
                 return true;
             case R.id.new_private_tab:
-                Tabs.getInstance().loadUrl("about:home", Tabs.LOADURL_NEW_TAB | Tabs.LOADURL_PRIVATE);
+                addPrivateTab();
                 return true;
             default:
                 return super.onOptionsItemSelected(item);

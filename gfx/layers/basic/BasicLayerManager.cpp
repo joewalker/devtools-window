@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/dom/TabChild.h"
+#include "mozilla/Hal.h"
 #include "mozilla/layers/PLayerChild.h"
 #include "mozilla/layers/PLayersChild.h"
 #include "mozilla/layers/PLayersParent.h"
@@ -15,7 +16,6 @@
 #include "nsXULAppAPI.h"
 #include "RenderTrace.h"
 #include "sampler.h"
-#include "Hal.h"
 
 #define PIXMAN_DONT_DEFINE_STDINT
 #include "pixman.h"
@@ -1341,8 +1341,8 @@ already_AddRefed<ThebesLayer>
 BasicShadowLayerManager::CreateThebesLayer()
 {
   NS_ASSERTION(InConstruction(), "Only allowed in construction phase");
-#ifdef FORCE_BASICTILEDTHEBESLAYER
-  if (HasShadowManager() && GetParentBackendType() == LAYERS_OPENGL) {
+  if (HasShadowManager() && GetParentBackendType() == LAYERS_OPENGL &&
+      ThebesLayer::UseTiledThebes()) {
     // BasicTiledThebesLayer doesn't support main
     // thread compositing so only return this layer
     // type if we have a shadow manager.
@@ -1351,7 +1351,6 @@ BasicShadowLayerManager::CreateThebesLayer()
     MAYBE_CREATE_SHADOW(Thebes);
     return layer.forget();
   } else
-#endif
   {
     nsRefPtr<BasicShadowableThebesLayer> layer =
       new BasicShadowableThebesLayer(this);

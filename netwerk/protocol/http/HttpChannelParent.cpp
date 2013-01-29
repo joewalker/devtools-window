@@ -34,7 +34,8 @@ namespace mozilla {
 namespace net {
 
 HttpChannelParent::HttpChannelParent(PBrowserParent* iframeEmbedding,
-                                     const IPC::SerializedLoadContext& loadContext)
+                                     nsILoadContext* aLoadContext,
+                                     PBOverrideStatus aOverrideStatus)
   : mIPCClosed(false)
   , mStoredStatus(NS_OK)
   , mStoredProgress(0)
@@ -42,7 +43,8 @@ HttpChannelParent::HttpChannelParent(PBrowserParent* iframeEmbedding,
   , mSentRedirect1Begin(false)
   , mSentRedirect1BeginFailed(false)
   , mReceivedRedirect2Verify(false)
-  , mPBOverride(kPBOverride_Unset)
+  , mPBOverride(aOverrideStatus)
+  , mLoadContext(aLoadContext)
 {
   // Ensure gHttpHandler is initialized: we need the atom table up and running.
   nsIHttpProtocolHandler* handler;
@@ -50,18 +52,6 @@ HttpChannelParent::HttpChannelParent(PBrowserParent* iframeEmbedding,
   NS_ASSERTION(handler, "no http handler");
 
   mTabParent = static_cast<mozilla::dom::TabParent*>(iframeEmbedding);
-
-  if (loadContext.IsNotNull()) {
-    if (mTabParent) {
-      mLoadContext = new LoadContext(loadContext, mTabParent->GetOwnerElement());
-    } else {
-      mLoadContext = new LoadContext(loadContext);
-    }
-  } else if (loadContext.IsPrivateBitValid()) {
-    // Don't have channel yet: override PB status after we create it.
-    mPBOverride = loadContext.mUsePrivateBrowsing ? kPBOverride_Private
-                                                  : kPBOverride_NotPrivate;
-  }
 }
 
 HttpChannelParent::~HttpChannelParent()
@@ -124,6 +114,7 @@ HttpChannelParent::RecvAsyncOpen(const URIParams&           aURI,
                                  const OptionalURIParams&   aOriginalURI,
                                  const OptionalURIParams&   aDocURI,
                                  const OptionalURIParams&   aReferrerURI,
+                                 const OptionalURIParams&   aAPIRedirectToURI,
                                  const uint32_t&            loadFlags,
                                  const RequestHeaderTuples& requestHeaders,
                                  const nsHttpAtom&          requestMethod,
@@ -144,6 +135,7 @@ HttpChannelParent::RecvAsyncOpen(const URIParams&           aURI,
   nsCOMPtr<nsIURI> originalUri = DeserializeURI(aOriginalURI);
   nsCOMPtr<nsIURI> docUri = DeserializeURI(aDocURI);
   nsCOMPtr<nsIURI> referrerUri = DeserializeURI(aReferrerURI);
+  nsCOMPtr<nsIURI> apiRedirectToUri = DeserializeURI(aAPIRedirectToURI);
 
   nsCString uriSpec;
   uri->GetSpec(uriSpec);
@@ -174,6 +166,8 @@ HttpChannelParent::RecvAsyncOpen(const URIParams&           aURI,
     httpChan->SetDocumentURI(docUri);
   if (referrerUri)
     httpChan->SetReferrerInternal(referrerUri);
+  if (apiRedirectToUri)
+    httpChan->RedirectTo(apiRedirectToUri);
   if (loadFlags != nsIRequest::LOAD_NORMAL)
     httpChan->SetLoadFlags(loadFlags);
 
@@ -326,13 +320,19 @@ HttpChannelParent::RecvUpdateAssociatedContentSecurity(const int32_t& broken,
 
 bool
 HttpChannelParent::RecvRedirect2Verify(const nsresult& result, 
-                                       const RequestHeaderTuples& changedHeaders)
+                                       const RequestHeaderTuples& changedHeaders,
+                                       const OptionalURIParams&   aAPIRedirectURI)
 {
   if (NS_SUCCEEDED(result)) {
     nsCOMPtr<nsIHttpChannel> newHttpChannel =
         do_QueryInterface(mRedirectChannel);
 
     if (newHttpChannel) {
+      nsCOMPtr<nsIURI> apiRedirectUri = DeserializeURI(aAPIRedirectURI);
+
+      if (apiRedirectUri)
+        newHttpChannel->RedirectTo(apiRedirectUri);
+
       for (uint32_t i = 0; i < changedHeaders.Length(); i++) {
         newHttpChannel->SetRequestHeader(changedHeaders[i].mHeader,
                                          changedHeaders[i].mValue,

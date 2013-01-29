@@ -30,7 +30,7 @@
 #include "nsIScriptGlobalObject.h"
 #include "nsIServiceManager.h"
 #include "nsIURL.h"
-#include "nsIViewManager.h"
+#include "nsViewManager.h"
 #include "nsIXULDocument.h"
 #include "nsIScriptSecurityManager.h"
 #include "nsLayoutCID.h"
@@ -530,7 +530,7 @@ XULContentSinkImpl::HandleEndElement(const PRUnichar *aName)
             static_cast<nsXULPrototypeScript*>(node.get());
 
         // If given a src= attribute, we must ignore script tag content.
-        if (! script->mSrcURI && ! script->mScriptObject.mObject) {
+        if (!script->mSrcURI && !script->GetScriptObject()) {
             nsCOMPtr<nsIDocument> doc = do_QueryReferent(mDocument);
 
             script->mOutOfLine = false;

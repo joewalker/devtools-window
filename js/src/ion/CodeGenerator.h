@@ -54,6 +54,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitStart(LStart *lir);
     bool visitReturn(LReturn *ret);
     bool visitDefVar(LDefVar *lir);
+    bool visitDefFun(LDefFun *lir);
     bool visitOsrEntry(LOsrEntry *lir);
     bool visitOsrScopeChain(LOsrScopeChain *lir);
     bool visitStackArgT(LStackArgT *lir);
@@ -98,9 +99,8 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitNewCallObject(LNewCallObject *lir);
     bool visitNewStringObject(LNewStringObject *lir);
     bool visitInitProp(LInitProp *lir);
-    bool emitCreateThisVM(LInstruction *lir, const LAllocation *proto, const LAllocation *callee);
-    bool visitCreateThisV(LCreateThisV *lir);
-    bool visitCreateThisO(LCreateThisO *lir);
+    bool visitCreateThis(LCreateThis *lir);
+    bool visitCreateThisWithProto(LCreateThisWithProto *lir);
     bool visitCreateThisWithTemplate(LCreateThisWithTemplate *lir);
     bool visitReturnFromCtor(LReturnFromCtor *lir);
     bool visitArrayLength(LArrayLength *lir);
@@ -128,7 +128,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitMinMaxI(LMinMaxI *lir);
     bool visitBinaryV(LBinaryV *lir);
     bool visitCompareS(LCompareS *lir);
-    bool visitCompareV(LCompareV *lir);
+    bool visitCompareVM(LCompareVM *lir);
     bool visitIsNullOrLikeUndefined(LIsNullOrLikeUndefined *lir);
     bool visitIsNullOrLikeUndefinedAndBranch(LIsNullOrLikeUndefinedAndBranch *lir);
     bool visitEmulatesUndefined(LEmulatesUndefined *lir);
@@ -201,6 +201,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitOutOfLineSetPropertyCache(OutOfLineCache *ool);
     bool visitOutOfLineBindNameCache(OutOfLineCache *ool);
     bool visitOutOfLineGetNameCache(OutOfLineCache *ool);
+    bool visitOutOfLineCallsiteCloneCache(OutOfLineCache *ool);
 
     bool visitGetPropertyCacheV(LGetPropertyCacheV *ins) {
         return visitCache(ins);
@@ -221,6 +222,9 @@ class CodeGenerator : public CodeGeneratorSpecific
         return visitCache(ins);
     }
     bool visitGetNameCache(LGetNameCache *ins) {
+        return visitCache(ins);
+    }
+    bool visitCallsiteCloneCache(LCallsiteCloneCache *ins) {
         return visitCache(ins);
     }
 
@@ -249,6 +253,9 @@ class CodeGenerator : public CodeGeneratorSpecific
     // be tested in the first place.)
     void testObjectTruthy(Register objreg, Label *ifTruthy, Label *ifFalsy, Register scratch,
                           OutOfLineTestObject *ool);
+
+    // Bailout if an element about to be written to is a hole.
+    bool emitStoreHoleCheck(Register elements, const LAllocation *index, LSnapshot *snapshot);
 };
 
 } // namespace ion

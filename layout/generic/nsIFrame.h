@@ -32,6 +32,7 @@
 #include "mozilla/layout/FrameChildList.h"
 #include "FramePropertyTable.h"
 #include "mozilla/Attributes.h"
+#include <algorithm>
 
 #ifdef ACCESSIBILITY
 #include "mozilla/a11y/AccTypes.h"
@@ -62,7 +63,7 @@ class nsIAtom;
 class nsPresContext;
 class nsIPresShell;
 class nsRenderingContext;
-class nsIView;
+class nsView;
 class nsIWidget;
 class nsIDOMRange;
 class nsISelectionController;
@@ -1358,8 +1359,8 @@ public:
     int32_t secondaryOffset;
     // Helpers for places that need the ends of the offsets and expect them in
     // numerical order, as opposed to wanting the primary and secondary offsets
-    int32_t StartOffset() { return NS_MIN(offset, secondaryOffset); }
-    int32_t EndOffset() { return NS_MAX(offset, secondaryOffset); }
+    int32_t StartOffset() { return std::min(offset, secondaryOffset); }
+    int32_t EndOffset() { return std::max(offset, secondaryOffset); }
     // This boolean indicates whether the associated content is before or after
     // the offset; the most visible use is to allow the caret to know which line
     // to display on.
@@ -1949,16 +1950,16 @@ public:
    * GetView returns non-null if and only if |HasView| returns true.
    */
   bool HasView() const { return !!(mState & NS_FRAME_HAS_VIEW); }
-  nsIView* GetView() const;
-  virtual nsIView* GetViewExternal() const;
-  nsresult SetView(nsIView* aView);
+  nsView* GetView() const;
+  virtual nsView* GetViewExternal() const;
+  nsresult SetView(nsView* aView);
 
   /**
    * Find the closest view (on |this| or an ancestor).
    * If aOffset is non-null, it will be set to the offset of |this|
    * from the returned view.
    */
-  nsIView* GetClosestView(nsPoint* aOffset = nullptr) const;
+  nsView* GetClosestView(nsPoint* aOffset = nullptr) const;
 
   /**
    * Find the closest ancestor (excluding |this| !) that has a view
@@ -2026,7 +2027,7 @@ public:
    * has a view. Also returns the containing view or null in case of error
    */
   NS_IMETHOD  GetOffsetFromView(nsPoint&  aOffset,
-                                nsIView** aView) const = 0;
+                                nsView** aView) const = 0;
 
   /**
    * Returns the nearest widget containing this frame. If this frame has a

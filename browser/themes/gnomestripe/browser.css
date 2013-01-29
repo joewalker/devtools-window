@@ -55,7 +55,7 @@
 #nav-bar[tabsontop=true],
 #nav-bar[tabsontop=true][collapsed=true]:not([customizing]) + toolbar,
 #nav-bar[tabsontop=true][collapsed=true]:not([customizing]) + #customToolbars + #PersonalToolbar {
-  background-image: -moz-linear-gradient(@toolbarHighlight@, rgba(255,255,255,0));
+  background-image: linear-gradient(@toolbarHighlight@, rgba(255,255,255,0));
 }
 
 #personal-bookmarks {
@@ -730,6 +730,10 @@ toolbar[mode="full"] .toolbarbutton-1 > .toolbarbutton-menubutton-button {
   opacity: .3;
 }
 
+#webrtc-status-button {
+  -moz-image-region: rect(0px 192px 24px 168px);
+}
+
 /* 16px primary toolbar buttons */
 toolbar[iconsize="small"] .toolbarbutton-1:not([type="menu-button"]) {
   -moz-box-orient: vertical;
@@ -810,6 +814,7 @@ toolbar[iconsize="small"] #downloads-button {
   -moz-image-region: rect(0px 16px 16px 0px);
 }
 
+toolbar[iconsize="small"] #webrtc-status-button /* temporary placeholder (bug 824825) */,
 toolbar[iconsize="small"] #history-button {
   -moz-image-region: rect(0px 32px 16px 16px);
 }
@@ -878,6 +883,10 @@ toolbar[iconsize="small"] #sync-button[status="active"] {
 
 toolbar[iconsize="small"] #feed-button {
   -moz-image-region: rect(0px 112px 16px 96px);
+}
+
+toolbar[iconsize="small"] #webrtc-status-button {
+  -moz-image-region: rect(0px 128px 16px 112px);
 }
 
 /* Fullscreen window controls */
@@ -1055,10 +1064,10 @@ toolbar[iconsize="small"] #feed-button {
   background-color: #fff;
   color: hsl(92,100%,30%);
   -moz-margin-end: 4px;
-  background-image: -moz-linear-gradient(hsla(92,81%,16%,0),
-                                         hsla(92,81%,16%,.2) 25%,
-                                         hsla(92,81%,16%,.2) 75%,
-                                         hsla(92,81%,16%,0));
+  background-image: linear-gradient(hsla(92,81%,16%,0),
+                                    hsla(92,81%,16%,.2) 25%,
+                                    hsla(92,81%,16%,.2) 75%,
+                                    hsla(92,81%,16%,0));
   background-position: right;
   background-size: 1px;
   background-repeat: no-repeat;
@@ -1200,6 +1209,7 @@ toolbar[iconsize="small"] #feed-button {
   list-style-image: url(chrome://browser/skin/webapps-64.png);
 }
 
+.popup-notification-icon[popupid="webRTC-sharingDevices"],
 .popup-notification-icon[popupid="webRTC-shareDevices"] {
   list-style-image: url(chrome://browser/skin/webRTC-shareDevice-64.png);
 }
@@ -1288,8 +1298,12 @@ toolbar[iconsize="small"] #feed-button {
   }
 }
 
-#webRTC-notification-icon {
+#webRTC-shareDevices-notification-icon {
   list-style-image: url(chrome://browser/skin/webRTC-shareDevice-16.png);
+}
+
+#webRTC-sharingDevices-notification-icon {
+  list-style-image: url(chrome://browser/skin/webRTC-sharingDevice-16.png);
 }
 
 #treecolAutoCompleteImage {
@@ -1477,7 +1491,7 @@ richlistitem[type~="action"][actiontype="switchtab"] > .ac-url-box > .ac-action-
   margin: 8px -10px -10px -10px;
   padding: 8px 10px;
   border-top: 1px solid ThreeDShadow;
-  background-image: -moz-linear-gradient(hsla(0,0%,0%,.15), hsla(0,0%,0%,.08) 6px);
+  background-image: linear-gradient(hsla(0,0%,0%,.15), hsla(0,0%,0%,.08) 6px);
 }
 
 .panel-promo-icon {
@@ -1536,15 +1550,14 @@ richlistitem[type~="action"][actiontype="switchtab"] > .ac-url-box > .ac-action-
 }
 
 #TabsToolbar[tabsontop=false] {
-  background-image:
-    -moz-linear-gradient(bottom, rgba(0,0,0,.3) 1px, rgba(0,0,0,.05) 1px, transparent 50%);
+  background-image: linear-gradient(to top, rgba(0,0,0,.3) 1px, rgba(0,0,0,.05) 1px, transparent 50%);
 }
 
 .tabbrowser-tab,
 .tabs-newtab-button {
   position: static;
   -moz-appearance: none;
-  background: -moz-linear-gradient(hsla(0,0%,100%,.2), hsla(0,0%,45%,.2) 2px, hsla(0,0%,32%,.2) 80%);
+  background: linear-gradient(hsla(0,0%,100%,.2), hsla(0,0%,45%,.2) 2px, hsla(0,0%,32%,.2) 80%);
   background-origin: border-box;
   background-position: 1px 2px;
   background-size: 100% calc(100% - 2px);
@@ -1561,52 +1574,52 @@ richlistitem[type~="action"][actiontype="switchtab"] > .ac-url-box > .ac-action-
 
 .tabbrowser-tab:hover,
 .tabs-newtab-button:hover {
-  background-image: -moz-linear-gradient(hsla(0,0%,100%,.6), hsla(0,0%,100%,.2) 4px, hsla(0,0%,75%,.2) 80%);
+  background-image: linear-gradient(hsla(0,0%,100%,.6), hsla(0,0%,100%,.2) 4px, hsla(0,0%,75%,.2) 80%);
 }
 
 .tabbrowser-tab[selected="true"] {
-  background-image: -moz-linear-gradient(@selectedTabHighlight@, @toolbarHighlight@ 32%),
-                    -moz-linear-gradient(-moz-dialog, -moz-dialog);
+  background-image: linear-gradient(@selectedTabHighlight@, @toolbarHighlight@ 32%),
+                    linear-gradient(-moz-dialog, -moz-dialog);
   color: -moz-dialogtext;
 }
 
 #main-window[tabsontop=false]:not([disablechrome]) .tabbrowser-tab[selected=true]:not(:-moz-lwtheme) {
-  background-image: -moz-linear-gradient(bottom, rgba(0,0,0,.3) 1px, transparent 1px),
-                    -moz-linear-gradient(@selectedTabHighlight@, @toolbarHighlight@ 32%),
-                    -moz-linear-gradient(-moz-dialog, -moz-dialog);
+  background-image: linear-gradient(to top, rgba(0,0,0,.3) 1px, transparent 1px),
+                    linear-gradient(@selectedTabHighlight@, @toolbarHighlight@ 32%),
+                    linear-gradient(-moz-dialog, -moz-dialog);
 }
 
 .tabbrowser-tab[selected="true"]:-moz-lwtheme {
-  background-image: -moz-linear-gradient(@selectedTabHighlight@, @toolbarHighlight@ 32%);
+  background-image: linear-gradient(@selectedTabHighlight@, @toolbarHighlight@ 32%);
   color: inherit;
 }
 
 .tabbrowser-tab:-moz-lwtheme-brighttext:not([selected="true"]),
 .tabs-newtab-button:-moz-lwtheme-brighttext {
-  background-image: -moz-linear-gradient(hsla(0,0%,60%,.6), hsla(0,0%,40%,.6) 4px, hsla(0,0%,30%,.6) 80%);
+  background-image: linear-gradient(hsla(0,0%,60%,.6), hsla(0,0%,40%,.6) 4px, hsla(0,0%,30%,.6) 80%);
 }
 
 .tabbrowser-tab:-moz-lwtheme-brighttext:not([selected="true"]):hover,
 .tabs-newtab-button:-moz-lwtheme-brighttext:hover {
-  background-image: -moz-linear-gradient(hsla(0,0%,80%,.6), hsla(0,0%,60%,.6) 4px, hsla(0,0%,45%,.6) 80%);
+  background-image: linear-gradient(hsla(0,0%,80%,.6), hsla(0,0%,60%,.6) 4px, hsla(0,0%,45%,.6) 80%);
 }
 
 .tabbrowser-tab:-moz-lwtheme-darktext:not([selected="true"]),
 .tabs-newtab-button:-moz-lwtheme-darktext {
-  background-image: -moz-linear-gradient(hsla(0,0%,100%,.5), hsla(0,0%,60%,.5) 4px, hsla(0,0%,45%,.5) 80%);
+  background-image: linear-gradient(hsla(0,0%,100%,.5), hsla(0,0%,60%,.5) 4px, hsla(0,0%,45%,.5) 80%);
 }
 
 .tabbrowser-tab:-moz-lwtheme-darktext:not([selected="true"]):hover,
 .tabs-newtab-button:-moz-lwtheme-darktext:hover {
-  background-image: -moz-linear-gradient(hsla(0,0%,100%,.5), hsla(0,0%,80%,.5) 4px, hsla(0,0%,60%,.5) 80%);
+  background-image: linear-gradient(hsla(0,0%,100%,.5), hsla(0,0%,80%,.5) 4px, hsla(0,0%,60%,.5) 80%);
 }
 
 .tabbrowser-tab[pinned][titlechanged]:not([selected="true"]) {
-  background-image: -moz-radial-gradient(center 3px, circle cover, rgba(233,242,252,1) 3%, rgba(172,206,255,.75) 40%, rgba(87,151,201,.5) 80%, rgba(87,151,201,0));
+  background-image: radial-gradient(circle farthest-corner at 50% 3px, rgba(233,242,252,1) 3%, rgba(172,206,255,.75) 40%, rgba(87,151,201,.5) 80%, rgba(87,151,201,0));
 }
 .tabbrowser-tab[pinned][titlechanged]:not([selected="true"]):hover {
-  background-image: -moz-linear-gradient(hsla(0,0%,100%,.8), hsla(0,0%,100%,.6) 2px, hsla(0,0%,75%,.2) 80%),
-                    -moz-radial-gradient(center 3px, circle cover, rgba(233,242,252,1) 3%, rgba(172,206,255,.75) 40%, rgba(87,151,201,.5) 80%, rgba(87,151,201,0));
+  background-image: linear-gradient(hsla(0,0%,100%,.8), hsla(0,0%,100%,.6) 2px, hsla(0,0%,75%,.2) 80%),
+                    radial-gradient(circle farthest-corner at 50% 3px, rgba(233,242,252,1) 3%, rgba(172,206,255,.75) 40%, rgba(87,151,201,.5) 80%, rgba(87,151,201,0));
 }
 
 #tabbrowser-tabs[positionpinnedtabs] > .tabbrowser-tab > .tab-stack > .tab-content[pinned] {
@@ -1935,9 +1948,9 @@ toolbar[mode="text"] toolbarbutton.chevron > .toolbarbutton-icon {
 
 #addon-bar[customizing] > #status-bar {
   opacity: .5;
-  background-image: -moz-repeating-linear-gradient(-45deg,
-                                                   rgba(255,255,255,.3), rgba(255,255,255,.3) 5px,
-                                                   rgba(0,0,0,.3) 5px, rgba(0,0,0,.3) 10px);
+  background-image: repeating-linear-gradient(135deg,
+                                              rgba(255,255,255,.3), rgba(255,255,255,.3) 5px,
+                                              rgba(0,0,0,.3) 5px, rgba(0,0,0,.3) 10px);
 }
 
 #status-bar > statusbarpanel {
@@ -1959,7 +1972,7 @@ toolbar[mode="text"] toolbarbutton.chevron > .toolbarbutton-icon {
 .statuspanel-label {
   margin: 0;
   padding: 2px 4px;
-  background: -moz-linear-gradient(white, #ddd);
+  background: linear-gradient(#fff, #ddd);
   border: 1px none #ccc;
   border-top-style: solid;
   color: #333;
@@ -2005,7 +2018,7 @@ toolbar[mode="text"] toolbarbutton.chevron > .toolbarbutton-icon {
   color: hsl(200, 100%, 65%);
   border: 1px solid hsla(210, 19%, 63%, .5);
   border-radius: 3px;
-  background: -moz-linear-gradient(hsl(209, 18%, 30%), hsl(210, 24%, 16%)) no-repeat padding-box;
+  background: linear-gradient(hsl(209, 18%, 30%), hsl(210, 24%, 16%)) no-repeat padding-box;
 }
 
 /* Highlighter - Node Infobar - text */
@@ -2089,7 +2102,7 @@ html|*.highlighter-nodeinfobar-pseudo-classes {
   margin-top: 8px;
   border-right-color: hsla(210, 19%, 63%, .5);
   border-top-color: hsla(210, 19%, 63%, .5);
-  background-image: -moz-linear-gradient(bottom left, transparent 50%, hsl(209, 18%, 30%) 50%);
+  background-image: linear-gradient(to top right, transparent 50%, hsl(209, 18%, 30%) 50%);
 }
 
 .highlighter-nodeinfobar-arrow-bottom {
@@ -2097,7 +2110,7 @@ html|*.highlighter-nodeinfobar-pseudo-classes {
   margin-bottom: 8px;
   border-left-color: hsla(210, 19%, 63%, .5);
   border-bottom-color: hsla(210, 19%, 63%, .5);
-  background-image: -moz-linear-gradient(top right, transparent 50%, hsl(210, 24%, 16%) 50%);
+  background-image: linear-gradient(to bottom left, transparent 50%, hsl(210, 24%, 16%) 50%);
 }
 
 .highlighter-nodeinfobar-container[position="top"] > .highlighter-nodeinfobar,
@@ -2294,6 +2307,10 @@ html|*#gcli-output-frame {
   display: none;
 }
 
+#developer-toolbar-toolbox-button > .toolbarbutton-icon {
+  -moz-margin-end: 0;
+}
+
 .developer-toolbar-button {
   -moz-appearance: none;
   min-width: 78px;
@@ -2336,34 +2353,13 @@ html|*#gcli-output-frame {
   color: #FDF3DE;
   min-width: 16px;
   text-shadow: none;
-  background-image: -moz-linear-gradient(top, #B4211B, #8A1915);
+  background-image: linear-gradient(#B4211B, #8A1915);
   border-radius: 1px;
   -moz-margin-end: 2px;
 }
 
-#social-toolbar-item {
-  -moz-box-orient: horizontal;
-}
-
-#social-toolbar-item > .toolbarbutton-1 {
-  margin: 0;
-  padding: 0;
-  -moz-appearance: toolbarbutton;
-}
-
-.social-notification-icon-hbox {
-  pointer-events: none;
-}
-
-.social-status-button {
-  list-style-image: none;
-}
-
-#social-provider-button {
-  -moz-image-region: rect(0, 16px, 16px, 0);
-}
-
-#social-provider-button > image {
+#social-toolbar-item > .toolbarbutton-1 > .toolbarbutton-icon,
+.social-notification-container > .toolbarbutton-1 > .toolbarbutton-icon {
   margin: 5px 3px;
 }
 
@@ -2371,33 +2367,32 @@ html|*#gcli-output-frame {
   display: none;
 }
 
-.social-notification-icon-stack {
-  padding: 0;
+.social-notification-container {
+  /* position:relative on .toolbarbutton-1 does not get position:absolute
+     to work as expected on .toolbarbutton-1 generated content. Placing a
+     simple container outside of .toolbarbutton-1 and setting position:relative
+     on the simple container however will work. */
+  position: relative;
 }
 
-.social-notification-icon-image {
-  margin: 5px 3px;
-  -moz-image-region: rect(0, 16px, 16px, 0);
-}
-
-.social-notification-icon-hbox {
-  padding: 0;
-}
-
-.social-notification-icon-label {
-  background-color: rgb(240,61,37);
-  border: 1px solid rgb(216,55,34);
-  box-shadow: 0px 1px 0px rgba(0,39,121,0.77);
-  padding-right: 1px;
-  padding-left: 1px;
-  color: white;
+.social-notification-container > .toolbarbutton-1[badge]:not([badge=""])::after {
+  /* The |content| property is set in the content stylesheet. */
   font-size: 9px;
   font-weight: bold;
-  margin: 0;
+  padding: 0 1px;
+  color: #fff;
+  background-color: rgb(240,61,37);
+  border: 1px solid rgb(216,55,34);
+  border-radius: 2px;
+  box-shadow: 0 1px 0 rgba(0,39,121,0.77);
+  position: absolute;
+  top: 2px;
+  right: 2px;
 }
 
-.social-notification-icon-label[value=""] {
-  display: none;
+.social-notification-container > .toolbarbutton-1[badge]:not([badge=""]):-moz-locale-dir(rtl)::after {
+  left: 2px;
+  right: auto;
 }
 
 /* social toolbar provider menu */
@@ -2663,3 +2658,13 @@ chatbox[minimized="true"] {
 .center-item-button {
   min-width: 0;
 }
+
+%ifdef MOZ_PER_WINDOW_PRIVATE_BROWSING
+#main-window[privatebrowsingmode=temporary] #TabsToolbar::before {
+  display: -moz-box;
+  content: "";
+  background: url("chrome://browser/skin/privatebrowsing-mask.png") center no-repeat;
+  width: 40px;
+}
+%endif
+

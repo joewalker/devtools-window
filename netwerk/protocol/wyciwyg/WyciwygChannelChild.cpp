@@ -6,6 +6,7 @@
 
 #include "mozilla/net/NeckoChild.h"
 #include "WyciwygChannelChild.h"
+#include "mozilla/dom/TabChild.h"
 
 #include "nsCharsetSource.h"
 #include "nsStringStream.h"
@@ -37,6 +38,7 @@ WyciwygChannelChild::WyciwygChannelChild()
   , mCharsetSource(kCharsetUninitialized)
   , mState(WCC_NEW)
   , mIPCOpen(false)
+  , mSentAppData(false)
   , mEventQ(NS_ISUPPORTS_CAST(nsIWyciwygChannel*, this))
 {
   LOG(("Creating WyciwygChannelChild @%x\n", this));
@@ -567,6 +569,14 @@ WyciwygChannelChild::Open(nsIInputStream **_retval)
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
+static mozilla::dom::TabChild*
+GetTabChild(nsIChannel* aChannel)
+{
+  nsCOMPtr<nsITabChild> iTabChild;
+  NS_QueryNotificationCallbacks(aChannel, iTabChild);
+  return iTabChild ? static_cast<mozilla::dom::TabChild*>(iTabChild.get()) : nullptr;
+}
+
 /* void asyncOpen (in nsIStreamListener aListener, in nsISupports aContext); */
 NS_IMETHODIMP
 WyciwygChannelChild::AsyncOpen(nsIStreamListener *aListener, nsISupports *aContext)
@@ -592,13 +602,18 @@ WyciwygChannelChild::AsyncOpen(nsIStreamListener *aListener, nsISupports *aConte
   URIParams originalURI;
   SerializeURI(mOriginalURI, originalURI);
 
-  SendAsyncOpen(originalURI, mLoadFlags, IPC::SerializedLoadContext(this));
+  mozilla::dom::TabChild* tabChild = GetTabChild(this);
+  if (MissingRequiredTabChild(tabChild, "wyciwyg")) {
+    return NS_ERROR_ILLEGAL_VALUE;
+  }
 
+  SendAsyncOpen(originalURI, mLoadFlags, IPC::SerializedLoadContext(this), tabChild);
+
+  mSentAppData = true;
   mState = WCC_OPENED;
 
   return NS_OK;
 }
-
 
 //-----------------------------------------------------------------------------
 // nsIWyciwygChannel
@@ -610,6 +625,12 @@ WyciwygChannelChild::WriteToCacheEntry(const nsAString & aData)
 {
   NS_ENSURE_TRUE((mState == WCC_INIT) ||
                  (mState == WCC_ONWRITE), NS_ERROR_UNEXPECTED);
+
+  if (!mSentAppData) {
+    mozilla::dom::TabChild* tabChild = GetTabChild(this);
+    SendAppData(IPC::SerializedLoadContext(this), tabChild);
+    mSentAppData = true;
+  }
 
   SendWriteToCacheEntry(PromiseFlatString(aData));
   mState = WCC_ONWRITE;

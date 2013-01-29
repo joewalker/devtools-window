@@ -82,17 +82,6 @@ public:
   NS_DECL_ISUPPORTS
 };
 
-// IID for the TestCallbackInterface
-#define NS_TEST_CALLBACK_INTERFACE_IID \
-{ 0xbf711ba4, 0xc8f6, 0x46cf, \
- { 0xba, 0x5b, 0xaa, 0xe2, 0x78, 0x18, 0xe6, 0x4a } }
-class TestCallbackInterface : public nsISupports
-{
-public:
-  NS_DECLARE_STATIC_IID_ACCESSOR(NS_TEST_CALLBACK_INTERFACE_IID)
-  NS_DECL_ISUPPORTS
-};
-
 class TestNonWrapperCacheInterface : public nsISupports
 {
 public:
@@ -122,26 +111,25 @@ public:
   // And now our actual WebIDL API
   // Constructors
   static
-  already_AddRefed<TestInterface> Constructor(nsISupports*, ErrorResult&);
+  already_AddRefed<TestInterface>
+    Constructor(const GlobalObject&, ErrorResult&);
   static
-  already_AddRefed<TestInterface> Constructor(nsISupports*, const nsAString&,
-                                              ErrorResult&);
+  already_AddRefed<TestInterface>
+    Constructor(const GlobalObject&, const nsAString&, ErrorResult&);
   static
-  already_AddRefed<TestInterface> Constructor(nsISupports*, uint32_t,
-                                              const Nullable<bool>&,
-                                              ErrorResult&);
+  already_AddRefed<TestInterface>
+    Constructor(const GlobalObject&, uint32_t, const Nullable<bool>&,
+                ErrorResult&);
   static
-  already_AddRefed<TestInterface> Constructor(nsISupports*, TestInterface*,
-                                              ErrorResult&);
+  already_AddRefed<TestInterface>
+    Constructor(const GlobalObject&, TestInterface*, ErrorResult&);
   static
-  already_AddRefed<TestInterface> Constructor(nsISupports*,
-                                              TestNonCastableInterface&,
-                                              ErrorResult&);
+  already_AddRefed<TestInterface>
+    Constructor(const GlobalObject&, TestNonCastableInterface&, ErrorResult&);
   /*  static
-  already_AddRefed<TestInterface> Constructor(nsISupports*,
-                                              uint32_t, uint32_t,
-                                              const TestInterfaceOrOnlyForUseInConstructor&,
-                                              ErrorResult&);
+  already_AddRefed<TestInterface>
+    Constructor(const GlobalObject&, uint32_t, uint32_t,
+                const TestInterfaceOrOnlyForUseInConstructor&, ErrorResult&);
   */
   
   // Integer types
@@ -404,6 +392,10 @@ public:
   void PassNullableTreatAsNullCallback(TestTreatAsNullCallback*);
   void PassOptionalNullableTreatAsNullCallback(const Optional<nsRefPtr<TestTreatAsNullCallback> >&);
   void PassOptionalNullableTreatAsNullCallbackWithDefaultValue(TestTreatAsNullCallback*);
+  void SetTreatAsNullCallback(TestTreatAsNullCallback&);
+  already_AddRefed<TestTreatAsNullCallback> TreatAsNullCallback();
+  void SetNullableTreatAsNullCallback(TestTreatAsNullCallback*);
+  already_AddRefed<TestTreatAsNullCallback> GetNullableTreatAsNullCallback();
 
   // Any types
   void PassAny(JSContext*, JS::Value);
@@ -471,13 +463,24 @@ public:
   void ExerciseTypedefInterfaces3(TestInterface&);
 
   // Static methods and attributes
-  static void StaticMethod(nsISupports*, bool);
-  static bool StaticAttribute(nsISupports*);
-  static void SetStaticAttribute(nsISupports*, bool);
+  static void StaticMethod(const GlobalObject&, bool);
+  static void StaticMethodWithContext(const GlobalObject&, JSContext*,
+                                      JS::Value);
+  static bool StaticAttribute(const GlobalObject&);
+  static void SetStaticAttribute(const GlobalObject&, bool);
 
   // Overload resolution tests
   bool Overload1(TestInterface&);
   TestInterface* Overload1(const nsAString&, TestInterface&);
+  void Overload2(TestInterface&);
+  void Overload2(const Dict&);
+  void Overload2(const nsAString&);
+  void Overload3(TestInterface&);
+  void Overload3(const TestCallback&);
+  void Overload3(const nsAString&);
+  void Overload4(TestInterface&);
+  void Overload4(TestCallbackInterface&);
+  void Overload4(const nsAString&);
 
   // Variadic handling
   void PassVariadicThirdArg(const nsAString&, int32_t,

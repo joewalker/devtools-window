@@ -189,6 +189,14 @@ class ReftestServer:
 
         xpcshell = os.path.join(self._utilityPath,
                                 "xpcshell" + self._automation.BIN_SUFFIX)
+
+        if not os.access(xpcshell, os.F_OK):
+            raise Exception('xpcshell not found at %s' % xpcshell)
+        if self._automation.elf_arm(xpcshell):
+            raise Exception('xpcshell at %s is an ARM binary; please use '
+                            'the --utility-path argument to specify the path '
+                            'to a desktop version.' % xpcshell)
+
         self._process = self._automation.Process([xpcshell] + args, env = env)
         pid = self._process.pid
         if pid < 0:
@@ -320,9 +328,11 @@ user_pref("browser.firstrun.show.localepicker", false);
 user_pref("font.size.inflation.emPerLine", 0);
 user_pref("font.size.inflation.minTwips", 0);
 user_pref("reftest.remote", true);
-#expand user_pref("toolkit.telemetry.prompted", __MOZ_TELEMETRY_DISPLAY_REV__);
-#expand user_pref("toolkit.telemetry.notifiedOptOut", __MOZ_TELEMETRY_DISPLAY_REV__);
+// Set a future policy version to avoid the telemetry prompt.
+user_pref("toolkit.telemetry.prompted", 999);
+user_pref("toolkit.telemetry.notifiedOptOut", 999);
 user_pref("reftest.uri", "%s");
+user_pref("datareporting.policy.dataSubmissionPolicyBypassAcceptance", true);
 """ % reftestlist)
 
         #workaround for jsreftests.
@@ -414,6 +424,7 @@ def main(args):
     automation.setRemoteProfile(options.remoteProfile)
     automation.setRemoteLog(options.remoteLogFile)
     reftest = RemoteReftest(automation, dm, options, SCRIPT_DIRECTORY)
+    options = parser.verifyCommonOptions(options, reftest)
 
     # Hack in a symbolic link for jsreftest
     os.system("ln -s ../jsreftest " + str(os.path.join(SCRIPT_DIRECTORY, "jsreftest")))

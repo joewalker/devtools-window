@@ -5,7 +5,7 @@
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "Hal.h"
-#include "mozilla/AppProcessPermissions.h"
+#include "mozilla/AppProcessChecker.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/hal_sandbox/PHalChild.h"
 #include "mozilla/hal_sandbox/PHalParent.h"
@@ -425,6 +425,10 @@ public:
     hal::UnregisterWakeLockObserver(this);
     hal::UnregisterSystemClockChangeObserver(this);
     hal::UnregisterSystemTimezoneChangeObserver(this);
+    for (int32_t switchDevice = SWITCH_DEVICE_UNKNOWN + 1;
+         switchDevice < NUM_SWITCH_DEVICE; ++switchDevice) {
+      hal::UnregisterSwitchObserver(SwitchDevice(switchDevice), this);
+    }
   }
 
   virtual bool

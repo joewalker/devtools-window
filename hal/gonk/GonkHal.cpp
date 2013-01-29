@@ -58,6 +58,7 @@
 #include "nsXULAppAPI.h"
 #include "OrientationObserver.h"
 #include "UeventPoller.h"
+#include <algorithm>
 
 #define LOG(args...)  __android_log_print(ANDROID_LOG_INFO, "Gonk", args)
 #define NsecPerMsec  1000000LL
@@ -503,7 +504,7 @@ bool ReadFromFile(const char *filename, char (&buf)[n])
     return false;
   }
 
-  buf[NS_MIN(numRead, n - 1)] = '\0';
+  buf[std::min(numRead, n - 1)] = '\0';
   return true;
 }
 
@@ -1046,8 +1047,13 @@ EnsureKernelLowMemKillerParamsSet()
   nsAutoCString adjParams;
   nsAutoCString minfreeParams;
 
-  const char* priorityClasses[] =
-    {"master", "foreground", "background", "backgroundHomescreen"};
+  const char* priorityClasses[] = {
+    "master",
+    "foreground",
+    "background",
+    "backgroundHomescreen",
+    "backgroundPerceivable"
+  };
   for (size_t i = 0; i < NS_ARRAY_LENGTH(priorityClasses); i++) {
     int32_t oomScoreAdj;
     if (!NS_SUCCEEDED(Preferences::GetInt(nsPrintfCString(
@@ -1111,6 +1117,9 @@ SetProcessPriority(int aPid, ProcessPriority aPriority)
     break;
   case PROCESS_PRIORITY_BACKGROUND_HOMESCREEN:
     priorityStr = "backgroundHomescreen";
+    break;
+  case PROCESS_PRIORITY_BACKGROUND_PERCEIVABLE:
+    priorityStr = "backgroundPerceivable";
     break;
   case PROCESS_PRIORITY_FOREGROUND:
     priorityStr = "foreground";

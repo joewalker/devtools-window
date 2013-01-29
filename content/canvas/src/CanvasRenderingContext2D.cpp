@@ -16,7 +16,7 @@
 #include "nsContentUtils.h"
 
 #include "nsIDocument.h"
-#include "nsHTMLCanvasElement.h"
+#include "mozilla/dom/HTMLCanvasElement.h"
 #include "nsSVGEffects.h"
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
@@ -94,7 +94,7 @@
 #include "nsJSUtils.h"
 #include "XPCQuickStubs.h"
 #include "mozilla/dom/BindingUtils.h"
-#include "nsHTMLImageElement.h"
+#include "mozilla/dom/HTMLImageElement.h"
 #include "nsHTMLVideoElement.h"
 #include "mozilla/dom/CanvasRenderingContext2DBinding.h"
 #include <cstdlib> // for std::abs(int/long)
@@ -130,7 +130,6 @@ static NS_NAMED_LITERAL_STRING(kDefaultFontStyle, "10px sans-serif");
 const Float SIGMA_MAX = 100;
 
 /* Memory reporter stuff */
-static nsIMemoryReporter *gCanvasAzureMemoryReporter = nullptr;
 static int64_t gCanvasAzureMemoryUsed = 0;
 
 static int64_t GetCanvasAzureMemoryUsed() {
@@ -303,10 +302,10 @@ public:
 
     // We need to enlarge and possibly offset our temporary surface
     // so that things outside of the canvas may cast shadows.
-    mTempRect.Inflate(Margin(blurRadius + NS_MAX<Float>(state.shadowOffset.x, 0),
-                             blurRadius + NS_MAX<Float>(state.shadowOffset.y, 0),
-                             blurRadius + NS_MAX<Float>(-state.shadowOffset.x, 0),
-                             blurRadius + NS_MAX<Float>(-state.shadowOffset.y, 0)));
+    mTempRect.Inflate(Margin(blurRadius + std::max<Float>(state.shadowOffset.x, 0),
+                             blurRadius + std::max<Float>(state.shadowOffset.y, 0),
+                             blurRadius + std::max<Float>(-state.shadowOffset.x, 0),
+                             blurRadius + std::max<Float>(-state.shadowOffset.y, 0)));
 
     if (aBounds) {
       // We actually include the bounds of the shadow blur, this makes it
@@ -621,7 +620,7 @@ CanvasRenderingContext2D::Reset()
 }
 
 static void
-WarnAboutUnexpectedStyle(nsHTMLCanvasElement* canvasElement)
+WarnAboutUnexpectedStyle(HTMLCanvasElement* canvasElement)
 {
   nsContentUtils::ReportToConsole(
     nsIScriptError::warningFlag,
@@ -792,9 +791,10 @@ CanvasRenderingContext2D::EnsureTarget()
   }
 
   if (mTarget) {
-    if (gCanvasAzureMemoryReporter == nullptr) {
-        gCanvasAzureMemoryReporter = new NS_MEMORY_REPORTER_NAME(CanvasAzureMemory);
-      NS_RegisterMemoryReporter(gCanvasAzureMemoryReporter);
+    static bool registered = false;
+    if (!registered) {
+      registered = true;
+      NS_RegisterMemoryReporter(new NS_MEMORY_REPORTER_NAME(CanvasAzureMemory));
     }
 
     gCanvasAzureMemoryUsed += mWidth * mHeight * 4;
@@ -1400,7 +1400,7 @@ CanvasRenderingContext2D::CreatePattern(const HTMLImageOrCanvasOrVideoElement& e
 
   Element* htmlElement;
   if (element.IsHTMLCanvasElement()) {
-    nsHTMLCanvasElement* canvas = element.GetAsHTMLCanvasElement();
+    HTMLCanvasElement* canvas = element.GetAsHTMLCanvasElement();
     htmlElement = canvas;
 
     nsIntSize size = canvas->GetSize();
@@ -1421,7 +1421,7 @@ CanvasRenderingContext2D::CreatePattern(const HTMLImageOrCanvasOrVideoElement& e
       return pat.forget();
     }
   } else if (element.IsHTMLImageElement()) {
-    htmlElement = element.GetAsHTMLImageElement();
+    htmlElement = &element.GetAsHTMLImageElement();
   } else {
     htmlElement = element.GetAsHTMLVideoElement();
   }
@@ -1636,9 +1636,9 @@ CanvasRenderingContext2D::BeginPath()
 }
 
 void
-CanvasRenderingContext2D::Fill()
+CanvasRenderingContext2D::Fill(const CanvasWindingRule& winding)
 {
-  EnsureUserSpacePath();
+  EnsureUserSpacePath(winding);
 
   if (!mPath) {
     return;
@@ -1687,9 +1687,9 @@ CanvasRenderingContext2D::Stroke()
 }
 
 void
-CanvasRenderingContext2D::Clip()
+CanvasRenderingContext2D::Clip(const CanvasWindingRule& winding)
 {
-  EnsureUserSpacePath();
+  EnsureUserSpacePath(winding);
 
   if (!mPath) {
     return;
@@ -1848,9 +1848,11 @@ CanvasRenderingContext2D::EnsureWritablePath()
 }
 
 void
-CanvasRenderingContext2D::EnsureUserSpacePath()
+CanvasRenderingContext2D::EnsureUserSpacePath(const CanvasWindingRule& winding)
 {
   FillRule fillRule = CurrentState().fillRule;
+  if(winding == CanvasWindingRuleValues::Evenodd)
+    fillRule = FILL_EVEN_ODD;
 
   if (!mPath && !mPathBuilder && !mDSPathBuilder) {
     EnsureTarget();
@@ -2836,19 +2838,21 @@ CanvasRenderingContext2D::SetMozDashOffset(double mozDashOffset)
 }
 
 bool
-CanvasRenderingContext2D::IsPointInPath(double x, double y)
+CanvasRenderingContext2D::IsPointInPath(double x, double y, const CanvasWindingRule& winding)
 {
   if (!FloatValidate(x,y)) {
     return false;
   }
 
-  EnsureUserSpacePath();
+  EnsureUserSpacePath(winding);
   if (!mPath) {
     return false;
   }
+
   if (mPathTransformWillUpdate) {
     return mPath->ContainsPoint(Point(x, y), mPathToDS);
   }
+
   return mPath->ContainsPoint(Point(x, y), mTarget->GetTransform());
 }
 
@@ -2913,7 +2917,7 @@ CanvasRenderingContext2D::DrawImage(const HTMLImageOrCanvasOrVideoElement& image
 
   EnsureTarget();
   if (image.IsHTMLCanvasElement()) {
-    nsHTMLCanvasElement* canvas = image.GetAsHTMLCanvasElement();
+    HTMLCanvasElement* canvas = image.GetAsHTMLCanvasElement();
     element = canvas;
     nsIntSize size = canvas->GetSize();
     if (size.width == 0 || size.height == 0) {
@@ -2944,7 +2948,7 @@ CanvasRenderingContext2D::DrawImage(const HTMLImageOrCanvasOrVideoElement& image
     }
   } else {
     if (image.IsHTMLImageElement()) {
-      nsHTMLImageElement* img = image.GetAsHTMLImageElement();
+      HTMLImageElement* img = &image.GetAsHTMLImageElement();
       element = img;
     } else {
       nsHTMLVideoElement* video = image.GetAsHTMLVideoElement();
@@ -3640,6 +3644,13 @@ CanvasRenderingContext2D::PutImageData_explicit(int32_t x, int32_t y, uint32_t w
   RefPtr<SourceSurface> sourceSurface =
     mTarget->CreateSourceSurfaceFromData(imgsurf->Data(), IntSize(w, h), imgsurf->Stride(), FORMAT_B8G8R8A8);
 
+  // In certain scenarios, requesting larger than 8k image fails.  Bug 803568
+  // covers the details of how to run into it, but the full detailed
+  // investigation hasn't been done to determine the underlying cause.  We
+  // will just handle the failure to allocate the surface to avoid a crash.
+  if (!sourceSurface) {
+    return NS_ERROR_FAILURE;
+  }
 
   mTarget->CopySurface(sourceSurface,
                        IntRect(dirtyRect.x - x, dirtyRect.y - y,

@@ -16,13 +16,12 @@
  */
 
 var PDFJS = {};
+PDFJS.version = '0.7.82';
+PDFJS.build = 'd467790';
 
 (function pdfjsWrapper() {
   // Use strict in our context only - users might not want it
   'use strict';
-
-  PDFJS.build =
-'3c7ef79';
 
 /* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
@@ -215,7 +214,9 @@ var Page = (function PageClosure() {
                                 xref, handler, this.pageIndex,
                                 'p' + this.pageIndex + '_');
 
-      return pe.getOperatorList(contentStream, resources, dependency);
+      var list = pe.getOperatorList(contentStream, resources, dependency);
+      pe.optimizeQueue(list);
+      return list;
     },
     extractTextContent: function Page_extractTextContent() {
       var handler = {
@@ -306,6 +307,12 @@ var Page = (function PageClosure() {
                   break;
                 case 'GoToR':
                   var url = a.get('F');
+                  if (isDict(url)) {
+                    // We assume that the 'url' is a Filspec dictionary
+                    // and fetch the url without checking any further
+                    url = url.get('F') || '';
+                  }
+
                   // TODO: pdf reference says that GoToR
                   // can also have 'NewWindow' attribute
                   if (!isValidUrl(url))
@@ -1026,7 +1033,14 @@ function isCmd(v, cmd) {
 }
 
 function isDict(v, type) {
-  return v instanceof Dict && (!type || v.get('Type').name == type);
+  if (!(v instanceof Dict)) {
+    return false;
+  }
+  if (!type) {
+    return true;
+  }
+  var dictType = v.get('Type');
+  return isName(dictType) && dictType.name == type;
 }
 
 function isArray(v) {
@@ -1359,6 +1373,13 @@ var PDFDocumentProxy = (function PDFDocumentProxyClosure() {
       return this.pdfInfo.fingerprint;
     },
     /**
+     * @return {boolean} true if embedded document fonts are in use. Will be
+     * set during rendering of the pages.
+     */
+    get embeddedFontsUsed() {
+      return this.transport.embeddedFontsUsed;
+    },
+    /**
      * @param {number} The page number to get. The first page is 1.
      * @return {Promise} A promise that is resolved with a {PDFPageProxy}
      * object.
@@ -1605,6 +1626,9 @@ var PDFPageProxy = (function PDFPageProxyClosure() {
           warn('Error during font loading: ' + obj.error);
           continue;
         }
+        if (!obj.coded) {
+          this.transport.embeddedFontsUsed = true;
+        }
         fontObjs.push(obj);
       }
 
@@ -1710,7 +1734,7 @@ var WorkerTransport = (function WorkerTransportClosure() {
 
     this.pageCache = [];
     this.pagePromises = [];
-    this.fontsLoading = {};
+    this.embeddedFontsUsed = false;
 
     // If worker support isn't disabled explicit and the browser has worker
     // support, create a new web worker and test if it/the browser fullfills
@@ -2111,7 +2135,7 @@ var CanvasExtraState = (function CanvasExtraStateClosure() {
     this.fontSize = 0;
     this.fontSizeScale = 1;
     this.textMatrix = IDENTITY_MATRIX;
-    this.fontMatrix = IDENTITY_MATRIX;
+    this.fontMatrix = FONT_IDENTITY_MATRIX;
     this.leading = 0;
     // Current point (in user coordinates)
     this.x = 0;
@@ -2176,6 +2200,133 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
     }
   }
 
+  function applyStencilMask(imgArray, width, height, inverseDecode, buffer) {
+    var imgArrayPos = 0;
+    var i, j, mask, buf;
+    // removing making non-masked pixels transparent
+    var bufferPos = 3; // alpha component offset
+    for (i = 0; i < height; i++) {
+      mask = 0;
+      for (j = 0; j < width; j++) {
+        if (!mask) {
+          buf = imgArray[imgArrayPos++];
+          mask = 128;
+        }
+        if (!(buf & mask) == inverseDecode) {
+          buffer[bufferPos] = 0;
+        }
+        bufferPos += 4;
+        mask >>= 1;
+      }
+    }
+  }
+
+  function putBinaryImageData(ctx, data, w, h) {
+    var tmpImgData = 'createImageData' in ctx ? ctx.createImageData(w, h) :
+      ctx.getImageData(0, 0, w, h);
+
+    var tmpImgDataPixels = tmpImgData.data;
+    if ('set' in tmpImgDataPixels)
+      tmpImgDataPixels.set(data);
+    else {
+      // Copy over the imageData pixel by pixel.
+      for (var i = 0, ii = tmpImgDataPixels.length; i < ii; i++)
+        tmpImgDataPixels[i] = data[i];
+    }
+
+    ctx.putImageData(tmpImgData, 0, 0);
+  }
+
+  function prescaleImage(pixels, width, height, widthScale, heightScale) {
+    pixels = new Uint8Array(pixels); // creating a copy
+    while (widthScale > 2 || heightScale > 2) {
+      if (heightScale > 2) {
+        // scaling image twice vertically
+        var rowSize = width * 4;
+        var k = 0, l = 0;
+        for (var i = 0; i < height - 1; i += 2) {
+          for (var j = 0; j < width; j++) {
+            var alpha1 = pixels[k + 3], alpha2 = pixels[k + 3 + rowSize];
+            if (alpha1 === alpha2) {
+              pixels[l] = (pixels[k] + pixels[k + rowSize]) >> 1;
+              pixels[l + 1] = (pixels[k + 1] + pixels[k + 1 + rowSize]) >> 1;
+              pixels[l + 2] = (pixels[k + 2] + pixels[k + 2 + rowSize]) >> 1;
+              pixels[l + 3] = alpha1;
+            } else if (alpha1 < alpha2) {
+              var d = 256 - alpha2 + alpha1;
+              pixels[l] = (pixels[k] * d + (pixels[k + rowSize] << 8)) >> 9;
+              pixels[l + 1] = (pixels[k + 1] * d +
+                              (pixels[k + 1 + rowSize] << 8)) >> 9;
+              pixels[l + 2] = (pixels[k + 2] * d +
+                              (pixels[k + 2 + rowSize] << 8)) >> 9;
+              pixels[l + 3] = alpha2;
+            } else {
+              var d = 256 - alpha1 + alpha2;
+              pixels[l] = ((pixels[k] << 8) + pixels[k + rowSize] * d) >> 9;
+              pixels[l + 1] = ((pixels[k + 1] << 8) +
+                              pixels[k + 1 + rowSize] * d) >> 9;
+              pixels[l + 2] = ((pixels[k + 2] << 8) +
+                              pixels[k + 2 + rowSize] * d) >> 9;
+              pixels[l + 3] = alpha1;
+            }
+            k += 4; l += 4;
+          }
+          k += rowSize;
+        }
+        if (height & 1) {
+          for (var i = 0; i < rowSize; i++) {
+            pixels[l++] = pixels[k++];
+          }
+        }
+        height = (height + 1) >> 1;
+        heightScale /= 2;
+      }
+      if (widthScale > 2) {
+        // scaling image twice horizontally
+        var k = 0, l = 0;
+        for (var i = 0; i < height; i++) {
+          for (var j = 0; j < width - 1; j += 2) {
+            var alpha1 = pixels[k + 3], alpha2 = pixels[k + 7];
+            if (alpha1 === alpha2) {
+              pixels[l] = (pixels[k] + pixels[k + 4]) >> 1;
+              pixels[l + 1] = (pixels[k + 1] + pixels[k + 5]) >> 1;
+              pixels[l + 2] = (pixels[k + 2] + pixels[k + 6]) >> 1;
+              pixels[l + 3] = alpha1;
+            } else if (alpha1 < alpha2) {
+              var d = 256 - alpha2 + alpha1;
+              pixels[l] = (pixels[k] * d + (pixels[k + 4] << 8)) >> 9;
+              pixels[l + 1] = (pixels[k + 1] * d + (pixels[k + 5] << 8)) >> 9;
+              pixels[l + 2] = (pixels[k + 2] * d + (pixels[k + 6] << 8)) >> 9;
+              pixels[l + 3] = alpha2;
+            } else {
+              var d = 256 - alpha1 + alpha2;
+              pixels[l] = ((pixels[k] << 8) + pixels[k + 4] * d) >> 9;
+              pixels[l + 1] = ((pixels[k + 1] << 8) + pixels[k + 5] * d) >> 9;
+              pixels[l + 2] = ((pixels[k + 2] << 8) + pixels[k + 6] * d) >> 9;
+              pixels[l + 3] = alpha1;
+            }
+            k += 8; l += 4;
+          }
+          if (width & 1) {
+            pixels[l++] = pixels[k++];
+            pixels[l++] = pixels[k++];
+            pixels[l++] = pixels[k++];
+            pixels[l++] = pixels[k++];
+          }
+        }
+        width = (width + 1) >> 1;
+        widthScale /= 2;
+      }
+    }
+
+    var tmpCanvas = createScratchCanvas(width, height);
+    var tmpCtx = tmpCanvas.getContext('2d');
+    putBinaryImageData(tmpCtx, pixels.subarray(0, width * height * 4),
+                               width, height);
+
+    return tmpCanvas;
+  }
+
   var LINE_CAP_STYLES = ['butt', 'round', 'square'];
   var LINE_JOIN_STYLES = ['miter', 'round', 'bevel'];
   var NORMAL_CLIP = {};
@@ -2207,7 +2358,10 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
       'setFillCMYKColor': true,
       'paintJpegXObject': true,
       'paintImageXObject': true,
+      'paintInlineImageXObject': true,
+      'paintInlineImageXObjectGroup': true,
       'paintImageMaskXObject': true,
+      'paintImageMaskXObjectGroup': true,
       'shadingFill': true
     },
 
@@ -2313,10 +2467,14 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
       this.ctx.miterLimit = limit;
     },
     setDash: function CanvasGraphics_setDash(dashArray, dashPhase) {
-      this.ctx.mozDash = dashArray;
-      this.ctx.mozDashOffset = dashPhase;
-      this.ctx.webkitLineDash = dashArray;
-      this.ctx.webkitLineDashOffset = dashPhase;
+      var ctx = this.ctx;
+      if ('setLineDash' in ctx) {
+        ctx.setLineDash(dashArray);
+        ctx.lineDashOffset = dashPhase;
+      } else {
+        ctx.mozDash = dashArray;
+        ctx.mozDashOffset = dashPhase;
+      }
     },
     setRenderingIntent: function CanvasGraphics_setRenderingIntent(intent) {
       // Maybe if we one day fully support color spaces this will be important
@@ -2586,11 +2744,8 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
       if (!fontObj)
         error('Can\'t find font for ' + fontRefName);
 
-      // Slice-clone matrix so we can manipulate it without affecting original
-      if (fontObj.fontMatrix)
-        current.fontMatrix = fontObj.fontMatrix.slice(0);
-      else
-        current.fontMatrix = IDENTITY_MATRIX.slice(0);
+      current.fontMatrix = fontObj.fontMatrix ? fontObj.fontMatrix :
+                                                FONT_IDENTITY_MATRIX;
 
       // A valid matrix needs all main diagonal elements to be non-zero
       // This also ensures we bypass FF bugzilla bug #719844.
@@ -2601,11 +2756,11 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
 
       // The spec for Tf (setFont) says that 'size' specifies the font 'scale',
       // and in some docs this can be negative (inverted x-y axes).
-      // We implement this condition with fontMatrix.
       if (size < 0) {
         size = -size;
-        current.fontMatrix[0] *= -1;
-        current.fontMatrix[3] *= -1;
+        current.fontDirection = -1;
+      } else {
+        current.fontDirection = 1;
       }
 
       this.current.font = fontObj;
@@ -2658,14 +2813,13 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
     applyTextTransforms: function CanvasGraphics_applyTextTransforms() {
       var ctx = this.ctx;
       var current = this.current;
-      var textHScale = current.textHScale;
-      var fontMatrix = current.fontMatrix || IDENTITY_MATRIX;
-
       ctx.transform.apply(ctx, current.textMatrix);
-      ctx.scale(1, -1);
-      ctx.translate(current.x, -current.y - current.textRise);
-      ctx.transform.apply(ctx, fontMatrix);
-      ctx.scale(textHScale, 1);
+      ctx.translate(current.x, current.y + current.textRise);
+      if (current.fontDirection > 0) {
+        ctx.scale(current.textHScale, -1);
+      } else {
+        ctx.scale(-current.textHScale, 1);
+      }
     },
     createTextGeometry: function CanvasGraphics_createTextGeometry() {
       var geometry = {};
@@ -2696,9 +2850,8 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
       var fontSizeScale = current.fontSizeScale;
       var charSpacing = current.charSpacing;
       var wordSpacing = current.wordSpacing;
-      var textHScale = current.textHScale;
-      var fontMatrix = current.fontMatrix || IDENTITY_MATRIX;
-      var textHScale2 = textHScale * fontMatrix[0];
+      var textHScale = current.textHScale * current.fontDirection;
+      var fontMatrix = current.fontMatrix || FONT_IDENTITY_MATRIX;
       var glyphsLength = glyphs.length;
       var textLayer = this.textLayer;
       var geom;
@@ -2737,8 +2890,8 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
           this.restore();
 
           var transformed = Util.applyTransform([glyph.width, 0], fontMatrix);
-          var width = transformed[0] * fontSize +
-              Util.sign(current.fontMatrix[0]) * charSpacing;
+          var width = (transformed[0] * fontSize + charSpacing) *
+                      current.fontDirection;
 
           ctx.translate(width, 0);
           current.x += width * textHScale;
@@ -2752,8 +2905,7 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
 
         var lineWidth = current.lineWidth;
         var a1 = current.textMatrix[0], b1 = current.textMatrix[1];
-        var a2 = fontMatrix[0], b2 = fontMatrix[1];
-        var scale = Math.sqrt((a1 * a1 + b1 * b1) * (a2 * a2 + b2 * b2));
+        var scale = Math.sqrt(a1 * a1 + b1 * b1);
         if (scale == 0 || lineWidth == 0)
           lineWidth = this.getSinglePixelWidth();
         else
@@ -2774,13 +2926,13 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
           var glyph = glyphs[i];
           if (glyph === null) {
             // word break
-            x += Util.sign(current.fontMatrix[0]) * wordSpacing;
+            x += current.fontDirection * wordSpacing;
             continue;
           }
 
           var character = glyph.fontChar;
-          var charWidth = glyph.width * fontSize * 0.001 +
-              Util.sign(current.fontMatrix[0]) * charSpacing;
+          var charWidth = glyph.width * fontSize * current.fontMatrix[0] +
+                          charSpacing * current.fontDirection;
 
           if (!glyph.disabled) {
             var scaledX = x / fontSizeScale;
@@ -2813,7 +2965,7 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
 
           canvasWidth += charWidth;
         }
-        current.x += x * textHScale2;
+        current.x += x * textHScale;
         ctx.restore();
       }
 
@@ -2829,9 +2981,9 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
       var current = this.current;
       var font = current.font;
       var fontSize = current.fontSize;
-      var textHScale = current.textHScale;
-      if (!font.coded)
-        textHScale *= (current.fontMatrix || IDENTITY_MATRIX)[0];
+      var textHScale = current.textHScale * (current.fontMatrix && !font.coded ?
+        current.fontMatrix[0] : FONT_IDENTITY_MATRIX[0]) *
+        current.fontDirection;
       var arrLength = arr.length;
       var textLayer = this.textLayer;
       var geom;
@@ -2840,14 +2992,7 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
 
       if (textSelection) {
         ctx.save();
-        // Type3 fonts - each glyph is a "mini-PDF" (see also showText)
-        if (font.coded) {
-          ctx.transform.apply(ctx, current.textMatrix);
-          ctx.scale(1, -1);
-          ctx.translate(current.x, -1 * current.y);
-          ctx.scale(textHScale, 1);
-        } else
-          this.applyTextTransforms();
+        this.applyTextTransforms();
         geom = this.createTextGeometry();
         ctx.restore();
       }
@@ -2855,7 +3000,7 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
       for (var i = 0; i < arrLength; ++i) {
         var e = arr[i];
         if (isNum(e)) {
-          var spacingLength = -e * 0.001 * fontSize * textHScale;
+          var spacingLength = -e * fontSize * textHScale;
           current.x += spacingLength;
 
           if (textSelection)
@@ -3107,96 +3252,58 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
 
     paintImageMaskXObject: function CanvasGraphics_paintImageMaskXObject(
                              imgArray, inverseDecode, width, height) {
-      function applyStencilMask(buffer, inverseDecode) {
-        var imgArrayPos = 0;
-        var i, j, mask, buf;
-        // removing making non-masked pixels transparent
-        var bufferPos = 3; // alpha component offset
-        for (i = 0; i < height; i++) {
-          mask = 0;
-          for (j = 0; j < width; j++) {
-            if (!mask) {
-              buf = imgArray[imgArrayPos++];
-              mask = 128;
-            }
-            if (!(buf & mask) == inverseDecode) {
-              buffer[bufferPos] = 0;
-            }
-            bufferPos += 4;
-            mask >>= 1;
-          }
-        }
-      }
-      function rescaleImage(pixels, widthScale, heightScale) {
-        var scaledWidth = Math.ceil(width / widthScale);
-        var scaledHeight = Math.ceil(height / heightScale);
-
-        var itemsSum = new Uint32Array(scaledWidth * scaledHeight * 4);
-        var itemsCount = new Uint32Array(scaledWidth * scaledHeight);
-        for (var i = 0, position = 0; i < height; i++) {
-          var lineOffset = (0 | (i / heightScale)) * scaledWidth;
-          for (var j = 0; j < width; j++) {
-            var countOffset = lineOffset + (0 | (j / widthScale));
-            var sumOffset = countOffset << 2;
-            itemsSum[sumOffset] += pixels[position];
-            itemsSum[sumOffset + 1] += pixels[position + 1];
-            itemsSum[sumOffset + 2] += pixels[position + 2];
-            itemsSum[sumOffset + 3] += pixels[position + 3];
-            itemsCount[countOffset]++;
-            position += 4;
-          }
-        }
-        var tmpCanvas = createScratchCanvas(scaledWidth, scaledHeight);
-        var tmpCtx = tmpCanvas.getContext('2d');
-        var imgData = tmpCtx.getImageData(0, 0, scaledWidth, scaledHeight);
-        pixels = imgData.data;
-        for (var i = 0, j = 0, ii = scaledWidth * scaledHeight; i < ii; i++) {
-          var count = itemsCount[i];
-          pixels[j] = itemsSum[j] / count;
-          pixels[j + 1] = itemsSum[j + 1] / count;
-          pixels[j + 2] = itemsSum[j + 2] / count;
-          pixels[j + 3] = itemsSum[j + 3] / count;
-          j += 4;
-        }
-        tmpCtx.putImageData(imgData, 0, 0);
-        return tmpCanvas;
-      }
-
-      this.save();
-
       var ctx = this.ctx;
-      var w = width, h = height;
-      // scale the image to the unit square
-      ctx.scale(1 / w, -1 / h);
-
-      var tmpCanvas = createScratchCanvas(w, h);
+      var tmpCanvas = createScratchCanvas(width, height);
       var tmpCtx = tmpCanvas.getContext('2d');
 
       var fillColor = this.current.fillColor;
       tmpCtx.fillStyle = (fillColor && fillColor.hasOwnProperty('type') &&
                           fillColor.type === 'Pattern') ?
                           fillColor.getPattern(tmpCtx) : fillColor;
-      tmpCtx.fillRect(0, 0, w, h);
+      tmpCtx.fillRect(0, 0, width, height);
 
-      var imgData = tmpCtx.getImageData(0, 0, w, h);
+      var imgData = tmpCtx.getImageData(0, 0, width, height);
       var pixels = imgData.data;
 
-      applyStencilMask(pixels, inverseDecode);
+      applyStencilMask(imgArray, width, height, inverseDecode, pixels);
 
-      var currentTransform = ctx.mozCurrentTransformInverse;
-      var widthScale = Math.max(Math.abs(currentTransform[0]), 1);
-      var heightScale = Math.max(Math.abs(currentTransform[3]), 1);
-      if (widthScale >= 2 || heightScale >= 2) {
-        // canvas does not resize well large images to small -- using simple
-        // algorithm to perform pre-scaling
-        tmpCanvas = rescaleImage(imgData.data, widthScale, heightScale);
-        ctx.scale(widthScale, heightScale);
-        ctx.drawImage(tmpCanvas, 0, -h / heightScale);
-      } else {
+      this.paintInlineImageXObject(imgData);
+    },
+
+    paintImageMaskXObjectGroup:
+      function CanvasGraphics_paintImageMaskXObjectGroup(images) {
+      var ctx = this.ctx;
+      var tmpCanvasWidth = 0, tmpCanvasHeight = 0, tmpCanvas, tmpCtx;
+      for (var i = 0, ii = images.length; i < ii; i++) {
+        var image = images[i];
+        var w = image.width, h = image.height;
+        if (w > tmpCanvasWidth || h > tmpCanvasHeight) {
+          tmpCanvasWidth = Math.max(w, tmpCanvasWidth);
+          tmpCanvasHeight = Math.max(h, tmpCanvasHeight);
+          tmpCanvas = createScratchCanvas(tmpCanvasWidth, tmpCanvasHeight);
+          tmpCtx = tmpCanvas.getContext('2d');
+
+          var fillColor = this.current.fillColor;
+          tmpCtx.fillStyle = (fillColor && fillColor.hasOwnProperty('type') &&
+                              fillColor.type === 'Pattern') ?
+                              fillColor.getPattern(tmpCtx) : fillColor;
+        }
+        tmpCtx.fillRect(0, 0, w, h);
+
+        var imgData = tmpCtx.getImageData(0, 0, w, h);
+        var pixels = imgData.data;
+
+        applyStencilMask(image.data, w, h, image.inverseDecode, pixels);
+
         tmpCtx.putImageData(imgData, 0, 0);
-        ctx.drawImage(tmpCanvas, 0, -h);
+
+        ctx.save();
+        ctx.transform.apply(ctx, image.transform);
+        ctx.scale(1, -1);
+        ctx.drawImage(tmpCanvas, 0, 0, w, h,
+                      0, -1, 1, 1);
+        ctx.restore();
       }
-      this.restore();
     },
 
     paintImageXObject: function CanvasGraphics_paintImageXObject(objId) {
@@ -3204,37 +3311,62 @@ var CanvasGraphics = (function CanvasGraphicsClosure() {
       if (!imgData)
         error('Dependent image isn\'t ready yet');
 
-      this.save();
+      this.paintInlineImageXObject(imgData);
+    },
+
+    paintInlineImageXObject:
+      function CanvasGraphics_paintInlineImageXObject(imgData) {
+      var width = imgData.width;
+      var height = imgData.height;
       var ctx = this.ctx;
-      var w = imgData.width;
-      var h = imgData.height;
+      this.save();
       // scale the image to the unit square
-      ctx.scale(1 / w, -1 / h);
+      ctx.scale(1 / width, -1 / height);
 
-      var tmpCanvas = createScratchCanvas(w, h);
+      var currentTransform = ctx.mozCurrentTransformInverse;
+      var widthScale = Math.max(Math.abs(currentTransform[0]), 1);
+      var heightScale = Math.max(Math.abs(currentTransform[3]), 1);
+      var tmpCanvas = createScratchCanvas(width, height);
       var tmpCtx = tmpCanvas.getContext('2d');
-      this.putBinaryImageData(tmpCtx, imgData, w, h);
 
-      ctx.drawImage(tmpCanvas, 0, -h);
+      if (widthScale > 2 || heightScale > 2) {
+        // canvas does not resize well large images to small -- using simple
+        // algorithm to perform pre-scaling
+        tmpCanvas = prescaleImage(imgData.data,
+                                 width, height,
+                                 widthScale, heightScale);
+        ctx.drawImage(tmpCanvas, 0, 0, tmpCanvas.width, tmpCanvas.height,
+                                 0, -height, width, height);
+      } else {
+        if (typeof ImageData !== 'undefined' && imgData instanceof ImageData) {
+          tmpCtx.putImageData(imgData, 0, 0);
+        } else {
+          putBinaryImageData(tmpCtx, imgData.data, width, height);
+        }
+        ctx.drawImage(tmpCanvas, 0, -height);
+      }
       this.restore();
     },
 
-    putBinaryImageData: function CanvasGraphics_putBinaryImageData(ctx, imgData,
-                                                                   w, h) {
-      var tmpImgData = 'createImageData' in ctx ? ctx.createImageData(w, h) :
-        ctx.getImageData(0, 0, w, h);
+    paintInlineImageXObjectGroup:
+      function CanvasGraphics_paintInlineImageXObjectGroup(imgData, map) {
+      var ctx = this.ctx;
+      var w = imgData.width;
+      var h = imgData.height;
 
-      var tmpImgDataPixels = tmpImgData.data;
-      var data = imgData.data;
-      if ('set' in tmpImgDataPixels)
-        tmpImgDataPixels.set(data);
-      else {
-        // Copy over the imageData pixel by pixel.
-        for (var i = 0, ii = tmpImgDataPixels.length; i < ii; i++)
-          tmpImgDataPixels[i] = data[i];
+      var tmpCanvas = createScratchCanvas(w, h);
+      var tmpCtx = tmpCanvas.getContext('2d');
+      putBinaryImageData(tmpCtx, imgData.data, w, h);
+
+      for (var i = 0, ii = map.length; i < ii; i++) {
+        var entry = map[i];
+        ctx.save();
+        ctx.transform.apply(ctx, entry.transform);
+        ctx.scale(1, -1);
+        ctx.drawImage(tmpCanvas, entry.x, entry.y, entry.w, entry.h,
+                      0, -1, 1, 1);
+        ctx.restore();
       }
-
-      ctx.putImageData(tmpImgData, 0, 0);
     },
 
     // Marked content
@@ -3631,8 +3763,9 @@ var XRef = (function XRefClosure() {
 
     var encrypt = trailerDict.get('Encrypt');
     if (encrypt) {
-      var fileId = trailerDict.get('ID');
-      this.encrypt = new CipherTransformFactory(encrypt, fileId[0], password);
+      var ids = trailerDict.get('ID');
+      var fileId = (ids && ids.length) ? ids[0] : '';
+      this.encrypt = new CipherTransformFactory(encrypt, fileId, password);
     }
 
     // get the root dictionary (catalog) object
@@ -14073,101 +14206,104 @@ var PartialEvaluator = (function PartialEvaluatorClosure() {
     this.fontIdCounter = 0;
   }
 
+  // Specifies properties for each command
+  //
+  // If variableArgs === true: [0, `numArgs`] expected
+  // If variableArgs === false: exactly `numArgs` expected
   var OP_MAP = {
-    // Graphics state
-    w: 'setLineWidth',
-    J: 'setLineCap',
-    j: 'setLineJoin',
-    M: 'setMiterLimit',
-    d: 'setDash',
-    ri: 'setRenderingIntent',
-    i: 'setFlatness',
-    gs: 'setGState',
-    q: 'save',
-    Q: 'restore',
-    cm: 'transform',
+    // Graphic state
+    w: { fnName: 'setLineWidth', numArgs: 1, variableArgs: false },
+    J: { fnName: 'setLineCap', numArgs: 1, variableArgs: false },
+    j: { fnName: 'setLineJoin', numArgs: 1, variableArgs: false },
+    M: { fnName: 'setMiterLimit', numArgs: 1, variableArgs: false },
+    d: { fnName: 'setDash', numArgs: 2, variableArgs: false },
+    ri: { fnName: 'setRenderingIntent', numArgs: 1, variableArgs: false },
+    i: { fnName: 'setFlatness', numArgs: 1, variableArgs: false },
+    gs: { fnName: 'setGState', numArgs: 1, variableArgs: false },
+    q: { fnName: 'save', numArgs: 0, variableArgs: false },
+    Q: { fnName: 'restore', numArgs: 0, variableArgs: false },
+    cm: { fnName: 'transform', numArgs: 6, variableArgs: false },
 
     // Path
-    m: 'moveTo',
-    l: 'lineTo',
-    c: 'curveTo',
-    v: 'curveTo2',
-    y: 'curveTo3',
-    h: 'closePath',
-    re: 'rectangle',
-    S: 'stroke',
-    s: 'closeStroke',
-    f: 'fill',
-    F: 'fill',
-    'f*': 'eoFill',
-    B: 'fillStroke',
-    'B*': 'eoFillStroke',
-    b: 'closeFillStroke',
-    'b*': 'closeEOFillStroke',
-    n: 'endPath',
+    m: { fnName: 'moveTo', numArgs: 2, variableArgs: false },
+    l: { fnName: 'lineTo', numArgs: 2, variableArgs: false },
+    c: { fnName: 'curveTo', numArgs: 6, variableArgs: false },
+    v: { fnName: 'curveTo2', numArgs: 4, variableArgs: false },
+    y: { fnName: 'curveTo3', numArgs: 4, variableArgs: false },
+    h: { fnName: 'closePath', numArgs: 0, variableArgs: false },
+    re: { fnName: 'rectangle', numArgs: 4, variableArgs: false },
+    S: { fnName: 'stroke', numArgs: 0, variableArgs: false },
+    s: { fnName: 'closeStroke', numArgs: 0, variableArgs: false },
+    f: { fnName: 'fill', numArgs: 0, variableArgs: false },
+    F: { fnName: 'fill', numArgs: 0, variableArgs: false },
+    'f*': { fnName: 'eoFill', numArgs: 0, variableArgs: false },
+    B: { fnName: 'fillStroke', numArgs: 0, variableArgs: false },
+    'B*': { fnName: 'eoFillStroke', numArgs: 0, variableArgs: false },
+    b: { fnName: 'closeFillStroke', numArgs: 0, variableArgs: false },
+    'b*': { fnName: 'closeEOFillStroke', numArgs: 0, variableArgs: false },
+    n: { fnName: 'endPath', numArgs: 0, variableArgs: false },
 
     // Clipping
-    W: 'clip',
-    'W*': 'eoClip',
+    W: { fnName: 'clip', numArgs: 0, variableArgs: false },
+    'W*': { fnName: 'eoClip', numArgs: 0, variableArgs: false },
 
     // Text
-    BT: 'beginText',
-    ET: 'endText',
-    Tc: 'setCharSpacing',
-    Tw: 'setWordSpacing',
-    Tz: 'setHScale',
-    TL: 'setLeading',
-    Tf: 'setFont',
-    Tr: 'setTextRenderingMode',
-    Ts: 'setTextRise',
-    Td: 'moveText',
-    TD: 'setLeadingMoveText',
-    Tm: 'setTextMatrix',
-    'T*': 'nextLine',
-    Tj: 'showText',
-    TJ: 'showSpacedText',
-    "'": 'nextLineShowText',
-    '"': 'nextLineSetSpacingShowText',
+    BT: { fnName: 'beginText', numArgs: 0, variableArgs: false },
+    ET: { fnName: 'endText', numArgs: 0, variableArgs: false },
+    Tc: { fnName: 'setCharSpacing', numArgs: 1, variableArgs: false },
+    Tw: { fnName: 'setWordSpacing', numArgs: 1, variableArgs: false },
+    Tz: { fnName: 'setHScale', numArgs: 1, variableArgs: false },
+    TL: { fnName: 'setLeading', numArgs: 1, variableArgs: false },
+    Tf: { fnName: 'setFont', numArgs: 2, variableArgs: false },
+    Tr: { fnName: 'setTextRenderingMode', numArgs: 1, variableArgs: false },
+    Ts: { fnName: 'setTextRise', numArgs: 1, variableArgs: false },
+    Td: { fnName: 'moveText', numArgs: 2, variableArgs: false },
+    TD: { fnName: 'setLeadingMoveText', numArgs: 2, variableArgs: false },
+    Tm: { fnName: 'setTextMatrix', numArgs: 6, variableArgs: false },
+    'T*': { fnName: 'nextLine', numArgs: 0, variableArgs: false },
+    Tj: { fnName: 'showText', numArgs: 1, variableArgs: false },
+    TJ: { fnName: 'showSpacedText', numArgs: 1, variableArgs: false },
+    '\'': { fnName: 'nextLineShowText', numArgs: 1, variableArgs: false },
+    '"': { fnName: 'nextLineSetSpacingShowText', numArgs: 3,
+      variableArgs: false },
 
     // Type3 fonts
-    d0: 'setCharWidth',
-    d1: 'setCharWidthAndBounds',
+    d0: { fnName: 'setCharWidth', numArgs: 2, variableArgs: false },
+    d1: { fnName: 'setCharWidthAndBounds', numArgs: 6, variableArgs: false },
 
     // Color
-    CS: 'setStrokeColorSpace',
-    cs: 'setFillColorSpace',
-    SC: 'setStrokeColor',
-    SCN: 'setStrokeColorN',
-    sc: 'setFillColor',
-    scn: 'setFillColorN',
-    G: 'setStrokeGray',
-    g: 'setFillGray',
-    RG: 'setStrokeRGBColor',
-    rg: 'setFillRGBColor',
-    K: 'setStrokeCMYKColor',
-    k: 'setFillCMYKColor',
+    CS: { fnName: 'setStrokeColorSpace', numArgs: 1, variableArgs: false },
+    cs: { fnName: 'setFillColorSpace', numArgs: 1, variableArgs: false },
+    SC: { fnName: 'setStrokeColor', numArgs: 4, variableArgs: true },
+    SCN: { fnName: 'setStrokeColorN', numArgs: 33, variableArgs: true },
+    sc: { fnName: 'setFillColor', numArgs: 4, variableArgs: true },
+    scn: { fnName: 'setFillColorN', numArgs: 33, variableArgs: true },
+    G: { fnName: 'setStrokeGray', numArgs: 1, variableArgs: false },
+    g: { fnName: 'setFillGray', numArgs: 1, variableArgs: false },
+    RG: { fnName: 'setStrokeRGBColor', numArgs: 3, variableArgs: false },
+    rg: { fnName: 'setFillRGBColor', numArgs: 3, variableArgs: false },
+    K: { fnName: 'setStrokeCMYKColor', numArgs: 4, variableArgs: false },
+    k: { fnName: 'setFillCMYKColor', numArgs: 4, variableArgs: false },
 
     // Shading
-    sh: 'shadingFill',
+    sh: { fnName: 'shadingFill', numArgs: 1, variableArgs: false },
 
     // Images
-    BI: 'beginInlineImage',
-    ID: 'beginImageData',
-    EI: 'endInlineImage',
+    BI: { fnName: 'beginInlineImage', numArgs: 0, variableArgs: false },
+    ID: { fnName: 'beginImageData', numArgs: 0, variableArgs: false },
+    EI: { fnName: 'endInlineImage', numArgs: 0, variableArgs: false },
 
     // XObjects
-    Do: 'paintXObject',
-
-    // Marked content
-    MP: 'markPoint',
-    DP: 'markPointProps',
-    BMC: 'beginMarkedContent',
-    BDC: 'beginMarkedContentProps',
-    EMC: 'endMarkedContent',
+    Do: { fnName: 'paintXObject', numArgs: 1, variableArgs: false },
+    MP: { fnName: 'markPoint', numArgs: 1, variableArgs: false },
+    DP: { fnName: 'markPointProps', numArgs: 2, variableArgs: false },
+    BMC: { fnName: 'beginMarkedContent', numArgs: 1, variableArgs: false },
+    BDC: { fnName: 'beginMarkedContentProps', numArgs: 2, variableArgs: false },
+    EMC: { fnName: 'endMarkedContent', numArgs: 0, variableArgs: false },
 
     // Compatibility
-    BX: 'beginCompat',
-    EX: 'endCompat',
+    BX: { fnName: 'beginCompat', numArgs: 0, variableArgs: false },
+    EX: { fnName: 'endCompat', numArgs: 0, variableArgs: false },
 
     // (reserved partial commands for the lexer)
     BM: null,
@@ -14303,14 +14439,27 @@ var PartialEvaluator = (function PartialEvaluatorClosure() {
           return;
         }
 
+        var softMask = dict.get('SMask', 'SM') || false;
+        var mask = dict.get('Mask') || false;
+
+        var SMALL_IMAGE_DIMENSIONS = 200;
+        // Inlining small images into the queue as RGB data
+        if (inline && !softMask && !mask &&
+            !(image instanceof JpegStream) &&
+            (w + h) < SMALL_IMAGE_DIMENSIONS) {
+          var imageObj = new PDFImage(xref, resources, image,
+                                      inline, null, null);
+          var imgData = imageObj.getImageData();
+          fn = 'paintInlineImageXObject';
+          args = [imgData];
+          return;
+        }
+
         // If there is no imageMask, create the PDFImage and a lot
         // of image processing can be done here.
         var objId = 'img_' + uniquePrefix + (++self.objIdCounter);
         insertDependency([objId]);
         args = [objId, w, h];
-
-        var softMask = dict.get('SMask', 'SM') || false;
-        var mask = dict.get('Mask') || false;
 
         if (!softMask && !mask && image instanceof JpegStream &&
             image.isNativelySupported(xref, resources)) {
@@ -14323,15 +14472,7 @@ var PartialEvaluator = (function PartialEvaluatorClosure() {
         fn = 'paintImageXObject';
 
         PDFImage.buildImage(function(imageObj) {
-            var drawWidth = imageObj.drawWidth;
-            var drawHeight = imageObj.drawHeight;
-            var imgData = {
-              width: drawWidth,
-              height: drawHeight,
-              data: new Uint8Array(drawWidth * drawHeight * 4)
-            };
-            var pixels = imgData.data;
-            imageObj.fillRgbaBuffer(pixels, drawWidth, drawHeight);
+            var imgData = imageObj.getImageData();
             handler.send('obj', [objId, pageIndex, 'Image', imgData]);
           }, handler, xref, resources, image, inline);
       }
@@ -14352,6 +14493,8 @@ var PartialEvaluator = (function PartialEvaluatorClosure() {
       resources = resources || new Dict();
       var xobjs = resources.get('XObject') || new Dict();
       var patterns = resources.get('Pattern') || new Dict();
+      // TODO(mduan): pass array of knownCommands rather than OP_MAP
+      // dictionary
       var parser = new Parser(new Lexer(stream, OP_MAP), false, xref);
       var res = resources;
       var args = [], obj;
@@ -14359,13 +14502,42 @@ var PartialEvaluator = (function PartialEvaluatorClosure() {
 
       while (true) {
         obj = parser.getObj();
-        if (isEOF(obj))
+        if (isEOF(obj)) {
           break;
+        }
 
         if (isCmd(obj)) {
           var cmd = obj.cmd;
-          var fn = OP_MAP[cmd];
-          assertWellFormed(fn, 'Unknown command "' + cmd + '"');
+
+          // Check that the command is valid
+          var opSpec = OP_MAP[cmd];
+          if (!opSpec) {
+            warn('Unknown command "' + cmd + '"');
+            continue;
+          }
+
+          var fn = opSpec.fnName;
+
+          // Validate the number of arguments for the command
+          if (opSpec.variableArgs) {
+            if (args.length > opSpec.numArgs) {
+              info('Command ' + fn + ': expected [0,' + opSpec.numArgs +
+                  '] args, but received ' + args.length + ' args');
+            }
+          } else {
+            if (args.length < opSpec.numArgs) {
+              // If we receive too few args, it's not possible to possible
+              // to execute the command, so skip the command
+              info('Command ' + fn + ': because expected ' + opSpec.numArgs +
+                  ' args, but received ' + args.length + ' args; skipping');
+              args = [];
+              continue;
+            } else if (args.length > opSpec.numArgs) {
+              info('Command ' + fn + ': expected ' + opSpec.numArgs +
+                  ' args, but received ' + args.length + ' args');
+            }
+          }
+
           // TODO figure out how to type-check vararg functions
 
           if ((cmd == 'SCN' || cmd == 'scn') && !args[args.length - 1].code) {
@@ -14547,12 +14719,128 @@ var PartialEvaluator = (function PartialEvaluatorClosure() {
           argsArray.push(args);
           args = [];
         } else if (obj != null) {
-          assertWellFormed(args.length <= 33, 'Too many arguments');
           args.push(obj instanceof Dict ? obj.getAll() : obj);
+          assertWellFormed(args.length <= 33, 'Too many arguments');
         }
       }
 
       return queue;
+    },
+
+    optimizeQueue: function PartialEvaluator_optimizeQueue(queue) {
+      var fnArray = queue.fnArray, argsArray = queue.argsArray;
+      // grouping paintInlineImageXObject's into paintInlineImageXObjectGroup
+      // searching for (save, transform, paintInlineImageXObject, restore)+
+      var MIN_IMAGES_IN_INLINE_IMAGES_BLOCK = 10;
+      var MAX_IMAGES_IN_INLINE_IMAGES_BLOCK = 200;
+      var MAX_WIDTH = 1000;
+      var IMAGE_PADDING = 1;
+      for (var i = 0, ii = fnArray.length; i < ii; i++) {
+        if (fnArray[i] === 'paintInlineImageXObject' &&
+            fnArray[i - 2] === 'save' && fnArray[i - 1] === 'transform' &&
+            fnArray[i + 1] === 'restore') {
+          var j = i - 2;
+          for (i += 2; i < ii && fnArray[i - 4] === fnArray[i]; i++) {
+          }
+          var count = Math.min((i - j) >> 2,
+                               MAX_IMAGES_IN_INLINE_IMAGES_BLOCK);
+          if (count < MIN_IMAGES_IN_INLINE_IMAGES_BLOCK) {
+            continue;
+          }
+          // assuming that heights of those image is too small (~1 pixel)
+          // packing as much as possible by lines
+          var maxX = 0;
+          var map = [], maxLineHeight = 0;
+          var currentX = IMAGE_PADDING, currentY = IMAGE_PADDING;
+          for (var q = 0; q < count; q++) {
+            var transform = argsArray[j + (q << 2) + 1];
+            var img = argsArray[j + (q << 2) + 2][0];
+            if (currentX + img.width > MAX_WIDTH) {
+              // starting new line
+              maxX = Math.max(maxX, currentX);
+              currentY += maxLineHeight + 2 * IMAGE_PADDING;
+              currentX = 0;
+              maxLineHeight = 0;
+            }
+            map.push({
+              transform: transform,
+              x: currentX, y: currentY,
+              w: img.width, h: img.height
+            });
+            currentX += img.width + 2 * IMAGE_PADDING;
+            maxLineHeight = Math.max(maxLineHeight, img.height);
+          }
+          var imgWidth = Math.max(maxX, currentX) + IMAGE_PADDING;
+          var imgHeight = currentY + maxLineHeight + IMAGE_PADDING;
+          var imgData = new Uint8Array(imgWidth * imgHeight * 4);
+          var imgRowSize = imgWidth << 2;
+          for (var q = 0; q < count; q++) {
+            var data = argsArray[j + (q << 2) + 2][0].data;
+            // copy image by lines and extends pixels into padding
+            var rowSize = map[q].w << 2;
+            var dataOffset = 0;
+            var offset = (map[q].x + map[q].y * imgWidth) << 2;
+            imgData.set(
+              data.subarray(0, rowSize), offset - imgRowSize);
+            for (var k = 0, kk = map[q].h; k < kk; k++) {
+              imgData.set(
+                data.subarray(dataOffset, dataOffset + rowSize), offset);
+              dataOffset += rowSize;
+              offset += imgRowSize;
+            }
+            imgData.set(
+              data.subarray(dataOffset - rowSize, dataOffset), offset);
+            while (offset >= 0) {
+              data[offset - 4] = data[offset];
+              data[offset - 3] = data[offset + 1];
+              data[offset - 2] = data[offset + 2];
+              data[offset - 1] = data[offset + 3];
+              data[offset + rowSize] = data[offset + rowSize - 4];
+              data[offset + rowSize + 1] = data[offset + rowSize - 3];
+              data[offset + rowSize + 2] = data[offset + rowSize - 2];
+              data[offset + rowSize + 3] = data[offset + rowSize - 1];
+              offset -= imgRowSize;
+            }
+          }
+          // replacing queue items
+          fnArray.splice(j, count * 4, ['paintInlineImageXObjectGroup']);
+          argsArray.splice(j, count * 4,
+            [{width: imgWidth, height: imgHeight, data: imgData}, map]);
+          i = j;
+          ii = fnArray.length;
+        }
+      }
+      // grouping paintImageMaskXObject's into paintImageMaskXObjectGroup
+      // searching for (save, transform, paintImageMaskXObject, restore)+
+      var MIN_IMAGES_IN_MASKS_BLOCK = 10;
+      var MAX_IMAGES_IN_MASKS_BLOCK = 100;
+      for (var i = 0, ii = fnArray.length; i < ii; i++) {
+        if (fnArray[i] === 'paintImageMaskXObject' &&
+            fnArray[i - 2] === 'save' && fnArray[i - 1] === 'transform' &&
+            fnArray[i + 1] === 'restore') {
+          var j = i - 2;
+          for (i += 2; i < ii && fnArray[i - 4] === fnArray[i]; i++) {
+          }
+          var count = Math.min((i - j) >> 2,
+                               MAX_IMAGES_IN_MASKS_BLOCK);
+          if (count < MIN_IMAGES_IN_MASKS_BLOCK) {
+            continue;
+          }
+          var images = [];
+          for (var q = 0; q < count; q++) {
+            var transform = argsArray[j + (q << 2) + 1];
+            var maskParams = argsArray[j + (q << 2) + 2];
+            images.push({data: maskParams[0], width: maskParams[2],
+              height: maskParams[3], transform: transform,
+              inverseDecode: maskParams[1]});
+          }
+          // replacing queue items
+          fnArray.splice(j, count * 4, ['paintImageMaskXObjectGroup']);
+          argsArray.splice(j, count * 4, [images]);
+          i = j;
+          ii = fnArray.length;
+        }
+      }
     },
 
     getTextContent: function PartialEvaluator_getTextContent(
@@ -14712,6 +15000,10 @@ var PartialEvaluator = (function PartialEvaluatorClosure() {
             supplement: cidSystemInfo.get('Supplement')
           };
         }
+
+        var cidEncoding = baseDict.get('Encoding');
+        if (isName(cidEncoding))
+          properties.cidEncoding = cidEncoding.name;
 
         var cidToGidMap = dict.get('CIDToGIDMap');
         if (isStream(cidToGidMap))
@@ -14973,9 +15265,30 @@ var PartialEvaluator = (function PartialEvaluatorClosure() {
       properties.widths = glyphsWidths;
     },
 
+    isSerifFont: function PartialEvaluator_isSerifFont(baseFontName) {
+
+      // Simulating descriptor flags attribute
+      var fontNameWoStyle = baseFontName.split('-')[0];
+      return (fontNameWoStyle in serifFonts) ||
+          (fontNameWoStyle.search(/serif/gi) !== -1);
+    },
+
     getBaseFontMetrics: function PartialEvaluator_getBaseFontMetrics(name) {
       var defaultWidth = 0, widths = [], monospace = false;
-      var glyphWidths = Metrics[stdFontMap[name] || name];
+
+      var lookupName = stdFontMap[name] || name;
+
+      if (!(lookupName in Metrics)) {
+        // Use default fonts for looking up font metrics if the passed
+        // font is not a base font
+        if (this.isSerifFont(name)) {
+          lookupName = 'Times-Roman';
+        } else {
+          lookupName = 'Helvetica';
+        }
+      }
+      var glyphWidths = Metrics[lookupName];
+
       if (isNum(glyphWidths)) {
         defaultWidth = glyphWidths;
         monospace = true;
@@ -15037,8 +15350,8 @@ var PartialEvaluator = (function PartialEvaluatorClosure() {
 
           // Simulating descriptor flags attribute
           var fontNameWoStyle = baseFontName.split('-')[0];
-          var flags = (serifFonts[fontNameWoStyle] ||
-            (fontNameWoStyle.search(/serif/gi) != -1) ? FontFlags.Serif : 0) |
+          var flags = (
+            this.isSerifFont(fontNameWoStyle) ? FontFlags.Serif : 0) |
             (metrics.monospace ? FontFlags.FixedPitch : 0) |
             (symbolsFonts[fontNameWoStyle] ? FontFlags.Symbolic :
             FontFlags.Nonsymbolic);
@@ -15064,10 +15377,26 @@ var PartialEvaluator = (function PartialEvaluatorClosure() {
       // a variant.
       var firstChar = dict.get('FirstChar') || 0;
       var lastChar = dict.get('LastChar') || maxCharIndex;
+
       var fontName = descriptor.get('FontName');
+      var baseFont = baseDict.get('BaseFont');
       // Some bad pdf's have a string as the font name.
-      if (isString(fontName))
+      if (isString(fontName)) {
         fontName = new Name(fontName);
+      }
+      if (isString(baseFont)) {
+        baseFont = new Name(baseFont);
+      }
+
+      var fontNameStr = fontName && fontName.name;
+      var baseFontStr = baseFont && baseFont.name;
+      if (fontNameStr !== baseFontStr) {
+        warn('The FontDescriptor\'s FontName is "' + fontNameStr +
+            '" but should be the same as the Font\'s BaseFont "' +
+            baseFontStr + '"');
+      }
+      fontName = fontName || baseFont;
+
       assertWellFormed(isName(fontName), 'invalid font name');
 
       var fontFile = descriptor.get('FontFile', 'FontFile2', 'FontFile3');
@@ -15093,7 +15422,7 @@ var PartialEvaluator = (function PartialEvaluatorClosure() {
         composite: composite,
         wideChars: composite,
         fixedPitch: false,
-        fontMatrix: dict.get('FontMatrix') || IDENTITY_MATRIX,
+        fontMatrix: dict.get('FontMatrix') || FONT_IDENTITY_MATRIX,
         firstChar: firstChar || 0,
         lastChar: lastChar || maxCharIndex,
         bbox: descriptor.get('FontBBox'),
@@ -15155,6 +15484,8 @@ var PDF_GLYPH_SPACE_UNITS = 1000;
 
 // Until hinting is fully supported this constant can be used
 var HINTING_ENABLED = false;
+
+var FONT_IDENTITY_MATRIX = [0.001, 0, 0, 0.001, 0, 0];
 
 var FontFlags = {
   FixedPitch: 1,
@@ -15525,6 +15856,48 @@ var serifFonts = {
 var symbolsFonts = {
   'Dingbats': true, 'Symbol': true, 'ZapfDingbats': true
 };
+
+var CMapConverterList = {
+  'H': jis7ToUnicode,
+  'V': jis7ToUnicode,
+  'EUC-H': eucjpToUnicode,
+  'EUC-V': eucjpToUnicode,
+  '90ms-RKSJ-H': sjisToUnicode,
+  '90ms-RKSJ-V': sjisToUnicode,
+  '90msp-RKSJ-H': sjisToUnicode,
+  '90msp-RKSJ-V': sjisToUnicode
+};
+
+var decodeBytes;
+if (typeof TextDecoder !== 'undefined') {
+  decodeBytes = function(bytes, encoding) {
+    return new TextDecoder(encoding).decode(bytes);
+  };
+} else if (typeof FileReaderSync !== 'undefined') {
+  decodeBytes = function(bytes, encoding) {
+    return new FileReaderSync().readAsText(new Blob([bytes]), encoding);
+  };
+} else {
+  // Clear the list so that decodeBytes will never be called.
+  CMapConverterList = {};
+}
+
+function jis7ToUnicode(str) {
+  var bytes = stringToBytes(str);
+  var length = bytes.length;
+  for (var i = 0; i < length; ++i) {
+    bytes[i] |= 0x80;
+  }
+  return decodeBytes(bytes, 'euc-jp');
+}
+
+function eucjpToUnicode(str) {
+  return decodeBytes(stringToBytes(str), 'euc-jp');
+}
+
+function sjisToUnicode(str) {
+  return decodeBytes(stringToBytes(str), 'shift_jis');
+}
 
 // Some characters, e.g. copyrightserif, mapped to the private use area and
 // might not be displayed using standard fonts. Mapping/hacking well-known chars
@@ -17155,6 +17528,19 @@ function fontCharsToUnicode(charCodes, font) {
   return result;
 }
 
+function adjustWidths(properties) {
+  if (properties.fontMatrix[0] === FONT_IDENTITY_MATRIX[0]) {
+    return;
+  }
+  // adjusting width to fontMatrix scale
+  var scale = 0.001 / properties.fontMatrix[0];
+  var glyphsWidths = properties.widths;
+  for (var glyph in glyphsWidths) {
+    glyphsWidths[glyph] *= scale;
+  }
+  properties.defaultWidth *= scale;
+}
+
 /**
  * 'Font' is the class the outside world should use, it encapsulate all the font
  * decoding logics whatever type it is (assuming the font type is supported).
@@ -17201,7 +17587,6 @@ var Font = (function FontClosure() {
     this.hasEncoding = properties.hasEncoding;
 
     this.fontMatrix = properties.fontMatrix;
-    this.widthMultiplier = 1.0;
     if (properties.type == 'Type3') {
       this.encoding = properties.baseEncoding;
       return;
@@ -17209,6 +17594,7 @@ var Font = (function FontClosure() {
 
     // Trying to fix encoding using glyph CIDSystemInfo.
     this.loadCidToUnicode(properties);
+    this.cidEncoding = properties.cidEncoding;
 
     if (properties.toUnicode)
       this.toUnicode = properties.toUnicode;
@@ -17244,6 +17630,11 @@ var Font = (function FontClosure() {
       type = 'Type1';
     if (subtype == 'CIDFontType0C' && type != 'CIDFontType0')
       type = 'CIDFontType0';
+    // XXX: Temporarily change the type for open type so we trigger a warning.
+    // This should be removed when we add support for open type.
+    if (subtype === 'OpenType') {
+      type = 'OpenType';
+    }
 
     var data;
     switch (type) {
@@ -17253,6 +17644,8 @@ var Font = (function FontClosure() {
 
         var cff = (subtype == 'Type1C' || subtype == 'CIDFontType0C') ?
           new CFFFont(file, properties) : new Type1Font(name, file, properties);
+
+        adjustWidths(properties);
 
         // Wrap the CFF data inside an OTF font file
         data = this.convert(name, cff, properties);
@@ -17268,15 +17661,18 @@ var Font = (function FontClosure() {
         break;
 
       default:
-        warn('Font ' + properties.type + ' is not supported');
+        warn('Font ' + type + ' is not supported');
         break;
     }
 
     this.data = data;
+
+    // Transfer some properties again that could change during font conversion
     this.fontMatrix = properties.fontMatrix;
-    this.widthMultiplier = !properties.fontMatrix ? 1.0 :
-      1.0 / properties.fontMatrix[0];
+    this.widths = properties.widths;
+    this.defaultWidth = properties.defaultWidth;
     this.encoding = properties.baseEncoding;
+
     this.loading = true;
   };
 
@@ -17563,24 +17959,24 @@ var Font = (function FontClosure() {
       lastCharIndex = 255;
     }
 
-    var unitsPerEm = override.unitsPerEm || PDF_GLYPH_SPACE_UNITS;
-    var typoAscent = override.ascent || properties.ascent;
-    var typoDescent = override.descent || properties.descent;
+    var bbox = properties.bbox || [0, 0, 0, 0];
+    var unitsPerEm = override.unitsPerEm ||
+      1 / (properties.fontMatrix || FONT_IDENTITY_MATRIX)[0];
+
+    // if the font units differ to the PDF glyph space units
+    // then scale up the values
+    var scale = properties.ascentScaled ? 1.0 :
+      unitsPerEm / PDF_GLYPH_SPACE_UNITS;
+
+    var typoAscent = override.ascent || Math.round(scale *
+      (properties.ascent || bbox[3]));
+    var typoDescent = override.descent || Math.round(scale *
+      (properties.descent || bbox[1]));
+    if (typoDescent > 0 && properties.descent > 0 && bbox[1] < 0) {
+      typoDescent = -typoDescent; // fixing incorrect descent
+    }
     var winAscent = override.yMax || typoAscent;
     var winDescent = -override.yMin || -typoDescent;
-
-    // if there is a units per em value but no other override
-    // then scale the calculated ascent
-    if (unitsPerEm != PDF_GLYPH_SPACE_UNITS &&
-        'undefined' == typeof(override.ascent)) {
-      // if the font units differ to the PDF glyph space units
-      // then scale up the values
-      typoAscent = Math.round(typoAscent * unitsPerEm / PDF_GLYPH_SPACE_UNITS);
-      typoDescent = Math.round(typoDescent * unitsPerEm /
-        PDF_GLYPH_SPACE_UNITS);
-      winAscent = typoAscent;
-      winDescent = -typoDescent;
-    }
 
     return '\x00\x03' + // version
            '\x02\x24' + // xAvgCharWidth
@@ -18867,7 +19263,7 @@ var Font = (function FontClosure() {
         }
         this.toFontChar = toFontChar;
       }
-      var unitsPerEm = properties.unitsPerEm || 1000; // defaulting to 1000
+      var unitsPerEm = 1 / (properties.fontMatrix || FONT_IDENTITY_MATRIX)[0];
 
       var fields = {
         // PostScript Font Program
@@ -19043,6 +19439,15 @@ var Font = (function FontClosure() {
         } else
           cid++;
       }
+
+      var cidEncoding = properties.cidEncoding;
+      if (cidEncoding && cidEncoding.indexOf('Identity-') !== 0) {
+        // input is already Unicode for non-Identity CMap encodings.
+        // However, Unicode-to-CID conversion is needed
+        // regardless of the CMap encoding. So we can't reset
+        // unicodeToCID.
+        this.cidToUnicode = [];
+      }
     },
 
     bindDOM: function Font_bindDOM() {
@@ -19106,7 +19511,7 @@ var Font = (function FontClosure() {
         if (width)
           break; // the non-zero width found
       }
-      width = (width || this.defaultWidth) * this.widthMultiplier;
+      width = width || this.defaultWidth;
       // Do not shadow the property here. See discussion:
       // https://github.com/mozilla/pdf.js/pull/2127#discussion_r1662280
       this._shadowWidth = width;
@@ -19122,16 +19527,12 @@ var Font = (function FontClosure() {
         case 'CIDFontType0':
           if (this.noUnicodeAdaptation) {
             width = this.widths[this.unicodeToCID[charcode] || charcode];
-            fontCharCode = mapPrivateUseChars(charcode);
-            break;
           }
           fontCharCode = this.toFontChar[charcode] || charcode;
           break;
         case 'CIDFontType2':
           if (this.noUnicodeAdaptation) {
             width = this.widths[this.unicodeToCID[charcode] || charcode];
-            fontCharCode = mapPrivateUseChars(charcode);
-            break;
           }
           fontCharCode = this.toFontChar[charcode] || charcode;
           break;
@@ -19187,7 +19588,7 @@ var Font = (function FontClosure() {
       if (typeof unicodeChars === 'number')
         unicodeChars = String.fromCharCode(unicodeChars);
 
-      width = (isNum(width) ? width : this.defaultWidth) * this.widthMultiplier;
+      width = isNum(width) ? width : this.defaultWidth;
       disabled = this.unicodeIsEnabled ?
         !this.unicodeIsEnabled[fontCharCode] : false;
 
@@ -19216,8 +19617,20 @@ var Font = (function FontClosure() {
         charsCache = this.charsCache = Object.create(null);
 
       glyphs = [];
+      var charsCacheKey = chars;
 
-      if (this.wideChars) {
+      var converter;
+      var cidEncoding = this.cidEncoding;
+      if (cidEncoding) {
+        converter = CMapConverterList[cidEncoding];
+        if (converter) {
+          chars = converter(chars);
+        } else if (cidEncoding.indexOf('Uni') !== 0 &&
+                   cidEncoding.indexOf('Identity-') !== 0) {
+          warn('Unsupported CMap: ' + cidEncoding);
+        }
+      }
+      if (!converter && this.wideChars) {
         // composite fonts have multi-byte strings convert the string from
         // single-byte to multi-byte
         // XXX assuming CIDFonts are two-byte - later need to extract the
@@ -19244,7 +19657,7 @@ var Font = (function FontClosure() {
       }
 
       // Enter the translated string into the cache
-      return (charsCache[chars] = glyphs);
+      return (charsCache[charsCacheKey] = glyphs);
     }
   };
 
@@ -19379,6 +19792,7 @@ var Type1Parser = function type1Parser() {
       // Type1 only command with command not (yet) built-in ,throw an error
       '7': -1, // sbw
 
+      '10': 'add',
       '11': 'sub',
       '12': 'div',
 
@@ -19447,7 +19861,7 @@ var Type1Parser = function type1Parser() {
     var charstring = [];
     var lsb = 0;
     var width = 0;
-    var flexState = 0;
+    var flexing = false;
 
     var value = '';
     var count = array.length;
@@ -19531,27 +19945,62 @@ var Type1Parser = function type1Parser() {
             continue;
           } else if (value == 10) { // callsubr
             if (charstring[charstring.length - 1] < 3) { // subr #0..2
+              // XXX: According to the spec if flex or hinting is not used then
+              // subroutines 0-3 can actually be anything defined by the font,
+              // so we really shouldn't be doing flex here but when
+              // callothersubr 0-2 is used. There hasn't been a real world
+              // example of this yet so we'll keep doing it here.
               var subrNumber = charstring.pop();
               switch (subrNumber) {
                 case 1:
-                  flexState = 1; // prepare for flex coordinates
-                  break;
-                case 2:
-                  flexState = 2; // flex in progress
+                  flexing = true; // prepare for flex coordinates
                   break;
                 case 0:
-                  // type2 flex command does not need final coords
-                  charstring.push('exch', 'drop', 'exch', 'drop');
-                  charstring.push('flex');
-                  flexState = 0;
+                  var flexArgs = breakUpArgs(charstring, 17);
+
+                  // removing all flex arguments from the stack
+                  charstring.splice(flexArgs[0].offset,
+                                    charstring.length - flexArgs[0].offset);
+
+                  charstring = charstring.concat(
+                    flexArgs[0].arg, // bcp1x +
+                    flexArgs[2].arg, // rpx
+                    ['add'],
+                    flexArgs[1].arg, // bcp1y +
+                    flexArgs[3].arg, // rpy
+                    ['add'],
+                    flexArgs[4].arg, // bcp2x
+                    flexArgs[5].arg, // bcp2y
+                    flexArgs[6].arg, // p2x
+                    flexArgs[7].arg, // p2y
+                    flexArgs[8].arg, // bcp3x
+                    flexArgs[9].arg, // bcp3y
+                    flexArgs[10].arg, // bcp4x
+                    flexArgs[11].arg, // bcp4y
+                    flexArgs[12].arg, // p3x
+                    flexArgs[13].arg, // p3y
+                    flexArgs[14].arg, // flexDepth
+                    // 15 = finalx unused by flex
+                    // 16 = finaly unused by flex
+                    ['flex']
+                  );
+
+                  flexing = false;
                   break;
               }
               continue;
             }
-          } else if (value == 21 && flexState > 0) {
-            if (flexState > 1)
-              continue; // ignoring rmoveto
-            value = 5; // first segment replacing with rlineto
+          } else if (value == 21 && flexing) { // rmoveto
+            continue; // ignoring rmoveto
+          } else if (value == 22 && flexing) { // hmoveto
+            // Add the dy for flex.
+            charstring.push(0);
+            continue; // ignoring hmoveto
+          } else if (value == 4 && flexing) { // vmoveto
+            // Insert the dx for flex before dy.
+            var flexArgs = breakUpArgs(charstring, 1);
+            charstring.splice(flexArgs[0].offset, 0, 0);
+            continue; // ignoring vmoveto
           } else if (!HINTING_ENABLED && (value == 1 || value == 3)) {
             charstring.push('drop', 'drop');
             continue;
@@ -19638,6 +20087,23 @@ var Type1Parser = function type1Parser() {
 
     return parseFloat(str.substr(start, count) || 0);
   }
+
+  function readBoolean(str, index) {
+    while (str[index] == ' ')
+      index++;
+
+    var start = index;
+
+    var count = 0;
+    var length = str.length;
+    while (index < length && str[index++] != ' ') {
+      count++;
+    }
+
+    // Use 1 and 0 since that's what type2 charstrings use.
+    return str.substr(start, count) === 'true' ? 1 : 0;
+  }
+
 
   function isSeparator(c) {
     return c == ' ' || c == '\n' || c == '\x0d';
@@ -19740,8 +20206,12 @@ var Type1Parser = function type1Parser() {
             case '/FamilyBlues':
             case '/FamilyOtherBlues':
               var blueArray = readNumberArray(eexecStr, i + 1);
-              if (blueArray.length > 0 && (blueArray.length % 2) == 0)
+              // *Blue* values may contain invalid data: disables reading of
+              // those values when hinting is disabled.
+              if (blueArray.length > 0 && (blueArray.length % 2) == 0 &&
+                  HINTING_ENABLED) {
                 program.properties.privateData[token.substring(1)] = blueArray;
+              }
               break;
             case '/StemSnapH':
             case '/StemSnapV':
@@ -19751,7 +20221,7 @@ var Type1Parser = function type1Parser() {
             case '/StdHW':
             case '/StdVW':
               program.properties.privateData[token.substring(1)] =
-                readNumberArray(eexecStr, i + 2)[0];
+                readNumberArray(eexecStr, i + 1)[0];
               break;
             case '/BlueShift':
             case '/lenIV':
@@ -19761,6 +20231,10 @@ var Type1Parser = function type1Parser() {
             case '/ExpansionFactor':
               program.properties.privateData[token.substring(1)] =
                 readNumber(eexecStr, i + 1);
+              break;
+            case '/ForceBold':
+              program.properties.privateData[token.substring(1)] =
+                readBoolean(eexecStr, i + 1);
               break;
           }
         } else if (c == '/') {
@@ -19802,14 +20276,6 @@ var Type1Parser = function type1Parser() {
         switch (token) {
           case '/FontMatrix':
             var matrix = readNumberArray(headerString, i + 1);
-
-            // The FontMatrix is in unitPerEm, so make it pixels
-            for (var j = 0, jj = matrix.length; j < jj; j++)
-              matrix[j] *= 1000;
-
-            // Make the angle into the right direction
-            matrix[2] *= -1;
-
             properties.fontMatrix = matrix;
             break;
           case '/Encoding':
@@ -19943,61 +20409,6 @@ var Type1Font = function Type1Font(name, file, properties) {
 };
 
 Type1Font.prototype = {
-  createCFFIndexHeader: function Type1Font_createCFFIndexHeader(objects,
-                                                                isByte) {
-    // First 2 bytes contains the number of objects contained into this index
-    var count = objects.length;
-
-    // If there is no object, just create an array saying that with another
-    // offset byte.
-    if (count == 0)
-      return '\x00\x00\x00';
-
-    var data = String.fromCharCode((count >> 8) & 0xFF, count & 0xff);
-
-    // Next byte contains the offset size use to reference object in the file
-    // Actually we're using 0x04 to be sure to be able to store everything
-    // without thinking of it while coding.
-    data += '\x04';
-
-    // Add another offset after this one because we need a new offset
-    var relativeOffset = 1;
-    for (var i = 0; i < count + 1; i++) {
-      data += String.fromCharCode((relativeOffset >>> 24) & 0xFF,
-                                  (relativeOffset >> 16) & 0xFF,
-                                  (relativeOffset >> 8) & 0xFF,
-                                  relativeOffset & 0xFF);
-
-      if (objects[i])
-        relativeOffset += objects[i].length;
-    }
-
-    for (var i = 0; i < count; i++) {
-      for (var j = 0, jj = objects[i].length; j < jj; j++)
-        data += isByte ? String.fromCharCode(objects[i][j] & 0xFF) :
-                objects[i][j];
-    }
-    return data;
-  },
-
-  encodeNumber: function Type1Font_encodeNumber(value) {
-    // some of the fonts has ouf-of-range values
-    // they are just arithmetic overflows
-    // make sanitizer happy
-    value |= 0;
-    if (value >= -32768 && value <= 32767) {
-      return '\x1c' +
-             String.fromCharCode((value >> 8) & 0xFF) +
-             String.fromCharCode(value & 0xFF);
-    } else {
-      return '\x1d' +
-             String.fromCharCode((value >> 24) & 0xFF) +
-             String.fromCharCode((value >> 16) & 0xFF) +
-             String.fromCharCode((value >> 8) & 0xFF) +
-             String.fromCharCode(value & 0xFF);
-    }
-  },
-
   getOrderedCharStrings: function Type1Font_getOrderedCharStrings(glyphs,
                                                             properties) {
     var charstrings = [];
@@ -20072,6 +20483,7 @@ Type1Font.prototype = {
     'rrcurveto': 8,
     'callsubr': 10,
     'return': 11,
+    'add': [12, 10],
     'sub': [12, 11],
     'div': [12, 12],
     'exch': [12, 28],
@@ -20116,9 +20528,9 @@ Type1Font.prototype = {
         if (command > 32000) {
           var divisor = charstring[i + 1];
           command /= divisor;
-          charstring.splice(i, 3, 28, command >> 8, command & 0xff);
+          charstring.splice(i, 3, 28, (command >> 8) & 0xff, command & 0xff);
         } else {
-          charstring.splice(i, 1, 28, command >> 8, command & 0xff);
+          charstring.splice(i, 1, 28, (command >> 8) & 0xff, command & 0xff);
         }
         i += 2;
       }
@@ -20127,140 +20539,91 @@ Type1Font.prototype = {
   },
 
   wrap: function Type1Font_wrap(name, glyphs, charstrings, subrs, properties) {
-    var fields = {
-      // major version, minor version, header size, offset size
-      'header': '\x01\x00\x04\x04',
+    var cff = new CFF();
+    cff.header = new CFFHeader(1, 0, 4, 4);
 
-      'names': this.createCFFIndexHeader([name]),
+    cff.names = [name];
 
-      'topDict': (function topDict(self) {
-        return function cffWrapTopDict() {
-          var header = '\x00\x01\x01\x01';
-          var dict =
-              '\xf8\x1b\x00' + // version
-              '\xf8\x1c\x01' + // Notice
-              '\xf8\x1d\x02' + // FullName
-              '\xf8\x1e\x03' + // FamilyName
-              '\xf8\x1f\x04' +  // Weight
-              '\x1c\x00\x00\x10'; // Encoding
+    var topDict = new CFFTopDict();
+    topDict.setByName('version', 0);
+    topDict.setByName('Notice', 1);
+    topDict.setByName('FullName', 2);
+    topDict.setByName('FamilyName', 3);
+    topDict.setByName('Weight', 4);
+    topDict.setByName('Encoding', null); // placeholder
+    topDict.setByName('FontMatrix', properties.fontMatrix);
+    topDict.setByName('FontBBox', properties.bbox);
+    topDict.setByName('charset', null); // placeholder
+    topDict.setByName('CharStrings', null); // placeholder
+    topDict.setByName('Private', null); // placeholder
+    cff.topDict = topDict;
 
-          var boundingBox = properties.bbox;
-          for (var i = 0, ii = boundingBox.length; i < ii; i++)
-            dict += self.encodeNumber(boundingBox[i]);
-          dict += '\x05'; // FontBBox;
+    var strings = new CFFStrings();
+    strings.add('Version 0.11'); // Version
+    strings.add('See original notice'); // Notice
+    strings.add(name); // FullName
+    strings.add(name); // FamilyName
+    strings.add('Medium'); // Weight
+    cff.strings = strings;
 
-          var offset = fields.header.length +
-                       fields.names.length +
-                       (header.length + 1) +
-                       (dict.length + (4 + 4)) +
-                       fields.strings.length +
-                       fields.globalSubrs.length;
+    cff.globalSubrIndex = new CFFIndex();
 
-          // If the offset if over 32767, encodeNumber is going to return
-          // 5 bytes to encode the position instead of 3.
-          if ((offset + fields.charstrings.length) > 32767) {
-            offset += 9;
-          } else {
-            offset += 7;
-          }
+    var count = glyphs.length;
+    var charsetArray = [0];
+    for (var i = 0; i < count; i++) {
+      var index = CFFStandardStrings.indexOf(charstrings[i].glyph);
+      // Some characters like asterikmath && circlecopyrt are
+      // missing from the original strings, for the moment let's
+      // map them to .notdef and see later if it cause any
+      // problems
+      if (index == -1)
+        index = 0;
 
-          dict += self.encodeNumber(offset) + '\x0f'; // Charset
-
-          offset = offset + (glyphs.length * 2) + 1;
-          dict += self.encodeNumber(offset) + '\x11'; // Charstrings
-
-          offset = offset + fields.charstrings.length;
-          dict += self.encodeNumber(fields.privateData.length);
-          dict += self.encodeNumber(offset) + '\x12'; // Private
-
-          return header + String.fromCharCode(dict.length + 1) + dict;
-        };
-      })(this),
-
-      'strings': (function strings(self) {
-        var strings = [
-          'Version 0.11',         // Version
-          'See original notice',  // Notice
-          name,                   // FullName
-          name,                   // FamilyName
-          'Medium'                // Weight
-        ];
-        return self.createCFFIndexHeader(strings);
-      })(this),
-
-      'globalSubrs': this.createCFFIndexHeader([]),
-
-      'charset': (function charset(self) {
-        var charsetString = '\x00'; // Encoding
-
-        var count = glyphs.length;
-        for (var i = 0; i < count; i++) {
-          var index = CFFStandardStrings.indexOf(charstrings[i].glyph);
-          // Some characters like asterikmath && circlecopyrt are
-          // missing from the original strings, for the moment let's
-          // map them to .notdef and see later if it cause any
-          // problems
-          if (index == -1)
-            index = 0;
-
-          charsetString += String.fromCharCode(index >> 8, index & 0xff);
-        }
-        return charsetString;
-      })(this),
-
-      'charstrings': this.createCFFIndexHeader([[0x8B, 0x0E]].concat(glyphs),
-                                               true),
-
-      'privateData': (function cffWrapPrivate(self) {
-        var data =
-            '\x8b\x14' + // defaultWidth
-            '\x8b\x15';  // nominalWidth
-        var fieldMap = {
-          BlueValues: '\x06',
-          OtherBlues: '\x07',
-          FamilyBlues: '\x08',
-          FamilyOtherBlues: '\x09',
-          StemSnapH: '\x0c\x0c',
-          StemSnapV: '\x0c\x0d',
-          BlueShift: '\x0c\x0a',
-          BlueFuzz: '\x0c\x0b',
-          BlueScale: '\x0c\x09',
-          LanguageGroup: '\x0c\x11',
-          ExpansionFactor: '\x0c\x18'
-        };
-        for (var field in fieldMap) {
-          if (!properties.privateData.hasOwnProperty(field))
-            continue;
-          var value = properties.privateData[field];
-
-          if (isArray(value)) {
-            data += self.encodeNumber(value[0]);
-            for (var i = 1, ii = value.length; i < ii; i++)
-              data += self.encodeNumber(value[i] - value[i - 1]);
-          } else {
-            data += self.encodeNumber(value);
-          }
-          data += fieldMap[field];
-        }
-
-        data += self.encodeNumber(data.length + 4) + '\x13'; // Subrs offset
-
-        return data;
-      })(this),
-
-      'localSubrs': this.createCFFIndexHeader(subrs, true)
-    };
-    fields.topDict = fields.topDict();
-
-
-    var cff = [];
-    for (var index in fields) {
-      var field = fields[index];
-      for (var i = 0, ii = field.length; i < ii; i++)
-        cff.push(field.charCodeAt(i));
+      charsetArray.push((index >> 8) & 0xff, index & 0xff);
     }
+    cff.charset = new CFFCharset(false, 0, [], charsetArray);
 
-    return cff;
+    var charStringsIndex = new CFFIndex();
+    charStringsIndex.add([0x8B, 0x0E]); // .notdef
+    for (var i = 0; i < count; i++) {
+      charStringsIndex.add(glyphs[i]);
+    }
+    cff.charStrings = charStringsIndex;
+
+    var privateDict = new CFFPrivateDict();
+    privateDict.setByName('Subrs', null); // placeholder
+    var fields = [
+      'BlueValues',
+      'OtherBlues',
+      'FamilyBlues',
+      'FamilyOtherBlues',
+      'StemSnapH',
+      'StemSnapV',
+      'BlueShift',
+      'BlueFuzz',
+      'BlueScale',
+      'LanguageGroup',
+      'ExpansionFactor',
+      'ForceBold',
+      'StdHW',
+      'StdVW'
+    ];
+    for (var i = 0, ii = fields.length; i < ii; i++) {
+      var field = fields[i];
+      if (!properties.privateData.hasOwnProperty(field))
+        continue;
+      privateDict.setByName(field, properties.privateData[field]);
+    }
+    cff.topDict.privateDict = privateDict;
+
+    var subrIndex = new CFFIndex();
+    for (var i = 0, ii = subrs.length; i < ii; i++) {
+      subrIndex.add(subrs[i]);
+    }
+    privateDict.subrsIndex = subrIndex;
+
+    var compiler = new CFFCompiler(cff);
+    return compiler.compile();
   }
 };
 
@@ -20465,8 +20828,7 @@ var CFFParser = (function CFFParserClosure() {
 
       var fontMatrix = topDict.getByName('FontMatrix');
       if (fontMatrix) {
-        // estimating unitsPerEM for the font
-        properties.unitsPerEm = 1 / fontMatrix[0];
+        properties.fontMatrix = fontMatrix;
       }
 
       var fontBBox = topDict.getByName('FontBBox');
@@ -20474,6 +20836,7 @@ var CFFParser = (function CFFParserClosure() {
         // adjusting ascent/descent
         properties.ascent = fontBBox[3];
         properties.descent = fontBBox[1];
+        properties.ascentScaled = true;
       }
 
       var charset, encoding;
@@ -20513,7 +20876,14 @@ var CFFParser = (function CFFParserClosure() {
       }
 
       var fontDict = cff.fdArray[0];
+      // Make the sanitizer happy and remove anything that is only for CID
+      // fonts.
       fontDict.setByKey(17, topDict.getByName('CharStrings'));
+      fontDict.removeByName('CIDFontVersion');
+      fontDict.removeByName('CIDFontRevision');
+      fontDict.removeByName('CIDFontType');
+      fontDict.removeByName('CIDCount');
+      fontDict.removeByName('UIDBase');
       cff.topDict = fontDict;
       cff.isCIDFont = false;
       delete cff.fdArray;
@@ -20721,7 +21091,6 @@ var CFFParser = (function CFFParserClosure() {
             stackSize++;
           } else if (value == 14) {
             if (stackSize >= 4) {
-              // TODO fix deprecated endchar construct for Windows
               stackSize -= 4;
             }
           } else if (value >= 32 && value <= 246) {  // number
@@ -20883,13 +21252,13 @@ var CFFParser = (function CFFParserClosure() {
       if (pos == 0 || pos == 1) {
         predefined = true;
         format = pos;
-        var gid = 1;
         var baseEncoding = pos ? Encodings.ExpertEncoding :
                                  Encodings.StandardEncoding;
         for (var i = 0, ii = charset.length; i < ii; i++) {
           var index = baseEncoding.indexOf(charset[i]);
-          if (index != -1)
-            encoding[index] = gid++;
+          if (index != -1) {
+            encoding[index] = i;
+          }
         }
       } else {
         var dataStart = pos;
@@ -21070,6 +21439,12 @@ var CFFDict = (function CFFDictClosure() {
         value = value[0];
       this.values[key] = value;
       return true;
+    },
+    setByName: function CFFDict_setByName(name, value) {
+      if (!(name in this.nameToKeyMap)) {
+        error('Invalid dictionary name "' + name + '"');
+      }
+      this.values[this.nameToKeyMap[name]] = value;
     },
     hasName: function CFFDict_hasName(name) {
       return this.nameToKeyMap[name] in this.values;
@@ -21379,37 +21754,26 @@ var CFFCompiler = (function CFFCompilerClosure() {
       else
         return this.encodeFloat(value);
     },
-    encodeFloat: function CFFCompiler_encodeFloat(value) {
-      value = value.toString();
-      // Strip off the any leading zeros.
-      if (value.substr(0, 2) === '0.')
-        value = value.substr(1);
-      else if (value.substr(0, 3) === '-0.')
-        value = '-' + value.substr(2);
-      var nibbles = [];
+    encodeFloat: function CFFCompiler_encodeFloat(num) {
+      var value = num.toString();
+      var nibbles = '';
       for (var i = 0, ii = value.length; i < ii; ++i) {
-        var a = value.charAt(i), b = value.charAt(i + 1);
-        var nibble;
-        if (a === 'e' && b === '-') {
-          nibble = 0xc;
-          ++i;
+        var a = value[i];
+        if (a === 'e') {
+          nibbles += value[++i] === '-' ? 'c' : 'b';
         } else if (a === '.') {
-          nibble = 0xa;
-        } else if (a === 'E') {
-          nibble = 0xb;
+          nibbles += 'a';
         } else if (a === '-') {
-          nibble = 0xe;
+          nibbles += 'e';
         } else {
-          nibble = a;
+          nibbles += a;
         }
-        nibbles.push(nibble);
       }
-      nibbles.push(0xf);
-      if (nibbles.length % 2)
-        nibbles.push(0xf);
+      nibbles += (nibbles.length & 1) ? 'f' : 'ff';
       var out = [30];
-      for (var i = 0, ii = nibbles.length; i < ii; i += 2)
-        out.push(nibbles[i] << 4 | nibbles[i + 1]);
+      for (var i = 0, ii = nibbles.length; i < ii; i += 2) {
+        out.push(parseInt(nibbles.substr(i, 2), 16));
+      }
       return out;
     },
     encodeInteger: function CFFCompiler_encodeInteger(value) {
@@ -26270,6 +26634,18 @@ var PDFImage = (function PDFImageClosure() {
       for (var i = 0; i < length; ++i)
         buffer[i] = (scale * comps[i]) | 0;
     },
+    getImageData: function PDFImage_getImageData() {
+      var drawWidth = this.drawWidth;
+      var drawHeight = this.drawHeight;
+      var imgData = {
+        width: drawWidth,
+        height: drawHeight,
+        data: new Uint8Array(drawWidth * drawHeight * 4)
+      };
+      var pixels = imgData.data;
+      this.fillRgbaBuffer(pixels, drawWidth, drawHeight);
+      return imgData;
+    },
     getImageBytes: function PDFImage_getImageBytes(length) {
       this.image.reset();
       return this.image.getBytes(length);
@@ -29243,7 +29619,6 @@ var Parser = (function ParserClosure() {
     this.lexer = lexer;
     this.allowStreams = allowStreams;
     this.xref = xref;
-    this.inlineImg = 0;
     this.refill();
   }
 
@@ -29366,15 +29741,6 @@ var Parser = (function ParserClosure() {
             state = 0;
             break;
         }
-      }
-
-      // TODO improve the small images performance to remove the limit
-      var inlineImgLimit = 500;
-      if (++this.inlineImg >= inlineImgLimit) {
-        if (this.inlineImg === inlineImgLimit)
-          warn('Too many inline images');
-        this.shift();
-        return null;
       }
 
       var length = (stream.pos - 4) - startPos;
@@ -29685,28 +30051,34 @@ var Lexer = (function LexerClosure() {
     getHexString: function Lexer_getHexString(ch) {
       var str = '';
       var stream = this.stream;
-      for (;;) {
+      var isFirstHex = true;
+      var firstDigit;
+      var secondDigit;
+      while (true) {
         ch = stream.getChar();
-        if (ch == '>') {
-          break;
-        }
         if (!ch) {
           warn('Unterminated hex string');
           break;
-        }
-        if (specialChars[ch.charCodeAt(0)] != 1) {
-          var x, x2;
-          if ((x = toHexDigit(ch)) == -1)
-            error('Illegal character in hex string: ' + ch);
-
-          ch = stream.getChar();
-          while (specialChars[ch.charCodeAt(0)] == 1)
-            ch = stream.getChar();
-
-          if ((x2 = toHexDigit(ch)) == -1)
-            error('Illegal character in hex string: ' + ch);
-
-          str += String.fromCharCode((x << 4) | x2);
+        } else if (ch === '>') {
+          break;
+        } else if (specialChars[ch.charCodeAt(0)] === 1) {
+          continue;
+        } else {
+          if (isFirstHex) {
+            firstDigit = toHexDigit(ch);
+            if (firstDigit === -1) {
+              warn("Ignoring invalid character '" + ch + "' in hex string");
+              continue;
+            }
+          } else {
+            secondDigit = toHexDigit(ch);
+            if (secondDigit === -1) {
+              warn("Ignoring invalid character '" + ch + "' in hex string");
+              continue;
+            }
+            str += String.fromCharCode((firstDigit << 4) | secondDigit);
+          }
+          isFirstHex = !isFirstHex;
         }
       }
       return str;
@@ -30254,7 +30626,8 @@ var TilingPattern = (function TilingPatternClosure() {
 
 var Stream = (function StreamClosure() {
   function Stream(arrayBuffer, start, length, dict) {
-    this.bytes = new Uint8Array(arrayBuffer);
+    this.bytes = arrayBuffer instanceof Uint8Array ? arrayBuffer :
+      new Uint8Array(arrayBuffer);
     this.start = start || 0;
     this.pos = this.start;
     this.end = (start + length) || this.bytes.length;
@@ -32731,7 +33104,19 @@ var WorkerMessageHandler = {
     }
 
     handler.on('test', function wphSetupTest(data) {
-      handler.send('test', data instanceof Uint8Array);
+      // check if Uint8Array can be sent to worker
+      if (!(data instanceof Uint8Array)) {
+        handler.send('test', false);
+        return;
+      }
+      // check if the response property is supported by xhr
+      var xhr = new XMLHttpRequest();
+      if (!('response' in xhr || 'mozResponse' in xhr ||
+          'responseArrayBuffer' in xhr || 'mozResponseArrayBuffer' in xhr)) {
+        handler.send('test', false);
+        return;
+      }
+      handler.send('test', true);
     });
 
     handler.on('GetDocRequest', function wphSetupDoc(data) {
@@ -35673,6 +36058,8 @@ var Jbig2Image = (function Jbig2ImageClosure() {
         pageInfo.requiresBuffer = !!(pageSegmentFlags & 32);
         pageInfo.combinationOperatorOverride = !!(pageSegmentFlags & 64);
         args = [pageInfo];
+        break;
+      case 49: // EndOfPage
         break;
       case 50: // EndOfStripe
         break;

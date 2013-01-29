@@ -12,6 +12,7 @@ import org.mozilla.gecko.ui.PanZoomController;
 import org.mozilla.gecko.ui.SimpleScaleGestureDetector;
 
 import android.content.Context;
+import android.os.Build;
 import android.os.SystemClock;
 import android.util.Log;
 import android.view.GestureDetector;
@@ -140,6 +141,10 @@ public final class TouchEventHandler implements Tabs.OnTabsChangedListener {
         Tabs.registerOnTabsChangedListener(this);
     }
 
+    void destroy() {
+        Tabs.unregisterOnTabsChangedListener(this);
+    }
+
     /* This function MUST be called on the UI thread */
     public boolean handleEvent(MotionEvent event) {
         // if we don't have gecko listeners, just dispatch the event
@@ -156,6 +161,11 @@ public final class TouchEventHandler implements Tabs.OnTabsChangedListener {
         // if this is a hover event just notify gecko, we don't have any interest in the java layer.
         if (isHoverEvent(event)) {
             mOnTouchListener.onTouch(mView, event);
+            return true;
+        }
+
+        if (isScrollEvent(event)) {
+            dispatchEvent(event);
             return true;
         }
 
@@ -250,6 +260,14 @@ public final class TouchEventHandler implements Tabs.OnTabsChangedListener {
     private boolean touchFinished(MotionEvent event) {
         int action = (event.getAction() & MotionEvent.ACTION_MASK);
         return (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL);
+    }
+
+    private boolean isScrollEvent(MotionEvent event) {
+        if (Build.VERSION.SDK_INT <= 11) {
+            return false;
+        }
+        int action = (event.getAction() & MotionEvent.ACTION_MASK);
+        return (action == MotionEvent.ACTION_SCROLL);
     }
 
     /**

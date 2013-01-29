@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/DebugOnly.h"
+#include <algorithm>
 
 #ifdef MOZ_LOGGING
 #define FORCE_PR_LOG /* Allow logging in the release build */
@@ -426,8 +427,8 @@ GDIFontEntry::InitLogFont(const nsAString& aName,
     mLogFont.lfItalic         = mItalic;
     mLogFont.lfWeight         = mWeight;
 
-    int len = NS_MIN<int>(aName.Length(), LF_FACESIZE - 1);
-    memcpy(&mLogFont.lfFaceName, nsPromiseFlatString(aName).get(), len * 2);
+    int len = std::min<int>(aName.Length(), LF_FACESIZE - 1);
+    memcpy(&mLogFont.lfFaceName, aName.BeginReading(), len * sizeof(PRUnichar));
     mLogFont.lfFaceName[len] = '\0';
 }
 
@@ -559,11 +560,8 @@ GDIFontFamily::FindStyleVariations()
     memset(&logFont, 0, sizeof(LOGFONTW));
     logFont.lfCharSet = DEFAULT_CHARSET;
     logFont.lfPitchAndFamily = 0;
-    uint32_t l = NS_MIN<uint32_t>(mName.Length(), LF_FACESIZE - 1);
-    memcpy(logFont.lfFaceName,
-           nsPromiseFlatString(mName).get(),
-           l * sizeof(PRUnichar));
-    logFont.lfFaceName[l] = 0;
+    uint32_t l = std::min<uint32_t>(mName.Length(), LF_FACESIZE - 1);
+    memcpy(logFont.lfFaceName, mName.get(), l * sizeof(PRUnichar));
 
     EnumFontFamiliesExW(hdc, &logFont,
                         (FONTENUMPROCW)GDIFontFamily::FamilyAddStylesProc,
@@ -866,7 +864,7 @@ public:
 
         while (mCurrentChunk < mNumChunks && bytesLeft) {
             FontDataChunk& currentChunk = mDataChunks[mCurrentChunk];
-            uint32_t bytesToCopy = NS_MIN(bytesLeft, 
+            uint32_t bytesToCopy = std::min(bytesLeft, 
                                           currentChunk.mLength - mChunkOffset);
             memcpy(out, currentChunk.mData + mChunkOffset, bytesToCopy);
             bytesLeft -= bytesToCopy;
@@ -930,7 +928,7 @@ gfxGDIFontList::MakePlatformFont(const gfxProxyFontEntry *aProxyEntry,
         uint32_t eotlen;
 
         isEmbedded = true;
-        uint32_t nameLen = NS_MIN<uint32_t>(uniqueName.Length(), LF_FACESIZE - 1);
+        uint32_t nameLen = std::min<uint32_t>(uniqueName.Length(), LF_FACESIZE - 1);
         nsAutoString fontName(Substring(uniqueName, 0, nameLen));
         
         FontDataOverlay overlayNameData = {0, 0, 0};

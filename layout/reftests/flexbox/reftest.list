@@ -10,7 +10,7 @@ test-pref(layout.css.flexbox.enabled,true) == flexbox-pref-1.xhtml flexbox-pref-
 fails == flexbox-align-self-baseline-horiz-2.xhtml  flexbox-align-self-baseline-horiz-2-ref.xhtml # bug 793456, and possibly others
 # This one fails on windows R (but not Ru, strangely). On Windows R, the
 # single-line <label> flex item has a different background size in test vs. ref
-random-if(winWidget) == flexbox-align-self-baseline-horiz-3.xhtml  flexbox-align-self-baseline-horiz-3-ref.xhtml # XXXdholbert investigate
+fuzzy-if(B2G,10,3) random-if(winWidget) == flexbox-align-self-baseline-horiz-3.xhtml  flexbox-align-self-baseline-horiz-3-ref.xhtml # XXXdholbert investigate
 == flexbox-align-self-baseline-horiz-4.xhtml flexbox-align-self-baseline-horiz-4-ref.xhtml
 
 == flexbox-align-self-horiz-1-block.xhtml  flexbox-align-self-horiz-1-ref.xhtml
@@ -58,7 +58,11 @@ fails == flexbox-basic-img-vert-2.xhtml flexbox-basic-img-vert-2-ref.xhtml # bug
 == flexbox-basic-video-vert-1.xhtml     flexbox-basic-video-vert-1-ref.xhtml
 fails == flexbox-basic-video-vert-2.xhtml flexbox-basic-video-vert-2-ref.xhtml # bug 794660
 
-# Tests for dynamic modifications to flexboxes
+# Tests for dynamic modifications of content inside a flex container
+== flexbox-dyn-changePadding-1a.xhtml flexbox-dyn-changePadding-1-ref.xhtml
+== flexbox-dyn-changePadding-1b.xhtml flexbox-dyn-changePadding-1-ref.xhtml
+
+# Tests for dynamic insertions of content into a flex container
 # (with existing [div | span | text] inside the flexbox, and new content
 # inserted adjacent to that existing content.)
 == flexbox-dyn-insertAroundDiv-1.xhtml flexbox-dyn-insertAroundDiv-1-ref.xhtml
@@ -97,6 +101,7 @@ fails == flexbox-basic-video-vert-2.xhtml flexbox-basic-video-vert-2-ref.xhtml #
 
 # Tests for the order in which we paint flex items
 == flexbox-paint-ordering-1.xhtml flexbox-paint-ordering-1-ref.xhtml
+== flexbox-paint-ordering-2.xhtml flexbox-paint-ordering-2-ref.xhtml
 
 # Tests for handling of absolutely/fixed/relatively-positioned flex items.
 == flexbox-position-absolute-1.xhtml  flexbox-position-absolute-1-ref.xhtml
@@ -153,7 +158,7 @@ HTTP(..) == flexbox-intrinsic-sizing-horiz-1b.xhtml flexbox-intrinsic-sizing-hor
 == flexbox-mbp-horiz-3-reverse.xhtml     flexbox-mbp-horiz-3-reverse-ref.xhtml
 
 # Tests for flexbox in an iframe that gets resized.
-== flexbox-resizeviewport-1.xhtml flexbox-resizeviewport-1-ref.xhtml
+skip-if(B2G) == flexbox-resizeviewport-1.xhtml flexbox-resizeviewport-1-ref.xhtml
 
 # Tests for sizing of flex containers, e.g. under min/max size constraints
 == flexbox-sizing-horiz-1.xhtml flexbox-sizing-horiz-1-ref.xhtml

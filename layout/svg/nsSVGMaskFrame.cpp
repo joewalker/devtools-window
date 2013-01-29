@@ -11,7 +11,9 @@
 #include "gfxImageSurface.h"
 #include "nsRenderingContext.h"
 #include "nsSVGEffects.h"
-#include "nsSVGMaskElement.h"
+#include "mozilla/dom/SVGMaskElement.h"
+
+using namespace mozilla::dom;
 
 //----------------------------------------------------------------------
 // Implementation
@@ -39,17 +41,17 @@ nsSVGMaskFrame::ComputeMaskAlpha(nsRenderingContext *aContext,
   }
   AutoMaskReferencer maskRef(this);
 
-  nsSVGMaskElement *mask = static_cast<nsSVGMaskElement*>(mContent);
+  SVGMaskElement *mask = static_cast<SVGMaskElement*>(mContent);
 
   uint16_t units =
-    mask->mEnumAttributes[nsSVGMaskElement::MASKUNITS].GetAnimValue();
+    mask->mEnumAttributes[SVGMaskElement::MASKUNITS].GetAnimValue();
   gfxRect bbox;
   if (units == nsIDOMSVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX) {
     bbox = nsSVGUtils::GetBBox(aParent);
   }
 
   gfxRect maskArea = nsSVGUtils::GetRelativeRect(units,
-    &mask->mLengthAttributes[nsSVGMaskElement::X], bbox, aParent);
+    &mask->mLengthAttributes[SVGMaskElement::ATTR_X], bbox, aParent);
 
   gfxContext *gfx = aContext->ThebesContext();
 
@@ -183,8 +185,8 @@ nsSVGMaskFrame::Init(nsIContent* aContent,
                      nsIFrame* aParent,
                      nsIFrame* aPrevInFlow)
 {
-  nsCOMPtr<nsIDOMSVGMaskElement> mask = do_QueryInterface(aContent);
-  NS_ASSERTION(mask, "Content is not an SVG mask");
+  NS_ASSERTION(aContent->IsSVG(nsGkAtoms::mask),
+               "Content is not an SVG mask");
 
   return nsSVGMaskFrameBase::Init(aContent, aParent, aPrevInFlow);
 }
@@ -201,11 +203,11 @@ nsSVGMaskFrame::GetCanvasTM(uint32_t aFor)
 {
   NS_ASSERTION(mMaskParentMatrix, "null parent matrix");
 
-  nsSVGMaskElement *mask = static_cast<nsSVGMaskElement*>(mContent);
+  SVGMaskElement *mask = static_cast<SVGMaskElement*>(mContent);
 
   return nsSVGUtils::AdjustMatrixForUnits(
     mMaskParentMatrix ? *mMaskParentMatrix : gfxMatrix(),
-    &mask->mEnumAttributes[nsSVGMaskElement::MASKCONTENTUNITS],
+    &mask->mEnumAttributes[SVGMaskElement::MASKCONTENTUNITS],
     mMaskParent);
 }
 

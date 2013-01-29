@@ -22,6 +22,7 @@ final class InputMethods {
     public static final String METHOD_IWNN = "jp.co.omronsoft.iwnnime.ml/.standardcommon.IWnnLanguageSwitcher";
     public static final String METHOD_OPENWNN_PLUS = "com.owplus.ime.openwnnplus/.OpenWnnJAJP";
     public static final String METHOD_SIMEJI = "com.adamrocker.android.input.simeji/.OpenWnnSimeji";
+    public static final String METHOD_STOCK_LATINIME = "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME";
     public static final String METHOD_SWYPE = "com.swype.android.inputmethod/.SwypeInputMethod";
     public static final String METHOD_SWYPE_BETA = "com.nuance.swype.input/.IME";
 
@@ -50,7 +51,8 @@ final class InputMethods {
     private InputMethods() {}
 
     public static String getCurrentInputMethod(Context context) {
-        return Secure.getString(context.getContentResolver(), Secure.DEFAULT_INPUT_METHOD);
+        String inputMethod = Secure.getString(context.getContentResolver(), Secure.DEFAULT_INPUT_METHOD);
+        return (inputMethod != null ? inputMethod : "");
     }
 
     public static InputMethodInfo getInputMethodInfo(Context context, String inputMethod) {
@@ -82,5 +84,11 @@ final class InputMethods {
         }
         // The locale may change while Firefox is running, but the device and OS should not. :)
         return sIsPreJellyBeanAsusTransformer && !Locale.getDefault().equals(Locale.US);
+    }
+
+    public static boolean needsSoftResetWorkaround(String inputMethod) {
+        // Stock latin IME on Android 4.2 and above
+        return Build.VERSION.SDK_INT >= 17 &&
+               METHOD_STOCK_LATINIME.equals(inputMethod);
     }
 }

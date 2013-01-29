@@ -89,14 +89,21 @@ Tracker.prototype = {
       return;
     }
     Utils.namedTimer(function() {
+      this._log.debug("Saving changed IDs to " + this.file);
       Utils.jsonSave("changes/" + this.file, this, this.changedIDs, cb);
     }, 1000, this, "_lazySave");
   },
 
-  loadChangedIDs: function T_loadChangedIDs() {
+  loadChangedIDs: function (cb) {
     Utils.jsonLoad("changes/" + this.file, this, function(json) {
-      if (json) {
+      if (json && (typeof(json) == "object")) {
         this.changedIDs = json;
+      } else {
+        this._log.warn("Changed IDs file " + this.file + " contains non-object value.");
+        json = null;
+      }
+      if (cb) {
+        cb.call(this, json);
       }
     });
   },
@@ -130,7 +137,7 @@ Tracker.prototype = {
 
     // Add/update the entry if we have a newer time
     if ((this.changedIDs[id] || -Infinity) < when) {
-      this._log.trace("Adding changed ID: " + [id, when]);
+      this._log.trace("Adding changed ID: " + id + ", " + when);
       this.changedIDs[id] = when;
       this.saveChangedIDs(this.onSavedChangedIDs);
     }

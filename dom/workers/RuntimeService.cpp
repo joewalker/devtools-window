@@ -22,6 +22,7 @@
 #include "nsLayoutStatics.h"
 
 #include "jsdbgapi.h"
+#include "jsfriendapi.h"
 #include "mozilla/dom/EventTargetBinding.h"
 #include "mozilla/Preferences.h"
 #include "nsContentUtils.h"
@@ -39,6 +40,7 @@
 #include "WorkerPrivate.h"
 
 #include "OSFileConstants.h"
+#include <algorithm>
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -51,6 +53,9 @@ using mozilla::Preferences;
 
 // The size of the worker runtime heaps in bytes. May be changed via pref.
 #define WORKER_DEFAULT_RUNTIME_HEAPSIZE 32 * 1024 * 1024
+
+// The size of the worker JS allocation threshold in MB. May be changed via pref.
+#define WORKER_DEFAULT_ALLOCATION_THRESHOLD 30
 
 // The C stack size. We use the same stack size on all platforms for
 // consistency.
@@ -150,6 +155,7 @@ enum {
   PREF_jit_hardening,
   PREF_mem_max,
   PREF_ion,
+  PREF_mem_gc_allocation_threshold_mb,
 
 #ifdef JS_GC_ZEAL
   PREF_gczeal,
@@ -169,7 +175,8 @@ const char* gPrefsToWatch[] = {
   JS_OPTIONS_DOT_STR "allow_xml",
   JS_OPTIONS_DOT_STR "jit_hardening",
   JS_OPTIONS_DOT_STR "mem.max",
-  JS_OPTIONS_DOT_STR "ion.content"
+  JS_OPTIONS_DOT_STR "ion.content",
+  "dom.workers.mem.gc_allocation_threshold_mb"
 
 #ifdef JS_GC_ZEAL
   , PREF_WORKERS_GCZEAL
@@ -194,10 +201,16 @@ PrefCallback(const char* aPrefName, void* aClosure)
     uint32_t maxBytes = (pref <= 0 || pref >= 0x1000) ?
                         uint32_t(-1) :
                         uint32_t(pref) * 1024 * 1024;
-    RuntimeService::SetDefaultJSRuntimeHeapSize(maxBytes);
-    rts->UpdateAllWorkerJSRuntimeHeapSize();
-  }
-  else if (StringBeginsWith(nsDependentCString(aPrefName), jsOptionStr)) {
+    RuntimeService::SetDefaultJSWorkerMemoryParameter(JSGC_MAX_BYTES, maxBytes);
+    rts->UpdateAllWorkerMemoryParameter(JSGC_MAX_BYTES);
+  } else if (!strcmp(aPrefName, gPrefsToWatch[PREF_mem_gc_allocation_threshold_mb])) {
+    int32_t pref = Preferences::GetInt(aPrefName, 30);
+    uint32_t threshold = (pref <= 0 || pref >= 0x1000) ?
+                          uint32_t(30) :
+                          uint32_t(pref);
+    RuntimeService::SetDefaultJSWorkerMemoryParameter(JSGC_ALLOCATION_THRESHOLD, threshold);
+    rts->UpdateAllWorkerMemoryParameter(JSGC_ALLOCATION_THRESHOLD);
+  } else if (StringBeginsWith(nsDependentCString(aPrefName), jsOptionStr)) {
     uint32_t newOptions = kRequiredJSContextOptions;
     if (Preferences::GetBool(gPrefsToWatch[PREF_strict])) {
       newOptions |= JSOPTION_STRICT;
@@ -372,6 +385,35 @@ ContentSecurityPolicyAllows(JSContext* aCx)
   return false;
 }
 
+void
+CTypesActivityCallback(JSContext* aCx,
+                       js::CTypesActivityType aType)
+{
+  WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
+  worker->AssertIsOnWorkerThread();
+
+  switch (aType) {
+    case js::CTYPES_CALL_BEGIN:
+      worker->BeginCTypesCall();
+      break;
+
+    case js::CTYPES_CALL_END:
+      worker->EndCTypesCall();
+      break;
+
+    case js::CTYPES_CALLBACK_BEGIN:
+      worker->BeginCTypesCallback();
+      break;
+
+    case js::CTYPES_CALLBACK_END:
+      worker->EndCTypesCallback();
+      break;
+
+    default:
+      MOZ_NOT_REACHED("Unknown type flag!");
+  }
+}
+
 JSContext*
 CreateJSContextForWorker(WorkerPrivate* aWorkerPrivate)
 {
@@ -389,6 +431,8 @@ CreateJSContextForWorker(WorkerPrivate* aWorkerPrivate)
   // This is the real place where we set the max memory for the runtime.
   JS_SetGCParameter(runtime, JSGC_MAX_BYTES,
                     aWorkerPrivate->GetJSRuntimeHeapSize());
+  JS_SetGCParameter(runtime, JSGC_ALLOCATION_THRESHOLD,
+                    aWorkerPrivate->GetJSWorkerAllocationThreshold());
 
   JS_SetNativeStackQuota(runtime, WORKER_CONTEXT_NATIVE_STACK_LIMIT);
 
@@ -412,11 +456,13 @@ CreateJSContextForWorker(WorkerPrivate* aWorkerPrivate)
     return nullptr;
   }
 
-  JS_SetContextPrivate(workerCx, aWorkerPrivate);
+  JS_SetRuntimePrivate(runtime, aWorkerPrivate);
 
   JS_SetErrorReporter(workerCx, ErrorReporter);
 
   JS_SetOperationCallback(workerCx, OperationCallback);
+
+  js::SetCTypesActivityCallback(runtime, CTypesActivityCallback);
 
   NS_ASSERTION((aWorkerPrivate->GetJSContextOptions() &
                 kRequiredJSContextOptions) == kRequiredJSContextOptions,
@@ -508,12 +554,6 @@ ResolveWorkerClasses(JSContext* aCx, JSHandleObject aObj, JSHandleId aId, unsign
                      JSMutableHandleObject aObjp)
 {
   AssertIsOnMainThread();
-
-  // Don't care about assignments, bail now.
-  if (aFlags & JSRESOLVE_ASSIGNING) {
-    aObjp.set(nullptr);
-    return true;
-  }
 
   // Make sure our strings are interned.
   if (JSID_IS_VOID(gStringIDs[0])) {
@@ -659,6 +699,9 @@ uint32_t RuntimeService::sDefaultJSContextOptions = kRequiredJSContextOptions;
 
 uint32_t RuntimeService::sDefaultJSRuntimeHeapSize =
   WORKER_DEFAULT_RUNTIME_HEAPSIZE;
+
+uint32_t RuntimeService::sDefaultJSAllocationThreshold =
+  WORKER_DEFAULT_ALLOCATION_THRESHOLD;
 
 int32_t RuntimeService::sCloseHandlerTimeoutSeconds = MAX_SCRIPT_RUN_TIME_SEC;
 
@@ -1048,7 +1091,7 @@ RuntimeService::Init()
 
   int32_t maxPerDomain = Preferences::GetInt(PREF_WORKERS_MAX_PER_DOMAIN,
                                              MAX_WORKERS_PER_DOMAIN);
-  gMaxWorkersPerDomain = NS_MAX(0, maxPerDomain);
+  gMaxWorkersPerDomain = std::max(0, maxPerDomain);
 
   mDetectorName = Preferences::GetLocalizedCString("intl.charset.detector");
 
@@ -1338,9 +1381,11 @@ RuntimeService::UpdateAllWorkerJSContextOptions()
 }
 
 void
-RuntimeService::UpdateAllWorkerJSRuntimeHeapSize()
+RuntimeService::UpdateAllWorkerMemoryParameter(JSGCParamKey key)
 {
-  BROADCAST_ALL_WORKERS(UpdateJSRuntimeHeapSize, GetDefaultJSRuntimeHeapSize());
+  BROADCAST_ALL_WORKERS(UpdateJSWorkerMemoryParameter,
+                        key,
+                        GetDefaultJSWorkerMemoryParameter(key));
 }
 
 #ifdef JS_GC_ZEAL

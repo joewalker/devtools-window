@@ -33,6 +33,7 @@ class AssemblerX86Shared
     js::Vector<RelativePatch, 8, SystemAllocPolicy> jumps_;
     CompactBufferWriter jumpRelocations_;
     CompactBufferWriter dataRelocations_;
+    CompactBufferWriter preBarriers_;
     size_t dataBytesNeeded_;
     bool enoughMemory_;
 
@@ -43,6 +44,9 @@ class AssemblerX86Shared
     void writeDataRelocation(const ImmGCPtr &ptr) {
         if (ptr.value)
             dataRelocations_.writeUnsigned(masm.currentOffset());
+    }
+    void writePrebarrierOffset(CodeOffsetLabel label) {
+        preBarriers_.writeUnsigned(label.offset());
     }
 
   protected:
@@ -155,7 +159,8 @@ class AssemblerX86Shared
         return masm.oom() ||
                !enoughMemory_ ||
                jumpRelocations_.oom() ||
-               dataRelocations_.oom();
+               dataRelocations_.oom() ||
+               preBarriers_.oom();
     }
 
     void setPrinter(Sprinter *sp) {
@@ -165,8 +170,9 @@ class AssemblerX86Shared
     void executableCopy(void *buffer);
     void processDeferredData(IonCode *code, uint8_t *data);
     void processCodeLabels(IonCode *code);
-    void copyJumpRelocationTable(uint8_t *buffer);
-    void copyDataRelocationTable(uint8_t *buffer);
+    void copyJumpRelocationTable(uint8_t *dest);
+    void copyDataRelocationTable(uint8_t *dest);
+    void copyPreBarrierTable(uint8_t *dest);
 
     bool addDeferredData(DeferredData *data, size_t bytes) {
         data->setOffset(dataBytesNeeded_);
@@ -191,6 +197,9 @@ class AssemblerX86Shared
     size_t dataRelocationTableBytes() const {
         return dataRelocations_.length();
     }
+    size_t preBarrierTableBytes() const {
+        return preBarriers_.length();
+    }
     // Size of the data table, in bytes.
     size_t dataSize() const {
         return dataBytesNeeded_;
@@ -199,7 +208,8 @@ class AssemblerX86Shared
         return size() +
                dataSize() +
                jumpRelocationTableBytes() +
-               dataRelocationTableBytes();
+               dataRelocationTableBytes() +
+               preBarrierTableBytes();
     }
 
   public:
@@ -1188,9 +1198,6 @@ class AssemblerX86Shared
     void flushBuffer() {
     }
 
-    void finish() {
-    }
-
     // Patching.
 
     static size_t patchWrite_NearCallSize() {
@@ -1238,6 +1245,12 @@ class AssemblerX86Shared
         uint8_t *ptr = (uint8_t *)inst.raw();
         JS_ASSERT(*ptr == 0xE9);
         *ptr = 0x3D;
+    }
+    static void ToggleCall(CodeLocationLabel inst, bool enabled) {
+        uint8_t *ptr = (uint8_t *)inst.raw();
+        JS_ASSERT(*ptr == 0x3D || // CMP
+                  *ptr == 0xE8);  // CALL
+        *ptr = enabled ? 0xE8 : 0x3D;
     }
 };
 

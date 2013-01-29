@@ -42,12 +42,13 @@ nsHTMLFieldSetElement::~nsHTMLFieldSetElement()
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsHTMLFieldSetElement,
                                                 nsGenericHTMLFormElement)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mValidity)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mElements)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsHTMLFieldSetElement)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsHTMLFieldSetElement,
                                                   nsGenericHTMLFormElement)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mValidity)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mElements)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
@@ -74,13 +75,19 @@ NS_IMPL_STRING_ATTR(nsHTMLFieldSetElement, Name, name)
 // nsIConstraintValidation
 NS_IMPL_NSICONSTRAINTVALIDATION(nsHTMLFieldSetElement)
 
+bool
+nsHTMLFieldSetElement::IsDisabledForEvents(uint32_t aMessage)
+{
+  return IsElementDisabledForEvents(aMessage, nullptr);
+}
+
 // nsIContent
 nsresult
 nsHTMLFieldSetElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
 {
   // Do not process any DOM events if the element is disabled.
   aVisitor.mCanHandle = false;
-  if (IsElementDisabledForEvents(aVisitor.mEvent->message, NULL)) {
+  if (IsDisabledForEvents(aVisitor.mEvent->message)) {
     return NS_OK;
   }
 

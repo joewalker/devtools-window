@@ -49,6 +49,8 @@ IonBuilder::inlineNativeCall(JSNative native, uint32_t argc, bool constructing)
         return inlineMathPow(argc, constructing);
     if (native == js_math_random)
         return inlineMathRandom(argc, constructing);
+    if (native == js::math_imul)
+        return inlineMathImul(argc, constructing);
     if (native == js::math_sin)
         return inlineMathFunction(MMathFunction::Sin, argc, constructing);
     if (native == js::math_cos)
@@ -220,7 +222,8 @@ IonBuilder::inlineArray(uint32_t argc, bool constructing)
             id = MConstant::New(Int32Value(i));
             current->add(id);
 
-            MStoreElement *store = MStoreElement::New(elements, id, argv[i + 1]);
+            MStoreElement *store = MStoreElement::New(elements, id, argv[i + 1],
+                                                      /* needsHoleCheck = */ false);
             current->add(store);
         }
 
@@ -254,9 +257,13 @@ IonBuilder::inlineArrayPopShift(MArrayPopShift::Mode mode, uint32_t argc, bool c
     // Inference's TypeConstraintCall generates the constraints that propagate
     // properties directly into the result type set.
     types::TypeObjectFlags unhandledFlags =
-        types::OBJECT_FLAG_NON_DENSE_ARRAY | types::OBJECT_FLAG_ITERATED;
+        types::OBJECT_FLAG_SPARSE_INDEXES |
+        types::OBJECT_FLAG_LENGTH_OVERFLOW |
+        types::OBJECT_FLAG_ITERATED;
 
     types::StackTypeSet *thisTypes = getInlineArgTypeSet(argc, 0);
+    if (thisTypes->getKnownClass() != &ArrayClass)
+        return InliningStatus_NotInlined;
     if (thisTypes->hasObjectFlags(cx, unhandledFlags))
         return InliningStatus_NotInlined;
     RootedScript script(cx, script_);
@@ -268,7 +275,7 @@ IonBuilder::inlineArrayPopShift(MArrayPopShift::Mode mode, uint32_t argc, bool c
         return InliningStatus_Error;
 
     types::StackTypeSet *returnTypes = getInlineReturnTypeSet();
-    bool needsHoleCheck = thisTypes->hasObjectFlags(cx, types::OBJECT_FLAG_NON_PACKED_ARRAY);
+    bool needsHoleCheck = thisTypes->hasObjectFlags(cx, types::OBJECT_FLAG_NON_PACKED);
     bool maybeUndefined = returnTypes->hasType(types::Type::UndefinedType());
 
     MArrayPopShift *ins = MArrayPopShift::New(argv[0], mode, needsHoleCheck, maybeUndefined);
@@ -295,8 +302,13 @@ IonBuilder::inlineArrayPush(uint32_t argc, bool constructing)
     // Inference's TypeConstraintCall generates the constraints that propagate
     // properties directly into the result type set.
     types::StackTypeSet *thisTypes = getInlineArgTypeSet(argc, 0);
-    if (thisTypes->hasObjectFlags(cx, types::OBJECT_FLAG_NON_DENSE_ARRAY))
+    if (thisTypes->getKnownClass() != &ArrayClass)
         return InliningStatus_NotInlined;
+    if (thisTypes->hasObjectFlags(cx, types::OBJECT_FLAG_SPARSE_INDEXES |
+                                  types::OBJECT_FLAG_LENGTH_OVERFLOW))
+    {
+        return InliningStatus_NotInlined;
+    }
     RootedScript script(cx, script_);
     if (types::ArrayPrototypeHasIndexedProperty(cx, script))
         return InliningStatus_NotInlined;
@@ -332,11 +344,21 @@ IonBuilder::inlineArrayConcat(uint32_t argc, bool constructing)
     types::StackTypeSet *thisTypes = getInlineArgTypeSet(argc, 0);
     types::StackTypeSet *argTypes = getInlineArgTypeSet(argc, 1);
 
-    if (thisTypes->hasObjectFlags(cx, types::OBJECT_FLAG_NON_DENSE_ARRAY))
+    if (thisTypes->getKnownClass() != &ArrayClass)
         return InliningStatus_NotInlined;
+    if (thisTypes->hasObjectFlags(cx, types::OBJECT_FLAG_SPARSE_INDEXES |
+                                  types::OBJECT_FLAG_LENGTH_OVERFLOW))
+    {
+        return InliningStatus_NotInlined;
+    }
 
-    if (argTypes->hasObjectFlags(cx, types::OBJECT_FLAG_NON_DENSE_ARRAY))
+    if (argTypes->getKnownClass() != &ArrayClass)
         return InliningStatus_NotInlined;
+    if (argTypes->hasObjectFlags(cx, types::OBJECT_FLAG_SPARSE_INDEXES |
+                                 types::OBJECT_FLAG_LENGTH_OVERFLOW))
+    {
+        return InliningStatus_NotInlined;
+    }
 
     // Watch out for indexed properties on the prototype.
     RootedScript script(cx, script_);
@@ -640,20 +662,51 @@ IonBuilder::inlineMathRandom(uint32_t argc, bool constructing)
 }
 
 IonBuilder::InliningStatus
+IonBuilder::inlineMathImul(uint32_t argc, bool constructing)
+{
+    if (argc != 2 || constructing)
+        return InliningStatus_NotInlined;
+
+    MIRType returnType = getInlineReturnType();
+    if (returnType != MIRType_Int32)
+        return InliningStatus_NotInlined;
+
+    if (!IsNumberType(getInlineArgType(argc, 1)))
+        return InliningStatus_NotInlined;
+    if (!IsNumberType(getInlineArgType(argc, 2)))
+        return InliningStatus_NotInlined;
+
+    MDefinitionVector argv;
+    if (!discardCall(argc, argv, current))
+        return InliningStatus_Error;
+
+    MInstruction *first = MTruncateToInt32::New(argv[1]);
+    current->add(first);
+
+    MInstruction *second = MTruncateToInt32::New(argv[2]);
+    current->add(second);
+
+    MMul *ins = MMul::New(first, second, MIRType_Int32, MMul::Integer);
+    current->add(ins);
+    current->push(ins);
+    return InliningStatus_Inlined;
+}
+
+IonBuilder::InliningStatus
 IonBuilder::inlineMathMinMax(bool max, uint32_t argc, bool constructing)
 {
     if (argc != 2 || constructing)
         return InliningStatus_NotInlined;
 
     MIRType returnType = getInlineReturnType();
-    if (returnType != MIRType_Double && returnType != MIRType_Int32)
+    if (!IsNumberType(returnType))
         return InliningStatus_NotInlined;
 
     MIRType arg1Type = getInlineArgType(argc, 1);
-    if (arg1Type != MIRType_Double && arg1Type != MIRType_Int32)
+    if (!IsNumberType(arg1Type))
         return InliningStatus_NotInlined;
     MIRType arg2Type = getInlineArgType(argc, 2);
-    if (arg2Type != MIRType_Double && arg2Type != MIRType_Int32)
+    if (!IsNumberType(arg2Type))
         return InliningStatus_NotInlined;
 
     if (returnType == MIRType_Int32 &&

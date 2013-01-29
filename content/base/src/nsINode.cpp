@@ -73,8 +73,8 @@
 #include "nsIScrollableFrame.h"
 #include "nsIServiceManager.h"
 #include "nsIURL.h"
-#include "nsIView.h"
-#include "nsIViewManager.h"
+#include "nsView.h"
+#include "nsViewManager.h"
 #include "nsIWebNavigation.h"
 #include "nsIWidget.h"
 #include "nsLayoutStatics.h"
@@ -103,6 +103,8 @@
 #include "nsHTMLLegendElement.h"
 #include "nsWrapperCacheInlines.h"
 #include "WrapperFactory.h"
+#include "DocumentType.h"
+#include <algorithm>
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -222,9 +224,8 @@ nsINode::GetTextEditorRootContent(nsIEditor** aEditor)
         !node->AsElement()->IsHTML())
       continue;
 
-    nsCOMPtr<nsIEditor> editor;
-    static_cast<nsGenericHTMLElement*>(node)->
-        GetEditorInternal(getter_AddRefs(editor));
+    nsCOMPtr<nsIEditor> editor =
+      static_cast<nsGenericHTMLElement*>(node)->GetEditorInternal();
     if (!editor)
       continue;
 
@@ -362,7 +363,7 @@ nsresult
 nsINode::GetParentElement(nsIDOMElement** aParentElement)
 {
   *aParentElement = nullptr;
-  nsINode* parent = GetElementParent();
+  nsINode* parent = GetParentElement();
   return parent ? CallQueryInterface(parent, aParentElement) : NS_OK;
 }
 
@@ -698,6 +699,7 @@ nsINode::SetUserData(JSContext* aCx, const nsAString& aKey, JS::Value aData,
   }
 
   JS::Value result;
+  JSAutoCompartment ac(aCx, GetWrapper());
   aError = nsContentUtils::XPConnect()->VariantToJS(aCx, GetWrapper(), oldData,
                                                     &result);
   return result;
@@ -712,6 +714,7 @@ nsINode::GetUserData(JSContext* aCx, const nsAString& aKey, ErrorResult& aError)
   }
 
   JS::Value result;
+  JSAutoCompartment ac(aCx, GetWrapper());
   aError = nsContentUtils::XPConnect()->VariantToJS(aCx, GetWrapper(), data,
                                                     &result);
   return result;
@@ -804,7 +807,7 @@ nsINode::CompareDocumentPosition(nsINode& aOtherNode) const
   // Find where the parent chain differs and check indices in the parent.
   const nsINode* parent = top1;
   uint32_t len;
-  for (len = NS_MIN(pos1, pos2); len > 0; --len) {
+  for (len = std::min(pos1, pos2); len > 0; --len) {
     const nsINode* child1 = parents1.ElementAt(--pos1);
     const nsINode* child2 = parents2.ElementAt(--pos2);
     if (child1 != child2) {
@@ -1443,7 +1446,7 @@ bool IsAllowedAsChild(nsIContent* aNewChild, nsINode* aParent,
         return true;
       }
 
-      nsIContent* docTypeContent = parentDocument->GetDocumentType();
+      nsIContent* docTypeContent = parentDocument->GetDoctype();
       if (!docTypeContent) {
         // It's all good.
         return true;
@@ -1466,7 +1469,7 @@ bool IsAllowedAsChild(nsIContent* aNewChild, nsINode* aParent,
       }
 
       nsIDocument* parentDocument = static_cast<nsIDocument*>(aParent);
-      nsIContent* docTypeContent = parentDocument->GetDocumentType();
+      nsIContent* docTypeContent = parentDocument->GetDoctype();
       if (docTypeContent) {
         // Already have a doctype, so this is only OK if we're replacing it
         return aIsReplace && docTypeContent == aRefChild;
@@ -2354,7 +2357,9 @@ nsINode::WrapObject(JSContext *aCx, JSObject *aScope, bool *aTriedToWrap)
   }
 
   JSObject* obj = WrapNode(aCx, aScope, aTriedToWrap);
-  if (obj && ChromeOnlyAccess()) {
+  if (obj && ChromeOnlyAccess() &&
+      !nsContentUtils::IsSystemPrincipal(NodePrincipal()))
+  {
     // Create a new wrapper and cache it.
     JSAutoCompartment ac(aCx, obj);
     JSObject* wrapper = xpc::WrapperFactory::WrapSOWObject(aCx, obj);
@@ -2371,12 +2376,6 @@ bool
 nsINode::IsSupported(const nsAString& aFeature, const nsAString& aVersion)
 {
   return nsContentUtils::InternalIsSupported(this, aFeature, aVersion);
-}
-
-Element*
-nsINode::GetParentElement() const
-{
-  return GetElementParent();
 }
 
 already_AddRefed<nsINode>

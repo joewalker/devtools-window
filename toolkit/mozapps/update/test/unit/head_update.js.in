@@ -47,6 +47,12 @@ const IS_ANDROID = true;
 const IS_ANDROID = false;
 #endif
 
+#ifdef MOZ_WIDGET_GONK
+const IS_TOOLKIT_GONK = true;
+#else
+const IS_TOOLKIT_GONK = false;
+#endif
+
 const USE_EXECV = IS_UNIX && !IS_MACOSX;
 
 #ifdef MOZ_VERIFY_MAR_SIGNATURE
@@ -297,6 +303,17 @@ const STATE_APPLIED_PLATFORM = STATE_APPLIED_SVC;
 const STATE_APPLIED_PLATFORM = STATE_APPLIED;
 #endif
 
+// This makes it possible to run most tests on xulrunner where the update
+// channel default preference is not set.
+if (APP_BIN_NAME == "xulrunner") {
+  try {
+    gDefaultPrefBranch.getCharPref(PREF_APP_UPDATE_CHANNEL);
+  }
+  catch (e) {
+    setUpdateChannel("test_channel");
+  }
+}
+
 /**
  * Nulls out the most commonly used global vars used by tests as appropriate.
  */
@@ -330,7 +347,7 @@ function cleanUp() {
     gXHR             = null;
   }
 
-  gTestserver    = null;
+  gTestserver = null;
 }
 
 /**

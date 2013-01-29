@@ -127,6 +127,7 @@
 #include "nsDASHMPDParser.h"
 #include "DASHRepDecoder.h"
 #include "DASHDecoder.h"
+#include <algorithm>
 
 namespace mozilla {
 
@@ -235,7 +236,7 @@ DASHDecoder::NotifyDownloadEnded(nsresult aStatus)
     // Create reader thread for |ChannelMediaResource|::|Read|.
     nsCOMPtr<nsIRunnable> event =
       NS_NewRunnableMethod(this, &DASHDecoder::ReadMPDBuffer);
-    NS_ENSURE_TRUE(event, );
+    NS_ENSURE_TRUE_VOID(event);
 
     nsresult rv = NS_NewNamedThread("DASH MPD Reader",
                                     getter_AddRefs(mMPDReaderThread),
@@ -324,14 +325,6 @@ DASHDecoder::OnReadMPDBufferCompleted()
   }
   mMPDReaderThread = nullptr;
 
-  // Close the MPD resource.
-  rv = mResource ? mResource->Close() : NS_ERROR_NULL_POINTER;
-  if (NS_FAILED(rv)) {
-    LOG("Media Resource did not close correctly! rv [%x]", rv);
-    NetworkError();
-    return;
-  }
-
   // Start parsing the MPD data and loading the media.
   rv = ParseMPDBuffer();
   if (NS_FAILED(rv)) {
@@ -388,17 +381,17 @@ DASHDecoder::CreateRepDecoders()
 
   // Global settings for the presentation.
   int64_t startTime = mMPDManager->GetStartTime();
-  mDuration = mMPDManager->GetDuration();
+  SetDuration(mMPDManager->GetDuration());
   NS_ENSURE_TRUE(startTime >= 0 && mDuration > 0, NS_ERROR_ILLEGAL_VALUE);
 
   // For each audio/video stream, create a |ChannelMediaResource| object.
 
-  for (int i = 0; i < mMPDManager->GetNumAdaptationSets(); i++) {
+  for (uint32_t i = 0; i < mMPDManager->GetNumAdaptationSets(); i++) {
     IMPDManager::AdaptationSetType asType = mMPDManager->GetAdaptationSetType(i);
     if (asType == IMPDManager::DASH_VIDEO_STREAM) {
       mVideoAdaptSetIdx = i;
     }
-    for (int j = 0; j < mMPDManager->GetNumRepresentations(i); j++) {
+    for (uint32_t j = 0; j < mMPDManager->GetNumRepresentations(i); j++) {
       // Get URL string.
       nsAutoString segmentUrl;
       nsresult rv = mMPDManager->GetFirstSegmentUrl(i, j, segmentUrl);
@@ -638,6 +631,12 @@ DASHDecoder::LoadRepresentations()
       mVideoRepDecoders[i]->SetStateMachine(mDecoderStateMachine);
     }
   }
+
+  // Ensure decoder is set to play if its already been requested.
+  if (mPlayState == PLAY_STATE_PLAYING) {
+    mNextState = PLAY_STATE_PLAYING;
+  }
+
   // Now that subreaders are init'd, it's ok to init state machine.
   return InitializeStateMachine(nullptr);
 }
@@ -704,7 +703,7 @@ DASHDecoder::NotifyDownloadEnded(DASHRepDecoder* aRepDecoder,
       // Do Stream Switching here before loading next bytes.
       // Audio stream switching not supported.
       if (aRepDecoder == VideoRepDecoder() &&
-          mVideoSubsegmentIdx < VideoRepDecoder()->GetNumDataByteRanges()) {
+          (uint32_t)mVideoSubsegmentIdx < VideoRepDecoder()->GetNumDataByteRanges()) {
         nsresult rv = PossiblySwitchDecoder(aRepDecoder);
         if (NS_FAILED(rv)) {
           LOG("Failed possibly switching decoder rv[0x%x]", rv);
@@ -713,6 +712,15 @@ DASHDecoder::NotifyDownloadEnded(DASHRepDecoder* aRepDecoder,
         }
         decoder = VideoRepDecoder();
       }
+    }
+
+    // Check that decoder is valid.
+    if (!decoder || (decoder != AudioRepDecoder() &&
+                     decoder != VideoRepDecoder())) {
+      LOG("Invalid decoder [%p]: video idx [%d] audio idx [%d]",
+          decoder.get(), AudioRepDecoder(), VideoRepDecoder());
+      DecodeError();
+      return;
     }
 
     // Before loading, note the index of the decoder which will downloaded the
@@ -739,25 +747,27 @@ DASHDecoder::NotifyDownloadEnded(DASHRepDecoder* aRepDecoder,
     // Load the next range of data bytes. If the range is already cached,
     // this function will be called again to adaptively download the next
     // subsegment.
-#ifdef PR_LOGGING
+    bool resourceLoaded = false;
     if (decoder.get() == AudioRepDecoder()) {
       LOG("Requesting load for audio decoder [%p] subsegment [%d].",
         decoder.get(), mAudioSubsegmentIdx);
+      if (mAudioSubsegmentIdx >= decoder->GetNumDataByteRanges()) {
+        resourceLoaded = true;
+      }
     } else if (decoder.get() == VideoRepDecoder()) {
       LOG("Requesting load for video decoder [%p] subsegment [%d].",
         decoder.get(), mVideoSubsegmentIdx);
+      if (mVideoSubsegmentIdx >= decoder->GetNumDataByteRanges()) {
+        resourceLoaded = true;
+      }
     }
-#endif
-    if (!decoder || (decoder != AudioRepDecoder() &&
-                     decoder != VideoRepDecoder())) {
-      LOG("Invalid decoder [%p]: video idx [%d] audio idx [%d]",
-          decoder.get(), AudioRepDecoder(), VideoRepDecoder());
-      DecodeError();
+    if (resourceLoaded) {
+      ResourceLoaded();
       return;
     }
     decoder->LoadNextByteRange();
   } else if (aStatus == NS_BINDING_ABORTED) {
-    LOG("MPD download has been cancelled by the user: aStatus [%x].", aStatus);
+    LOG("Media download has been cancelled by the user: aStatus[%x]", aStatus);
     if (mOwner) {
       mOwner->LoadAborted();
     }
@@ -774,9 +784,60 @@ DASHDecoder::LoadAborted()
   NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
 
   if (!mNotifiedLoadAborted && mOwner) {
+    LOG1("Load Aborted! Notifying media element.");
     mOwner->LoadAborted();
     mNotifiedLoadAborted = true;
-    LOG1("Load Aborted! Notifying media element.");
+  }
+}
+
+void
+DASHDecoder::Suspend()
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  // Suspend MPD download if not yet complete.
+  if (!mMPDManager && mResource) {
+    LOG1("Suspending MPD download.");
+    mResource->Suspend(true);
+    return;
+  }
+
+  // Otherwise, forward |Suspend| to active rep decoders.
+  if (AudioRepDecoder()) {
+    LOG("Suspending download for audio decoder [%p].", AudioRepDecoder());
+    AudioRepDecoder()->Suspend();
+  }
+  if (VideoRepDecoder()) {
+    LOG("Suspending download for video decoder [%p].", VideoRepDecoder());
+    VideoRepDecoder()->Suspend();
+  }
+}
+
+void
+DASHDecoder::Resume(bool aForceBuffering)
+{
+  MOZ_ASSERT(NS_IsMainThread());
+  // Resume MPD download if not yet complete.
+  if (!mMPDManager) {
+    if (mResource) {
+      LOG1("Resuming MPD download.");
+      mResource->Resume();
+    }
+    if (aForceBuffering) {
+      ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
+      if (mDecoderStateMachine) {
+        mDecoderStateMachine->StartBuffering();
+      }
+    }
+  }
+
+  // Otherwise, forward |Resume| to active rep decoders.
+  if (AudioRepDecoder()) {
+    LOG("Resuming download for audio decoder [%p].", AudioRepDecoder());
+    AudioRepDecoder()->Resume(aForceBuffering);
+  }
+  if (VideoRepDecoder()) {
+    LOG("Resuming download for video decoder [%p].", VideoRepDecoder());
+    VideoRepDecoder()->Resume(aForceBuffering);
   }
 }
 
@@ -785,6 +846,8 @@ DASHDecoder::Shutdown()
 {
   NS_ASSERTION(NS_IsMainThread(), "Should be on main thread.");
 
+  LOG1("Shutting down.");
+
   // Notify reader of shutdown first.
   if (mDASHReader) {
     mDASHReader->NotifyDecoderShuttingDown();
@@ -792,12 +855,12 @@ DASHDecoder::Shutdown()
 
   // Call parent class shutdown.
   MediaDecoder::Shutdown();
-  NS_ENSURE_TRUE(mShuttingDown, );
+  NS_ENSURE_TRUE_VOID(mShuttingDown);
 
   // Shutdown reader thread if not already done.
   if (mMPDReaderThread) {
     nsresult rv = mMPDReaderThread->Shutdown();
-    NS_ENSURE_SUCCESS(rv, );
+    NS_ENSURE_SUCCESS_VOID(rv);
     mMPDReaderThread = nullptr;
   }
 
@@ -939,7 +1002,7 @@ DASHDecoder::PossiblySwitchDecoder(DASHRepDecoder* aRepDecoder)
   // increase in quality.
   uint32_t toDecoderIdx = mVideoRepDecoderIdx;
   if (bestRepIdx > toDecoderIdx) {
-    toDecoderIdx = NS_MIN(toDecoderIdx+1, mVideoRepDecoders.Length()-1);
+    toDecoderIdx = std::min(toDecoderIdx+1, mVideoRepDecoders.Length()-1);
   } else if (toDecoderIdx < bestRepIdx) {
     // If the bitrate is too much for the current bandwidth, just use that
     // stream directly.
@@ -961,7 +1024,7 @@ DASHDecoder::PossiblySwitchDecoder(DASHRepDecoder* aRepDecoder)
                  NS_ERROR_ILLEGAL_VALUE);
 
   // Notify reader and sub decoders and do the switch.
-  if (toDecoderIdx != mVideoRepDecoderIdx) {
+  if (toDecoderIdx != (uint32_t)mVideoRepDecoderIdx) {
     LOG("*** Switching video decoder from [%d] [%p] to [%d] [%p] at "
         "subsegment [%d]", mVideoRepDecoderIdx, VideoRepDecoder(),
         toDecoderIdx, mVideoRepDecoders[toDecoderIdx].get(),
@@ -990,20 +1053,9 @@ DASHDecoder::Seek(double aTime)
 
   {
     ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
-    // We want to stop the current series of downloads and restart later with
-    // the appropriate subsegment.
-
-    // 1 - Set the seeking flag, so that when current subsegments download (if
+    // Set the seeking flag, so that when current subsegments download (if
     // any), the next subsegment will not be downloaded.
     mSeeking = true;
-
-    // 2 - Cancel all current downloads to reset for seeking.
-    for (uint32_t i = 0; i < mAudioRepDecoders.Length(); i++) {
-      mAudioRepDecoders[i]->CancelByteRangeLoad();
-    }
-    for (uint32_t i = 0; i < mVideoRepDecoders.Length(); i++) {
-      mVideoRepDecoders[i]->CancelByteRangeLoad();
-    }
   }
 
   return MediaDecoder::Seek(aTime);
@@ -1075,6 +1127,10 @@ DASHDecoder::IsDecoderAllowedToDownloadData(DASHRepDecoder* aRepDecoder)
   NS_ASSERTION(aRepDecoder, "DASHRepDecoder pointer is null.");
 
   ReentrantMonitorAutoEnter mon(GetReentrantMonitor());
+  LOG("Checking aRepDecoder [%p] with AudioRepDecoder [%p] metadataReadCount "
+      "[%d] and VideoRepDecoder [%p] metadataReadCount [%d]",
+      aRepDecoder, AudioRepDecoder(), mAudioMetadataReadCount,
+      VideoRepDecoder(), mVideoMetadataReadCount);
   // Only return true if |aRepDecoder| is active and metadata for all
   // representations has been downloaded.
   return ((aRepDecoder == AudioRepDecoder() && mAudioMetadataReadCount == 0) ||
@@ -1246,6 +1302,61 @@ DASHDecoder::GetStatistics()
   }
 
   return result;
+}
+
+bool
+DASHDecoder::IsDataCachedToEndOfResource()
+{
+  NS_ASSERTION(!mShuttingDown, "Don't call during shutdown!");
+  GetReentrantMonitor().AssertCurrentThreadIn();
+
+  if (!mMPDManager || !mResource) {
+    return false;
+  }
+
+  bool resourceIsLoaded = false;
+  if (VideoRepDecoder()) {
+    resourceIsLoaded = VideoRepDecoder()->IsDataCachedToEndOfResource();
+    LOG("IsDataCachedToEndOfResource for VideoRepDecoder %p = %s",
+       VideoRepDecoder(), resourceIsLoaded ? "yes" : "no");
+  }
+  if (AudioRepDecoder()) {
+    bool isAudioResourceLoaded =
+      AudioRepDecoder()->IsDataCachedToEndOfResource();
+    LOG("IsDataCachedToEndOfResource for AudioRepDecoder %p = %s",
+       AudioRepDecoder(), isAudioResourceLoaded ? "yes" : "no");
+    resourceIsLoaded = resourceIsLoaded && isAudioResourceLoaded;
+  }
+
+  return resourceIsLoaded;
+}
+
+void
+DASHDecoder::StopProgressUpdates()
+{
+  MOZ_ASSERT(OnStateMachineThread() || OnDecodeThread());
+  GetReentrantMonitor().AssertCurrentThreadIn();
+  mIgnoreProgressData = true;
+  for (uint32_t i = 0; i < mVideoRepDecoders.Length(); i++) {
+    mVideoRepDecoders[i]->StopProgressUpdates();
+  }
+  for (uint32_t i = 0; i < mAudioRepDecoders.Length(); i++) {
+    mAudioRepDecoders[i]->StopProgressUpdates();
+  }
+}
+
+void
+DASHDecoder::StartProgressUpdates()
+{
+  MOZ_ASSERT(OnStateMachineThread() || OnDecodeThread());
+  GetReentrantMonitor().AssertCurrentThreadIn();
+  mIgnoreProgressData = false;
+  for (uint32_t i = 0; i < mVideoRepDecoders.Length(); i++) {
+    mVideoRepDecoders[i]->StartProgressUpdates();
+  }
+  for (uint32_t i = 0; i < mAudioRepDecoders.Length(); i++) {
+    mAudioRepDecoders[i]->StartProgressUpdates();
+  }
 }
 
 } // namespace mozilla

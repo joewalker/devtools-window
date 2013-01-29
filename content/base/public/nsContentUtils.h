@@ -354,10 +354,10 @@ public:
   /**
    * Checks whether two nodes come from the same origin.
    */
-  static nsresult CheckSameOrigin(nsINode* aTrustedNode,
+  static nsresult CheckSameOrigin(const nsINode* aTrustedNode,
                                   nsIDOMNode* aUnTrustedNode);
-  static nsresult CheckSameOrigin(nsINode* aTrustedNode,
-                                  nsINode* unTrustedNode);
+  static nsresult CheckSameOrigin(const nsINode* aTrustedNode,
+                                  const nsINode* unTrustedNode);
 
   // Check if the (JS) caller can access aNode.
   static bool CanCallerAccess(nsIDOMNode *aNode);
@@ -437,6 +437,13 @@ public:
   // Returns the subject principal. Guaranteed to return non-null. May only
   // be called when nsContentUtils is initialized.
   static nsIPrincipal* GetSubjectPrincipal();
+
+  // Returns the principal of the given JS object. This should never be null
+  // for any object in the XPConnect runtime.
+  //
+  // In general, being interested in the principal of an object is enough to
+  // guarantee that the return value is non-null.
+  static nsIPrincipal* GetObjectPrincipal(JSObject* aObj);
 
   static nsresult GenerateStateKey(nsIContent* aContent,
                                    const nsIDocument* aDocument,
@@ -765,6 +772,7 @@ public:
     eSVG_PROPERTIES,
     eBRAND_PROPERTIES,
     eCOMMON_DIALOG_PROPERTIES,
+    eMATHML_PROPERTIES,
     PropertiesFile_COUNT
   };
   static nsresult ReportToConsole(uint32_t aErrorFlags,
@@ -1558,42 +1566,6 @@ public:
                                     const nsAString& aStr2);
 
   /**
-   * Case insensitive comparison between a string and an ASCII literal.
-   * This must ONLY be applied to an actual literal string. Do not attempt
-   * to use it with a regular char* pointer, or with a char array variable.
-   * The template trick to acquire the array length at compile time without
-   * using a macro is due to Corey Kosak, which much thanks.
-   */
-  static bool EqualsLiteralIgnoreASCIICase(const nsAString& aStr1,
-                                           const char* aStr2,
-                                           const uint32_t len);
-#ifdef NS_DISABLE_LITERAL_TEMPLATE
-  static inline bool
-  EqualsLiteralIgnoreASCIICase(const nsAString& aStr1,
-                               const char* aStr2)
-  {
-    uint32_t len = strlen(aStr2);
-    return EqualsLiteralIgnoreASCIICase(aStr1, aStr2, len);
-  }
-#else
-  template<int N>
-  static inline bool
-  EqualsLiteralIgnoreASCIICase(const nsAString& aStr1,
-                               const char (&aStr2)[N])
-  {
-    return EqualsLiteralIgnoreASCIICase(aStr1, aStr2, N-1);
-  }
-  template<int N>
-  static inline bool
-  EqualsLiteralIgnoreASCIICase(const nsAString& aStr1,
-                               char (&aStr2)[N])
-  {
-    const char* s = aStr2;
-    return EqualsLiteralIgnoreASCIICase(aStr1, s, N-1);
-  }
-#endif
-
-  /**
    * Convert ASCII A-Z to a-z.
    * @return NS_OK on success, or NS_ERROR_OUT_OF_MEMORY if making the string
    * writable needs to allocate memory and that allocation fails.
@@ -2245,6 +2217,7 @@ private:
   bool mPushedSomething;
 #ifdef DEBUG
   JSContext* mPushedContext;
+  unsigned mCompartmentDepthOnEntry;
 #endif
 };
 
@@ -2288,6 +2261,43 @@ public:
     nsContentUtils::LeaveMicroTask();
   }
 };
+
+namespace mozilla {
+
+/**
+ * Use AutoJSContext when you need a JS context on the stack but don't have one
+ * passed as a parameter. AutoJSContext will take care of finding the most
+ * appropriate JS context and release it when leaving the stack.
+ */
+class NS_STACK_CLASS AutoJSContext {
+public:
+  AutoJSContext(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM);
+  operator JSContext*();
+
+protected:
+  AutoJSContext(bool aSafe MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
+
+private:
+  // We need this Init() method because we can't use delegating constructor for
+  // the moment. It is a C++11 feature and we do not require C++11 to be
+  // supported to be able to compile Gecko.
+  void Init(bool aSafe MOZ_GUARD_OBJECT_NOTIFIER_PARAM);
+
+  JSContext* mCx;
+  nsCxPusher mPusher;
+  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
+
+/**
+ * SafeAutoJSContext is similar to AutoJSContext but will only return the safe
+ * JS context. That means it will never call ::GetCurrentJSContext().
+ */
+class NS_STACK_CLASS SafeAutoJSContext : public AutoJSContext {
+public:
+  SafeAutoJSContext(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM);
+};
+
+} // namespace mozilla
 
 #define NS_INTERFACE_MAP_ENTRY_TEAROFF(_interface, _allocator)                \
   if (aIID.Equals(NS_GET_IID(_interface))) {                                  \

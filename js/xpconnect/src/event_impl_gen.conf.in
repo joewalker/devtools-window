@@ -15,6 +15,7 @@ simple_events = [
     'UserProximityEvent',
     'CustomEvent',
     'PageTransitionEvent',
+    'DOMTransactionEvent',
     'PopStateEvent',
     'HashChangeEvent',
     'CloseEvent',
@@ -27,6 +28,7 @@ simple_events = [
     'BluetoothDeviceAddressEvent',
 #endif
 #ifdef MOZ_B2G_RIL
+    'CallEvent',
     'ICCCardLockErrorEvent',
     'MozWifiStatusChangeEvent',
     'MozWifiConnectionInfoEvent',

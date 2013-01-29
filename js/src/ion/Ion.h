@@ -211,6 +211,13 @@ enum MethodStatus
     Method_Compiled
 };
 
+enum AbortReason {
+    AbortReason_Alloc,
+    AbortReason_Inlining,
+    AbortReason_Disable,
+    AbortReason_NoAbort
+};
+
 // An Ion context is needed to enter into either an Ion method or an instance
 // of the Ion compiler. It points to a temporary allocator and the active
 // JSContext, either of which may be NULL, and the active compartment, which
@@ -243,9 +250,10 @@ IonContext *GetIonContext();
 
 bool SetIonContext(IonContext *ctx);
 
-MethodStatus CanEnterAtBranch(JSContext *cx, HandleScript script,
-                              StackFrame *fp, jsbytecode *pc);
-MethodStatus CanEnter(JSContext *cx, HandleScript script, StackFrame *fp, bool newType);
+MethodStatus CanEnterAtBranch(JSContext *cx, JSScript *script,
+                              AbstractFramePtr fp, jsbytecode *pc, bool isConstructing);
+MethodStatus CanEnter(JSContext *cx, JSScript *script, AbstractFramePtr fp,
+                      bool isConstructing, bool newType);
 MethodStatus CanEnterUsingFastInvoke(JSContext *cx, HandleScript script, uint32_t numActualArgs);
 
 enum IonExecStatus
@@ -296,7 +304,7 @@ class CodeGenerator;
 CodeGenerator *CompileBackEnd(MIRGenerator *mir);
 void AttachFinishedCompilations(JSContext *cx);
 void FinishOffThreadBuilder(IonBuilder *builder);
-bool TestIonCompile(JSContext *cx, HandleScript script, HandleFunction fun, jsbytecode *osrPc, bool constructing);
+MethodStatus TestIonCompile(JSContext *cx, HandleScript script, HandleFunction fun, jsbytecode *osrPc, bool constructing);
 
 static inline bool IsEnabled(JSContext *cx)
 {

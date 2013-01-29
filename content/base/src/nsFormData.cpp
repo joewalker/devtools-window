@@ -8,6 +8,7 @@
 #include "nsIDOMFile.h"
 #include "nsHTMLFormElement.h"
 #include "mozilla/dom/FormDataBinding.h"
+#include "mozilla/dom/BindingUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -105,11 +106,11 @@ nsFormData::WrapObject(JSContext* aCx, JSObject* aScope, bool* aTriedToWrap)
 }
 
 /* static */ already_AddRefed<nsFormData>
-nsFormData::Constructor(nsISupports* aGlobal,
+nsFormData::Constructor(const GlobalObject& aGlobal,
                         const Optional<nsHTMLFormElement*>& aFormElement,
                         ErrorResult& aRv)
 {
-  nsRefPtr<nsFormData> formData = new nsFormData(aGlobal);
+  nsRefPtr<nsFormData> formData = new nsFormData(aGlobal.Get());
   if (aFormElement.WasPassed()) {
     MOZ_ASSERT(aFormElement.Value());
     aRv = aFormElement.Value()->WalkFormElements(formData);

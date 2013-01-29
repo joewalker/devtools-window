@@ -23,7 +23,7 @@
 
 #include "nsFontMetrics.h"
 #include "nsIRollupListener.h"
-#include "nsIViewManager.h"
+#include "nsViewManager.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIFile.h"
 #include "nsILocalFileMac.h"
@@ -653,6 +653,48 @@ nsChildView::ReparentNativeWidget(nsIWidget* aNewParent)
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
 }
 
+void
+nsChildView::WillPaint()
+{
+  if (!mView || ![mView isKindOfClass:[ChildView class]])
+    return;
+  NSWindow* win = [mView window];
+  if (!win || ![win isKindOfClass:[ToolbarWindow class]])
+    return;
+  if (![(ToolbarWindow*)win drawsContentsIntoWindowFrame])
+    return;
+
+  NSRect titlebarRect = [(ToolbarWindow*)win titlebarRect];
+  gfxSize titlebarSize(titlebarRect.size.width, titlebarRect.size.height);
+  if (!mTitlebarSurf || mTitlebarSize != titlebarSize) {
+    mTitlebarSize = titlebarSize;
+    mTitlebarSurf = new gfxQuartzSurface(titlebarSize, gfxASurface::ImageFormatARGB32);
+  }
+  NSRect flippedTitlebarRect = { NSZeroPoint, titlebarRect.size };
+  CGContextRef context = mTitlebarSurf->GetCGContext();
+
+  CGContextSaveGState(context);
+  [(ChildView*)mView drawRect:flippedTitlebarRect inTitlebarContext:context];
+  CGContextRestoreGState(context);
+}
+
+void
+nsChildView::CompositeTitlebar(const gfxSize& aSize, CGContextRef aContext)
+{
+  NS_ASSERTION(mTitlebarSurf, "Must have titlebar surface");
+  if (!mTitlebarSurf) {
+    return;
+  }
+
+  CGImageRef image = CGBitmapContextCreateImage(mTitlebarSurf->GetCGContext());
+
+  CGContextDrawImage(aContext, 
+                     CGRectMake(0, 0, mTitlebarSize.width, mTitlebarSize.height), 
+                     image);
+
+  CGImageRelease(image);
+}
+
 void nsChildView::ResetParent()
 {
   if (!mOnDestroyCalled) {
@@ -738,6 +780,18 @@ NS_IMETHODIMP nsChildView::GetBounds(nsIntRect &aRect)
     aRect = mBounds;
   } else {
     aRect = CocoaPointsToDevPixels([mView frame]);
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP nsChildView::GetClientBounds(nsIntRect &aRect)
+{
+  GetBounds(aRect);
+  if (!mParentWidget) {
+    // For top level widgets we want the position on screen, not the position
+    // of this view inside the window.
+    MOZ_ASSERT(mWindowType != eWindowType_plugin, "plugin widgets should have parents");
+    aRect.MoveTo(WidgetToScreenOffset());
   }
   return NS_OK;
 }
@@ -927,6 +981,8 @@ bool nsChildView::ShowsResizeIndicator(nsIntRect* aResizerRect)
 // specific code to work around this bug, which breaks when we fix it (see bmo
 // bug 477077).  So we'll need to coordinate releasing a fix for this bug with
 // Adobe and other major plugin vendors that support the CoreGraphics mode.
+//
+// outClipRect and outOrigin are in display pixels, not device pixels.
 NS_IMETHODIMP nsChildView::GetPluginClipRect(nsIntRect& outClipRect, nsIntPoint& outOrigin, bool& outWidgetVisible)
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
@@ -964,7 +1020,11 @@ NS_IMETHODIMP nsChildView::GetPluginClipRect(nsIntRect& outClipRect, nsIntPoint&
     if (mClipRects) {
       nsIntRect clipBounds;
       for (uint32_t i = 0; i < mClipRectCount; ++i) {
-        clipBounds.UnionRect(clipBounds, mClipRects[i]);
+        NSRect cocoaPoints = DevPixelsToCocoaPoints(mClipRects[i]);
+        clipBounds.UnionRect(clipBounds, nsIntRect(NSToIntRound(cocoaPoints.origin.x),
+                                                   NSToIntRound(cocoaPoints.origin.y),
+                                                   NSToIntRound(cocoaPoints.size.width),
+                                                   NSToIntRound(cocoaPoints.size.height)));
       }
       outClipRect.IntersectRect(outClipRect, clipBounds - outOrigin);
     }
@@ -1429,30 +1489,35 @@ bool nsChildView::DispatchWindowEvent(nsGUIEvent &event)
 
 bool nsChildView::PaintWindow(nsIntRegion aRegion, bool aIsAlternate)
 {
-  nsIWidget* widget = this;
-  nsIWidgetListener* listener = mWidgetListener;
+  nsCOMPtr<nsIWidget> widget = this;
 
   // If there is no listener, use the parent popup's listener if that exists.
-  if (!listener && mParentWidget) {
+  if (!mWidgetListener && mParentWidget) {
     nsWindowType type;
     mParentWidget->GetWindowType(type);
     if (type == eWindowType_popup) {
       widget = mParentWidget;
-      listener = mParentWidget->GetWidgetListener();
     }
   }
 
+  nsIWidgetListener* listener = widget->GetWidgetListener();
   if (!listener)
     return false;
 
   bool returnValue = false;
   bool oldDispatchPaint = mIsDispatchPaint;
   mIsDispatchPaint = true;
-  uint32_t flags = nsIWidgetListener::SENT_WILL_PAINT;
+  uint32_t flags = 0;
   if (aIsAlternate) {
     flags |= nsIWidgetListener::PAINT_IS_ALTERNATE; 
   }
   returnValue = listener->PaintWindow(widget, aRegion, flags);
+
+  listener = widget->GetWidgetListener();
+  if (listener) {
+    listener->DidPaintWindow();
+  }
+
   mIsDispatchPaint = oldDispatchPaint;
   return returnValue;
 }
@@ -2400,6 +2465,14 @@ NSEvent* gLastDragMouseDownEvent = nil;
   }
 }
 
+- (void)drawTitlebar:(NSRect)aRect inTitlebarContext:(CGContextRef)aContext
+{
+  if (mGeckoChild) {
+    gfxSize size(aRect.size.width, aRect.size.height);
+    mGeckoChild->CompositeTitlebar(size, aContext);
+  }
+}
+
 // The display system has told us that a portion of our view is dirty. Tell
 // gecko to paint it
 - (void)drawRect:(NSRect)aRect
@@ -2453,7 +2526,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
   const NSRect *rects;
   NSInteger count, i;
   [[NSView focusView] getRectsBeingDrawn:&rects count:&count];
-  if (count < MAX_RECTS_IN_REGION) {
+  if (count < MAX_RECTS_IN_REGION && !aIsAlternate) {
     for (i = 0; i < count; ++i) {
       // Add the rect to the region.
       NSRect r = [self convertRect:rects[i] fromView:[NSView focusView]];
@@ -2610,7 +2683,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
     nsIWidgetListener* listener = mGeckoChild->GetWidgetListener();
     if (listener) {
-      listener->WillPaintWindow(mGeckoChild, false);
+      listener->WillPaintWindow(mGeckoChild);
     }
   }
   [super viewWillDraw];
@@ -2673,9 +2746,9 @@ NSEvent* gLastDragMouseDownEvent = nil;
 #endif /* MOZ_USE_NATIVE_POPUP_WINDOWS */
 
   nsIRollupListener* rollupListener = nsBaseWidget::GetActiveRollupListener();
+  NS_ENSURE_TRUE_VOID(rollupListener);
   nsCOMPtr<nsIWidget> widget = rollupListener->GetRollupWidget();
-  if (!widget)
-    return;
+  NS_ENSURE_TRUE_VOID(widget);
 
   NSWindow *popupWindow = (NSWindow*)widget->GetNativeData(NS_NATIVE_WINDOW);
   if (!popupWindow || ![popupWindow isKindOfClass:[PopupWindow class]])
@@ -2698,6 +2771,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
   BOOL consumeEvent = NO;
 
   nsIRollupListener* rollupListener = nsBaseWidget::GetActiveRollupListener();
+  NS_ENSURE_TRUE(rollupListener, false);
   nsCOMPtr<nsIWidget> rollupWidget = rollupListener->GetRollupWidget();
   if (rollupWidget) {
     NSWindow* currentPopup = static_cast<NSWindow*>(rollupWidget->GetNativeData(NS_NATIVE_WINDOW));

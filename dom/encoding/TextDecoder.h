@@ -20,12 +20,12 @@ public:
 
   // The WebIDL constructor.
   static already_AddRefed<TextDecoder>
-  Constructor(nsISupports* aGlobal,
+  Constructor(const GlobalObject& aGlobal,
               const nsAString& aEncoding,
               const TextDecoderOptions& aOptions,
               ErrorResult& aRv)
   {
-    nsRefPtr<TextDecoder> txtDecoder = new TextDecoder(aGlobal);
+    nsRefPtr<TextDecoder> txtDecoder = new TextDecoder(aGlobal.Get());
     txtDecoder->Init(aEncoding, aOptions.mFatal, aRv);
     if (aRv.Failed()) {
       return nullptr;
@@ -56,12 +56,19 @@ public:
     return mGlobal;
   }
 
-  void Decode(const ArrayBufferView* aView,
+  void Decode(nsAString& aOutDecodedString,
+              ErrorResult& aRv) {
+    TextDecoderBase::Decode(nullptr, 0, false,
+                            aOutDecodedString, aRv);
+  }
+
+  void Decode(const ArrayBufferView& aView,
               const TextDecodeOptions& aOptions,
               nsAString& aOutDecodedString,
               ErrorResult& aRv) {
-    return TextDecoderBase::Decode(aView, aOptions.mStream,
-                                   aOutDecodedString, aRv);
+    TextDecoderBase::Decode(reinterpret_cast<char*>(aView.Data()),
+                            aView.Length(), aOptions.mStream,
+                            aOutDecodedString, aRv);
   }
 
 private:

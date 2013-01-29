@@ -13,6 +13,7 @@
 #include "nsIOutputStream.h"
 #include "nsCRT.h"
 #include "nsThreadUtils.h"
+#include <algorithm>
 
 #define kMinDecompressReadBufLen 1024
 #define kMinCompressWriteBufLen  1024
@@ -586,6 +587,7 @@ nsCacheEntryDescriptor::Close()
     inputWrappers.Clear();
 
     nsCacheServiceAutoLock lock(LOCK_TELEM(NSCACHEENTRYDESCRIPTOR_CLOSE));
+    if (!mCacheEntry)  return NS_ERROR_NOT_AVAILABLE;
 
     // XXX perhaps closing descriptors should clear/sever transports
 
@@ -652,16 +654,63 @@ nsCacheEntryDescriptor::VisitMetaData(nsICacheMetaDataVisitor * visitor)
  *                      open while referenced.
  ******************************************************************************/
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsCacheEntryDescriptor::nsInputStreamWrapper,
-                              nsIInputStream)
+NS_IMPL_THREADSAFE_ADDREF(nsCacheEntryDescriptor::nsInputStreamWrapper)
+NS_IMETHODIMP_(nsrefcnt)
+nsCacheEntryDescriptor::nsInputStreamWrapper::Release()
+{
+    // Holding a reference to descriptor ensures that cache service won't go
+    // away. Do not grab cache service lock if there is no descriptor.
+    nsRefPtr<nsCacheEntryDescriptor> desc;
+
+    {
+        mozilla::MutexAutoLock lock(mLock);
+        desc = mDescriptor;
+    }
+
+    if (desc)
+        nsCacheService::Lock(LOCK_TELEM(NSINPUTSTREAMWRAPPER_RELEASE));
+
+    nsrefcnt count;
+    NS_PRECONDITION(0 != mRefCnt, "dup release");
+    count = NS_AtomicDecrementRefcnt(mRefCnt);
+    NS_LOG_RELEASE(this, count, "nsCacheEntryDescriptor::nsInputStreamWrapper");
+
+    if (0 == count) {
+        // don't use desc here since mDescriptor might be already nulled out
+        if (mDescriptor) {
+            NS_ASSERTION(mDescriptor->mInputWrappers.IndexOf(this) != -1,
+                         "Wrapper not found in array!");
+            mDescriptor->mInputWrappers.RemoveElement(this);
+        }
+
+        if (desc)
+            nsCacheService::Unlock();
+
+        mRefCnt = 1;
+        delete (this);
+        return 0;
+    }
+
+    if (desc)
+        nsCacheService::Unlock();
+
+    return count;
+}
+
+NS_INTERFACE_MAP_BEGIN(nsCacheEntryDescriptor::nsInputStreamWrapper)
+  NS_INTERFACE_MAP_ENTRY(nsIInputStream)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+NS_INTERFACE_MAP_END_THREADSAFE
 
 nsresult nsCacheEntryDescriptor::
 nsInputStreamWrapper::LazyInit()
 {
-    nsCacheServiceAutoLock lock(LOCK_TELEM(NSINPUTSTREAMWRAPPER_LAZYINIT));
-
+    // Check if we have the descriptor. If not we can't even grab the cache
+    // lock since it is not ensured that the cache service still exists.
     if (!mDescriptor)
         return NS_ERROR_NOT_AVAILABLE;
+
+    nsCacheServiceAutoLock lock(LOCK_TELEM(NSINPUTSTREAMWRAPPER_LAZYINIT));
 
     nsCacheAccessMode mode;
     nsresult rv = mDescriptor->GetAccessGranted(&mode);
@@ -686,15 +735,30 @@ nsInputStreamWrapper::LazyInit()
     return NS_OK;
 }
 
+nsresult nsCacheEntryDescriptor::
+nsInputStreamWrapper::EnsureInit()
+{
+    if (mInitialized) {
+        NS_ASSERTION(mDescriptor, "Bad state");
+        return NS_OK;
+    }
+
+    return LazyInit();
+}
+
 void nsCacheEntryDescriptor::
 nsInputStreamWrapper::CloseInternal()
 {
     mLock.AssertCurrentThreadOwns();
+    if (!mDescriptor) {
+        NS_ASSERTION(!mInitialized, "Bad state");
+        NS_ASSERTION(!mInput, "Bad state");
+        return;
+    }
+
     nsCacheServiceAutoLock lock(LOCK_TELEM(NSINPUTSTREAMWRAPPER_CLOSEINTERNAL));
 
     if (mDescriptor) {
-        NS_ASSERTION(mDescriptor->mInputWrappers.IndexOf(this) != -1,
-                     "Wrapper not found in array!");
         mDescriptor->mInputWrappers.RemoveElement(this);
         nsCacheService::ReleaseObject_Locked(mDescriptor);
         mDescriptor = nullptr;
@@ -782,8 +846,55 @@ nsInputStreamWrapper::IsNonBlocking(bool *result)
  * nsDecompressInputStreamWrapper - an input stream wrapper that decompresses
  ******************************************************************************/
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsCacheEntryDescriptor::nsDecompressInputStreamWrapper,
-                              nsIInputStream)
+NS_IMPL_THREADSAFE_ADDREF(nsCacheEntryDescriptor::nsDecompressInputStreamWrapper)
+NS_IMETHODIMP_(nsrefcnt)
+nsCacheEntryDescriptor::nsDecompressInputStreamWrapper::Release()
+{
+    // Holding a reference to descriptor ensures that cache service won't go
+    // away. Do not grab cache service lock if there is no descriptor.
+    nsRefPtr<nsCacheEntryDescriptor> desc;
+
+    {
+        mozilla::MutexAutoLock lock(mLock);
+        desc = mDescriptor;
+    }
+
+    if (desc)
+        nsCacheService::Lock(LOCK_TELEM(
+                             NSDECOMPRESSINPUTSTREAMWRAPPER_RELEASE));
+
+    nsrefcnt count;
+    NS_PRECONDITION(0 != mRefCnt, "dup release");
+    count = NS_AtomicDecrementRefcnt(mRefCnt);
+    NS_LOG_RELEASE(this, count,
+                   "nsCacheEntryDescriptor::nsDecompressInputStreamWrapper");
+
+    if (0 == count) {
+        // don't use desc here since mDescriptor might be already nulled out
+        if (mDescriptor) {
+            NS_ASSERTION(mDescriptor->mInputWrappers.IndexOf(this) != -1,
+                         "Wrapper not found in array!");
+            mDescriptor->mInputWrappers.RemoveElement(this);
+        }
+
+        if (desc)
+            nsCacheService::Unlock();
+
+        mRefCnt = 1;
+        delete (this);
+        return 0;
+    }
+
+    if (desc)
+        nsCacheService::Unlock();
+
+    return count;
+}
+
+NS_INTERFACE_MAP_BEGIN(nsCacheEntryDescriptor::nsDecompressInputStreamWrapper)
+  NS_INTERFACE_MAP_ENTRY(nsIInputStream)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+NS_INTERFACE_MAP_END_THREADSAFE
 
 NS_IMETHODIMP nsCacheEntryDescriptor::
 nsDecompressInputStreamWrapper::Read(char *    buf, 
@@ -811,7 +922,7 @@ nsDecompressInputStreamWrapper::Read(char *    buf,
         // input stream at one time. Making the buffer size proportional
         // to the request size is not necessary, but helps minimize the
         // number of read requests to the input stream.
-        uint32_t newBufLen = NS_MAX(count, (uint32_t)kMinDecompressReadBufLen);
+        uint32_t newBufLen = std::max(count, (uint32_t)kMinDecompressReadBufLen);
         unsigned char* newBuf;
         newBuf = (unsigned char*)nsMemory::Realloc(mReadBuffer, 
             newBufLen);
@@ -925,16 +1036,61 @@ nsDecompressInputStreamWrapper::EndZstream()
  *                       - also keeps the cache entry open while referenced.
  ******************************************************************************/
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsCacheEntryDescriptor::nsOutputStreamWrapper,
-                              nsIOutputStream)
+NS_IMPL_THREADSAFE_ADDREF(nsCacheEntryDescriptor::nsOutputStreamWrapper)
+NS_IMETHODIMP_(nsrefcnt)
+nsCacheEntryDescriptor::nsOutputStreamWrapper::Release()
+{
+    // Holding a reference to descriptor ensures that cache service won't go
+    // away. Do not grab cache service lock if there is no descriptor.
+    nsRefPtr<nsCacheEntryDescriptor> desc;
+
+    {
+        mozilla::MutexAutoLock lock(mLock);
+        desc = mDescriptor;
+    }
+
+    if (desc)
+        nsCacheService::Lock(LOCK_TELEM(NSOUTPUTSTREAMWRAPPER_RELEASE));
+
+    nsrefcnt count;
+    NS_PRECONDITION(0 != mRefCnt, "dup release");
+    count = NS_AtomicDecrementRefcnt(mRefCnt);
+    NS_LOG_RELEASE(this, count,
+                   "nsCacheEntryDescriptor::nsOutputStreamWrapper");
+
+    if (0 == count) {
+        // don't use desc here since mDescriptor might be already nulled out
+        if (mDescriptor)
+            mDescriptor->mOutputWrapper = nullptr;
+
+        if (desc)
+            nsCacheService::Unlock();
+
+        mRefCnt = 1;
+        delete (this);
+        return 0;
+    }
+
+    if (desc)
+        nsCacheService::Unlock();
+
+    return count;
+}
+
+NS_INTERFACE_MAP_BEGIN(nsCacheEntryDescriptor::nsOutputStreamWrapper)
+  NS_INTERFACE_MAP_ENTRY(nsIOutputStream)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+NS_INTERFACE_MAP_END_THREADSAFE
 
 nsresult nsCacheEntryDescriptor::
 nsOutputStreamWrapper::LazyInit()
 {
-    nsCacheServiceAutoLock lock(LOCK_TELEM(NSOUTPUTSTREAMWRAPPER_LAZYINIT));
-
+    // Check if we have the descriptor. If not we can't even grab the cache
+    // lock since it is not ensured that the cache service still exists.
     if (!mDescriptor)
         return NS_ERROR_NOT_AVAILABLE;
+
+    nsCacheServiceAutoLock lock(LOCK_TELEM(NSOUTPUTSTREAMWRAPPER_LAZYINIT));
 
     nsCacheAccessMode mode;
     nsresult rv = mDescriptor->GetAccessGranted(&mode);
@@ -981,6 +1137,17 @@ nsOutputStreamWrapper::LazyInit()
 }
 
 nsresult nsCacheEntryDescriptor::
+nsOutputStreamWrapper::EnsureInit()
+{
+    if (mInitialized) {
+        NS_ASSERTION(mDescriptor, "Bad state");
+        return NS_OK;
+    }
+
+    return LazyInit();
+}
+
+nsresult nsCacheEntryDescriptor::
 nsOutputStreamWrapper::OnWrite(uint32_t count)
 {
     if (count > INT32_MAX)  return NS_ERROR_UNEXPECTED;
@@ -991,6 +1158,12 @@ void nsCacheEntryDescriptor::
 nsOutputStreamWrapper::CloseInternal()
 {
     mLock.AssertCurrentThreadOwns();
+    if (!mDescriptor) {
+        NS_ASSERTION(!mInitialized, "Bad state");
+        NS_ASSERTION(!mOutput, "Bad state");
+        return;
+    }
+
     nsCacheServiceAutoLock lock(LOCK_TELEM(NSOUTPUTSTREAMWRAPPER_CLOSEINTERNAL));
 
     if (mDescriptor) {
@@ -1093,8 +1266,51 @@ nsOutputStreamWrapper::IsNonBlocking(bool *result)
  *   data before it is written
  ******************************************************************************/
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(nsCacheEntryDescriptor::nsCompressOutputStreamWrapper,
-                              nsIOutputStream)
+NS_IMPL_THREADSAFE_ADDREF(nsCacheEntryDescriptor::nsCompressOutputStreamWrapper)
+NS_IMETHODIMP_(nsrefcnt)
+nsCacheEntryDescriptor::nsCompressOutputStreamWrapper::Release()
+{
+    // Holding a reference to descriptor ensures that cache service won't go
+    // away. Do not grab cache service lock if there is no descriptor.
+    nsRefPtr<nsCacheEntryDescriptor> desc;
+
+    {
+        mozilla::MutexAutoLock lock(mLock);
+        desc = mDescriptor;
+    }
+
+    if (desc)
+        nsCacheService::Lock(LOCK_TELEM(NSCOMPRESSOUTPUTSTREAMWRAPPER_RELEASE));
+
+    nsrefcnt count;
+    NS_PRECONDITION(0 != mRefCnt, "dup release");
+    count = NS_AtomicDecrementRefcnt(mRefCnt);
+    NS_LOG_RELEASE(this, count,
+                   "nsCacheEntryDescriptor::nsCompressOutputStreamWrapper");
+
+    if (0 == count) {
+        // don't use desc here since mDescriptor might be already nulled out
+        if (mDescriptor)
+            mDescriptor->mOutputWrapper = nullptr;
+
+        if (desc)
+            nsCacheService::Unlock();
+
+        mRefCnt = 1;
+        delete (this);
+        return 0;
+    }
+
+    if (desc)
+        nsCacheService::Unlock();
+
+    return count;
+}
+
+NS_INTERFACE_MAP_BEGIN(nsCacheEntryDescriptor::nsCompressOutputStreamWrapper)
+  NS_INTERFACE_MAP_ENTRY(nsIOutputStream)
+  NS_INTERFACE_MAP_ENTRY(nsISupports)
+NS_INTERFACE_MAP_END_THREADSAFE
 
 NS_IMETHODIMP nsCacheEntryDescriptor::
 nsCompressOutputStreamWrapper::Write(const char * buf,
@@ -1117,7 +1333,7 @@ nsCompressOutputStreamWrapper::Write(const char * buf,
         // Once allocated, this buffer is referenced by the zlib stream and
         // cannot be grown. We use 2x(initial write request) to approximate
         // a stream buffer size proportional to request buffers.
-        mWriteBufferLen = NS_MAX(count*2, (uint32_t)kMinCompressWriteBufLen);
+        mWriteBufferLen = std::max(count*2, (uint32_t)kMinCompressWriteBufLen);
         mWriteBuffer = (unsigned char*)nsMemory::Alloc(mWriteBufferLen);
         if (!mWriteBuffer) {
             mWriteBufferLen = 0;

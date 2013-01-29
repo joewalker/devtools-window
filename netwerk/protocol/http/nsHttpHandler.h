@@ -253,6 +253,12 @@ public:
     // returns true in between Init and Shutdown states
     bool Active() { return mHandlerActive; }
 
+    static void GetCacheSessionNameForStoragePolicy(
+            nsCacheStoragePolicy storagePolicy,
+            bool isPrivate,
+            uint32_t appId,
+            bool inBrowser,
+            nsACString& sessionName);
 private:
 
     //
@@ -370,9 +376,10 @@ private:
     // Persistent HTTPS caching flag
     bool           mEnablePersistentHttpsCaching;
 
-    // For broadcasting the preference to not be tracked
+    // For broadcasting tracking preference
     bool           mDoNotTrackEnabled;
-    
+    PRUint8        mDoNotTrackValue;
+
     // Whether telemetry is reported or not
     bool           mTelemetryEnabled;
 

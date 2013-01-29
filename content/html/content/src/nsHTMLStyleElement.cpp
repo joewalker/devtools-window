@@ -86,6 +86,7 @@ protected:
   void GetStyleSheetInfo(nsAString& aTitle,
                          nsAString& aType,
                          nsAString& aMedia,
+                         bool* aIsScoped,
                          bool* aIsAlternate);
   /**
    * Common method to call from the various mutation observer methods.
@@ -109,7 +110,6 @@ nsHTMLStyleElement::~nsHTMLStyleElement()
 {
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsHTMLStyleElement)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsHTMLStyleElement,
                                                   nsGenericHTMLElement)
   tmp->nsStyleLinkElement::Traverse(cb);
@@ -164,6 +164,7 @@ nsHTMLStyleElement::SetDisabled(bool aDisabled)
 }
 
 NS_IMPL_STRING_ATTR(nsHTMLStyleElement, Media, media)
+NS_IMPL_BOOL_ATTR(nsHTMLStyleElement, Scoped, scoped)
 NS_IMPL_STRING_ATTR(nsHTMLStyleElement, Type, type)
 
 void
@@ -242,11 +243,14 @@ nsHTMLStyleElement::SetAttr(int32_t aNameSpaceID, nsIAtom* aName,
 {
   nsresult rv = nsGenericHTMLElement::SetAttr(aNameSpaceID, aName, aPrefix,
                                               aValue, aNotify);
-  if (NS_SUCCEEDED(rv) && aNameSpaceID == kNameSpaceID_None &&
-      (aName == nsGkAtoms::title ||
-       aName == nsGkAtoms::media ||
-       aName == nsGkAtoms::type)) {
-    UpdateStyleSheetInternal(nullptr, true);
+  if (NS_SUCCEEDED(rv) && aNameSpaceID == kNameSpaceID_None) {
+    if (aName == nsGkAtoms::title ||
+        aName == nsGkAtoms::media ||
+        aName == nsGkAtoms::type) {
+      UpdateStyleSheetInternal(nullptr, true);
+    } else if (aName == nsGkAtoms::scoped) {
+      UpdateStyleSheetScopedness(true);
+    }
   }
 
   return rv;
@@ -258,11 +262,14 @@ nsHTMLStyleElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttribute,
 {
   nsresult rv = nsGenericHTMLElement::UnsetAttr(aNameSpaceID, aAttribute,
                                                 aNotify);
-  if (NS_SUCCEEDED(rv) && aNameSpaceID == kNameSpaceID_None &&
-      (aAttribute == nsGkAtoms::title ||
-       aAttribute == nsGkAtoms::media ||
-       aAttribute == nsGkAtoms::type)) {
-    UpdateStyleSheetInternal(nullptr, true);
+  if (NS_SUCCEEDED(rv) && aNameSpaceID == kNameSpaceID_None) {
+    if (aAttribute == nsGkAtoms::title ||
+        aAttribute == nsGkAtoms::media ||
+        aAttribute == nsGkAtoms::type) {
+      UpdateStyleSheetInternal(nullptr, true);
+    } else if (aAttribute == nsGkAtoms::scoped) {
+      UpdateStyleSheetScopedness(false);
+    }
   }
 
   return rv;
@@ -298,6 +305,7 @@ void
 nsHTMLStyleElement::GetStyleSheetInfo(nsAString& aTitle,
                                       nsAString& aType,
                                       nsAString& aMedia,
+                                      bool* aIsScoped,
                                       bool* aIsAlternate)
 {
   aTitle.Truncate();
@@ -316,6 +324,8 @@ nsHTMLStyleElement::GetStyleSheetInfo(nsAString& aTitle,
   nsContentUtils::ASCIIToLower(aMedia);
 
   GetAttr(kNameSpaceID_None, nsGkAtoms::type, aType);
+
+  *aIsScoped = HasAttr(kNameSpaceID_None, nsGkAtoms::scoped);
 
   nsAutoString mimeType;
   nsAutoString notUsed;

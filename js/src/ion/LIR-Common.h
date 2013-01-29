@@ -371,25 +371,39 @@ class LCheckOverRecursed : public LInstructionHelper<0, 0, 1>
     }
 };
 
-class LDefVar : public LCallInstructionHelper<0, 1, 1>
+class LDefVar : public LCallInstructionHelper<0, 1, 0>
 {
   public:
     LIR_HEADER(DefVar)
 
-    LDefVar(const LAllocation &scopeChain, const LDefinition &namereg)
+    LDefVar(const LAllocation &scopeChain)
     {
         setOperand(0, scopeChain);
-        setTemp(0, namereg);
     }
 
-    const LAllocation *getScopeChain() {
+    const LAllocation *scopeChain() {
         return getOperand(0);
-    }
-    const LAllocation *nameTemp() {
-        return getTemp(0)->output();
     }
     MDefVar *mir() const {
         return mir_->toDefVar();
+    }
+};
+
+class LDefFun : public LCallInstructionHelper<0, 1, 0>
+{
+  public:
+    LIR_HEADER(DefFun)
+
+    LDefFun(const LAllocation &scopeChain)
+    {
+        setOperand(0, scopeChain);
+    }
+
+    const LAllocation *scopeChain() {
+        return getOperand(0);
+    }
+    MDefFun *mir() const {
+        return mir_->toDefFun();
     }
 };
 
@@ -418,6 +432,52 @@ class LToIdV : public LCallInstructionHelper<BOX_PIECES, 2 * BOX_PIECES, 0>
     }
 };
 
+// Allocate an object for |new| on the caller-side,
+// when there is no templateObject or prototype known
+class LCreateThis : public LCallInstructionHelper<BOX_PIECES, 1, 0>
+{
+  public:
+    LIR_HEADER(CreateThis)
+
+    LCreateThis(const LAllocation &callee)
+    {
+        setOperand(0, callee);
+    }
+
+    const LAllocation *getCallee() {
+        return getOperand(0);
+    }
+
+    MCreateThis *mir() const {
+        return mir_->toCreateThis();
+    }
+};
+
+// Allocate an object for |new| on the caller-side,
+// when the prototype is known.
+class LCreateThisWithProto : public LCallInstructionHelper<1, 2, 0>
+{
+  public:
+    LIR_HEADER(CreateThisWithProto)
+
+    LCreateThisWithProto(const LAllocation &callee, const LAllocation &prototype)
+    {
+        setOperand(0, callee);
+        setOperand(1, prototype);
+    }
+
+    const LAllocation *getCallee() {
+        return getOperand(0);
+    }
+    const LAllocation *getPrototype() {
+        return getOperand(1);
+    }
+
+    MCreateThis *mir() const {
+        return mir_->toCreateThis();
+    }
+};
+
 // Allocate an object for |new| on the caller-side.
 // Always performs object initialization with a fast path.
 class LCreateThisWithTemplate : public LInstructionHelper<1, 0, 0>
@@ -430,54 +490,6 @@ class LCreateThisWithTemplate : public LInstructionHelper<1, 0, 0>
 
     MCreateThisWithTemplate *mir() const {
         return mir_->toCreateThisWithTemplate();
-    }
-};
-
-// Allocate an object for |new| on the caller-side, when there is no templateObject.
-class LCreateThisV : public LCallInstructionHelper<BOX_PIECES, 2, 0>
-{
-  public:
-    LIR_HEADER(CreateThisV)
-
-    LCreateThisV(const LAllocation &callee, const LAllocation &prototype)
-    {
-        setOperand(0, callee);
-        setOperand(1, prototype);
-    }
-
-    const LAllocation *getCallee() {
-        return getOperand(0);
-    }
-    const LAllocation *getPrototype() {
-        return getOperand(1);
-    }
-
-    MCreateThis *mir() const {
-        return mir_->toCreateThis();
-    }
-};
-
-// Allocate an object for |new| on the caller-side, when there is no templateObject.
-class LCreateThisO : public LCallInstructionHelper<1, 2, 0>
-{
-  public:
-    LIR_HEADER(CreateThisO)
-
-    LCreateThisO(const LAllocation &callee, const LAllocation &prototype)
-    {
-        setOperand(0, callee);
-        setOperand(1, prototype);
-    }
-
-    const LAllocation *getCallee() {
-        return getOperand(0);
-    }
-    const LAllocation *getPrototype() {
-        return getOperand(1);
-    }
-
-    MCreateThis *mir() const {
-        return mir_->toCreateThis();
     }
 };
 
@@ -959,7 +971,6 @@ class LPolyInlineDispatch : public LInstructionHelper<0, 1, 1>
     }
 };
 
-
 // Compares two integral values of the same JS type, either integer or object.
 // For objects, both operands are in registers.
 class LCompare : public LInstructionHelper<1, 2, 0>
@@ -985,64 +996,6 @@ class LCompare : public LInstructionHelper<1, 2, 0>
         return getOperand(1);
     }
     MCompare *mir() {
-        return mir_->toCompare();
-    }
-};
-
-class LCompareD : public LInstructionHelper<1, 2, 0>
-{
-  public:
-    LIR_HEADER(CompareD)
-    LCompareD(const LAllocation &left, const LAllocation &right) {
-        setOperand(0, left);
-        setOperand(1, right);
-    }
-
-    const LAllocation *left() {
-        return getOperand(0);
-    }
-    const LAllocation *right() {
-        return getOperand(1);
-    }
-    MCompare *mir() {
-        return mir_->toCompare();
-    }
-};
-
-class LCompareS : public LInstructionHelper<1, 2, 1>
-{
-  public:
-    LIR_HEADER(CompareS)
-    LCompareS(const LAllocation &left, const LAllocation &right,
-              const LDefinition &temp) {
-        setOperand(0, left);
-        setOperand(1, right);
-        setTemp(0, temp);
-    }
-
-    const LAllocation *left() {
-        return getOperand(0);
-    }
-    const LAllocation *right() {
-        return getOperand(1);
-    }
-    const LDefinition *temp() {
-        return getTemp(0);
-    }
-    MCompare *mir() {
-        return mir_->toCompare();
-    }
-};
-
-class LCompareV : public LCallInstructionHelper<1, 2 * BOX_PIECES, 0>
-{
-  public:
-    LIR_HEADER(CompareV)
-
-    static const size_t LhsInput = 0;
-    static const size_t RhsInput = BOX_PIECES;
-
-    MCompare *mir() const {
         return mir_->toCompare();
     }
 };
@@ -1087,6 +1040,26 @@ class LCompareAndBranch : public LInstructionHelper<0, 2, 0>
     }
 };
 
+class LCompareD : public LInstructionHelper<1, 2, 0>
+{
+  public:
+    LIR_HEADER(CompareD)
+    LCompareD(const LAllocation &left, const LAllocation &right) {
+        setOperand(0, left);
+        setOperand(1, right);
+    }
+
+    const LAllocation *left() {
+        return getOperand(0);
+    }
+    const LAllocation *right() {
+        return getOperand(1);
+    }
+    MCompare *mir() {
+        return mir_->toCompare();
+    }
+};
+
 class LCompareDAndBranch : public LInstructionHelper<0, 2, 0>
 {
     MBasicBlock *ifTrue_;
@@ -1114,6 +1087,31 @@ class LCompareDAndBranch : public LInstructionHelper<0, 2, 0>
     }
     const LAllocation *right() {
         return getOperand(1);
+    }
+    MCompare *mir() {
+        return mir_->toCompare();
+    }
+};
+
+class LCompareS : public LInstructionHelper<1, 2, 1>
+{
+  public:
+    LIR_HEADER(CompareS)
+    LCompareS(const LAllocation &left, const LAllocation &right,
+              const LDefinition &temp) {
+        setOperand(0, left);
+        setOperand(1, right);
+        setTemp(0, temp);
+    }
+
+    const LAllocation *left() {
+        return getOperand(0);
+    }
+    const LAllocation *right() {
+        return getOperand(1);
+    }
+    const LDefinition *temp() {
+        return getTemp(0);
     }
     MCompare *mir() {
         return mir_->toCompare();
@@ -1170,6 +1168,59 @@ class LCompareBAndBranch : public LInstructionHelper<0, BOX_PIECES + 1, 0>
         return ifFalse_;
     }
     MCompare *mir() {
+        return mir_->toCompare();
+    }
+};
+
+class LCompareV : public LInstructionHelper<1, 2 * BOX_PIECES, 0>
+{
+  public:
+    LIR_HEADER(CompareV)
+
+    static const size_t LhsInput = 0;
+    static const size_t RhsInput = BOX_PIECES;
+
+    MCompare *mir() const {
+        return mir_->toCompare();
+    }
+};
+
+class LCompareVAndBranch : public LInstructionHelper<0, 2 * BOX_PIECES, 0>
+{
+    MBasicBlock *ifTrue_;
+    MBasicBlock *ifFalse_;
+
+  public:
+    LIR_HEADER(CompareVAndBranch)
+
+    static const size_t LhsInput = 0;
+    static const size_t RhsInput = BOX_PIECES;
+
+    LCompareVAndBranch(MBasicBlock *ifTrue, MBasicBlock *ifFalse)
+      : ifTrue_(ifTrue),
+        ifFalse_(ifFalse)
+    { }
+
+    MBasicBlock *ifTrue() const {
+        return ifTrue_;
+    }
+    MBasicBlock *ifFalse() const {
+        return ifFalse_;
+    }
+    MCompare *mir() {
+        return mir_->toCompare();
+    }
+};
+
+class LCompareVM : public LCallInstructionHelper<1, 2 * BOX_PIECES, 0>
+{
+  public:
+    LIR_HEADER(CompareVM)
+
+    static const size_t LhsInput = 0;
+    static const size_t RhsInput = BOX_PIECES;
+
+    MCompare *mir() const {
         return mir_->toCompare();
     }
 };
@@ -2760,6 +2811,22 @@ class LCallGetIntrinsicValue : public LCallInstructionHelper<BOX_PIECES, 0, 0>
     }
 };
 
+class LCallsiteCloneCache : public LInstructionHelper<1, 1, 0>
+{
+  public:
+    LIR_HEADER(CallsiteCloneCache);
+
+    LCallsiteCloneCache(const LAllocation &callee) {
+        setOperand(0, callee);
+    }
+    const LAllocation *callee() {
+        return getOperand(0);
+    }
+    const MCallsiteCloneCache *mir() const {
+        return mir_->toCallsiteCloneCache();
+    }
+};
+
 // Patchable jump to stubs generated for a GetProperty cache, which loads a
 // boxed value.
 class LGetPropertyCacheV : public LInstructionHelper<BOX_PIECES, 1, 0>
@@ -3164,16 +3231,17 @@ class LIteratorMore : public LInstructionHelper<1, 1, 1>
     }
 };
 
-class LIteratorEnd : public LInstructionHelper<0, 1, 2>
+class LIteratorEnd : public LInstructionHelper<0, 1, 3>
 {
   public:
     LIR_HEADER(IteratorEnd)
 
     LIteratorEnd(const LAllocation &iterator, const LDefinition &temp1,
-                 const LDefinition &temp2) {
+                 const LDefinition &temp2, const LDefinition &temp3) {
         setOperand(0, iterator);
         setTemp(0, temp1);
         setTemp(1, temp2);
+        setTemp(2, temp3);
     }
     const LAllocation *object() {
         return getOperand(0);
@@ -3183,6 +3251,9 @@ class LIteratorEnd : public LInstructionHelper<0, 1, 2>
     }
     const LDefinition *temp2() {
         return getTemp(1);
+    }
+    const LDefinition *temp3() {
+        return getTemp(2);
     }
     MIteratorEnd *mir() const {
         return mir_->toIteratorEnd();

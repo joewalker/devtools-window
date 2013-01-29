@@ -6,6 +6,7 @@
 #include "gfxMacFont.h"
 #include "gfxCoreTextShaper.h"
 #include "gfxHarfBuzzShaper.h"
+#include <algorithm>
 #ifdef MOZ_GRAPHITE
 #include "gfxGraphiteShaper.h"
 #endif
@@ -120,10 +121,13 @@ gfxMacFont::~gfxMacFont()
 }
 
 bool
-gfxMacFont::ShapeWord(gfxContext *aContext,
-                      gfxShapedWord *aShapedWord,
+gfxMacFont::ShapeText(gfxContext      *aContext,
                       const PRUnichar *aText,
-                      bool aPreferPlatformShaping)
+                      uint32_t         aOffset,
+                      uint32_t         aLength,
+                      int32_t          aScript,
+                      gfxShapedText   *aShapedText,
+                      bool             aPreferPlatformShaping)
 {
     if (!mIsValid) {
         NS_WARNING("invalid font! expect incorrect text rendering");
@@ -132,7 +136,8 @@ gfxMacFont::ShapeWord(gfxContext *aContext,
 
     bool requiresAAT =
         static_cast<MacOSFontEntry*>(GetFontEntry())->RequiresAATLayout();
-    return gfxFont::ShapeWord(aContext, aShapedWord, aText, requiresAAT);
+    return gfxFont::ShapeText(aContext, aText, aOffset, aLength,
+                              aScript, aShapedText, requiresAAT);
 }
 
 void
@@ -209,7 +214,7 @@ gfxMacFont::InitMetrics()
         return;
     }
 
-    mAdjustedSize = NS_MAX(mStyle.size, 1.0);
+    mAdjustedSize = std::max(mStyle.size, 1.0);
     mFUnitsConvFactor = mAdjustedSize / upem;
 
     // For CFF fonts, when scaling values read from CGFont* APIs, we need to

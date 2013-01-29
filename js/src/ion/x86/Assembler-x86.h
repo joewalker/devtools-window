@@ -12,6 +12,7 @@
 #include "assembler/assembler/X86Assembler.h"
 #include "ion/CompactBuffer.h"
 #include "ion/IonCode.h"
+#include "mozilla/Util.h"
 
 #include "jsscriptinlines.h"
 
@@ -54,6 +55,11 @@ static const Register CallTempReg2 = ebx;
 static const Register CallTempReg3 = ecx;
 static const Register CallTempReg4 = esi;
 static const Register CallTempReg5 = edx;
+
+// We have no arg regs, so our NonArgRegs are just our CallTempReg*
+static const Register CallTempNonArgRegs[] = { edi, eax, ebx, ecx, esi, edx };
+static const uint32_t NumCallTempNonArgRegs =
+    mozilla::ArrayLength(CallTempNonArgRegs);
 
 static const Register OsrFrameReg = edx;
 static const Register PreBarrierReg = edx;
@@ -221,7 +227,7 @@ class Assembler : public AssemblerX86Shared
 
     // The buffer is about to be linked, make sure any constant pools or excess
     // bookkeeping has been flushed to the instruction stream.
-    void flush() { }
+    void finish() { }
 
     // Copy the assembly code to the given buffer, and perform any pending
     // relocations relying on the target address.
@@ -363,6 +369,15 @@ class Assembler : public AssemblerX86Shared
         addPendingJump(src, target.asPointer(), Relocation::HARDCODED);
     }
 
+    // Emit a CALL or CMP (nop) instruction. ToggleCall can be used to patch
+    // this instruction.
+    CodeOffsetLabel toggledCall(IonCode *target, bool enabled) {
+        CodeOffsetLabel offset(size());
+        JmpSrc src = enabled ? masm.call() : masm.cmp_eax();
+        addPendingJump(src, target->raw(), Relocation::IONCODE);
+        return offset;
+    }
+
     // Re-routes pending jumps to an external target, flushing the label in the
     // process.
     void retarget(Label *label, void *target, Relocation::Kind reloc) {
@@ -391,6 +406,20 @@ class Assembler : public AssemblerX86Shared
         label->setPrev(masm.size());
     }
 };
+
+// Get a register in which we plan to put a quantity that will be used as an
+// integer argument.  This differs from GetIntArgReg in that if we have no more
+// actual argument registers to use we will fall back on using whatever
+// CallTempReg* don't overlap the argument registers, and only fail once those
+// run out too.
+static inline bool
+GetTempRegForIntArg(uint32_t usedIntArgs, uint32_t usedFloatArgs, Register *out)
+{
+    if (usedIntArgs >= NumCallTempNonArgRegs)
+        return false;
+    *out = CallTempNonArgRegs[usedIntArgs];
+    return true;
+}
 
 } // namespace ion
 } // namespace js

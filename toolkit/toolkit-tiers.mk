@@ -23,12 +23,17 @@ ifdef MOZ_TREE_FREETYPE
 tier_platform_staticdirs += modules/freetype2
 endif
 
-# this must precede xpcom
-ifdef MOZ_DMDV
-tier_platform_dirs += tools/dmdv
+tier_platform_dirs += xpcom
+
+ifndef MOZ_NATIVE_SQLITE
+tier_platform_dirs += db/sqlite3/src
 endif
 
-tier_platform_dirs += xpcom
+ifdef MOZ_PSM
+tier_platform_dirs += \
+  security/build \
+  $(NULL)
+endif
 
 tier_platform_dirs += \
 		modules/libpref \
@@ -132,12 +137,6 @@ ifdef MOZ_SYDNEYAUDIO
 tier_platform_dirs += \
 		media/libsydneyaudio \
 		$(NULL)
-endif
-
-ifdef MOZ_PSM
-tier_platform_dirs += \
-  security/build \
-  $(NULL)
 endif
 
 ifdef MOZ_WEBRTC
@@ -265,7 +264,7 @@ ifdef MOZ_PREF_EXTENSIONS
 tier_platform_dirs += extensions/pref
 endif
 
-tier_platform_dirs += services/crypto/component
+tier_platform_dirs += services
 
 tier_platform_dirs += startupcache
 

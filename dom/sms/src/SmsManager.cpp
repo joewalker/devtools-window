@@ -38,7 +38,6 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED_0(SmsManager, nsDOMEventTargetHelper)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(SmsManager)
   NS_INTERFACE_MAP_ENTRY(nsIDOMMozSmsManager)
   NS_INTERFACE_MAP_ENTRY(nsIObserver)
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMMozSmsManager)
   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(MozSmsManager)
 NS_INTERFACE_MAP_END_INHERITING(nsDOMEventTargetHelper)
 
@@ -130,14 +129,13 @@ SmsManager::Shutdown()
 }
 
 NS_IMETHODIMP
-SmsManager::GetNumberOfMessagesForText(const nsAString& aText, uint16_t* aResult)
+SmsManager::GetSegmentInfoForText(const nsAString& aText,
+                                  nsIDOMMozSmsSegmentInfo** aResult)
 {
   nsCOMPtr<nsISmsService> smsService = do_GetService(SMS_SERVICE_CONTRACTID);
-  NS_ENSURE_TRUE(smsService, NS_OK);
+  NS_ENSURE_TRUE(smsService, NS_ERROR_FAILURE);
 
-  smsService->GetNumberOfMessagesForText(aText, aResult);
-
-  return NS_OK;
+  return smsService->GetSegmentInfoForText(aText, aResult);
 }
 
 nsresult

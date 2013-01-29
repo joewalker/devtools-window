@@ -14,7 +14,6 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.Build;
-import android.os.Debug;
 import android.util.Log;
 
 /**
@@ -151,7 +150,7 @@ class MemoryMonitor extends BroadcastReceiver {
 
         // TODO hook in memory-reduction stuff for different levels here
         if (level >= MEMORY_PRESSURE_MEDIUM) {
-            if (GeckoApp.checkLaunchState(GeckoApp.LaunchState.GeckoRunning)) {
+            if (GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoRunning)) {
                 GeckoAppShell.onLowMemory();
             }
             GeckoAppShell.geckoEventSync();
@@ -209,7 +208,7 @@ class MemoryMonitor extends BroadcastReceiver {
         @Override
         public void run() {
             // this might get run right on startup, if so wait 10 seconds and try again
-            if (!GeckoApp.checkLaunchState(GeckoApp.LaunchState.GeckoRunning)) {
+            if (!GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoRunning)) {
                 GeckoAppShell.getHandler().postDelayed(this, 10000);
                 return;
             }

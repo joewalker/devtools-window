@@ -90,13 +90,7 @@ function unwrapIfWrapped(x) {
 };
 
 function isXrayWrapper(x) {
-  try {
-    return /XrayWrapper/.exec(x.toString());
-  } catch(e) {
-    // The toString() implementation could theoretically throw. But it never
-    // throws for Xray, so we can just assume non-xray in that case.
-    return false;
-  }
+  return Cu.isXrayWrapper(x);
 }
 
 function callGetOwnPropertyDescriptor(obj, name) {
@@ -719,6 +713,14 @@ SpecialPowersAPI.prototype = {
     }
   },
 
+  // Disables the app install prompt for the duration of this test. There is
+  // no need to re-enable the prompt at the end of the test.
+  //
+  // The provided callback is invoked once the prompt is disabled.
+  autoConfirmAppInstall: function(cb) {
+    this.pushPrefEnv({set: [['dom.mozApps.auto_confirm_install', true]]}, cb);
+  },
+
   addObserver: function(obs, notification, weak) {
     var obsvc = Cc['@mozilla.org/observer-service;1']
                    .getService(Ci.nsIObserverService);
@@ -1109,7 +1111,7 @@ SpecialPowersAPI.prototype = {
   },
 
   getFocusedElementForWindow: function(targetWindow, aDeep, childTargetWindow) {
-    this.focusManager.getFocusedElementForWindow(targetWindow, aDeep, childTargetWindow);
+    return this.focusManager.getFocusedElementForWindow(targetWindow, aDeep, childTargetWindow);
   },
 
   activeWindow: function() {

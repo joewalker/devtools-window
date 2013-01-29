@@ -8,16 +8,17 @@
 #include "mozilla/Likely.h"
 
 #include "nsIHttpChannel.h"
+#include "nsSimpleURI.h"
+#include "nsMimeTypes.h"
 
 #include "RasterImage.h"
 #include "VectorImage.h"
 
 #include "ImageFactory.h"
+#include <algorithm>
 
 namespace mozilla {
 namespace image {
-
-const char* SVG_MIMETYPE = "image/svg+xml";
 
 // Global preferences related to image containers.
 static bool gInitializedPrefCaches = false;
@@ -80,28 +81,20 @@ ImageFactory::CreateImage(nsIRequest* aRequest,
                           bool aIsMultiPart,
                           uint32_t aInnerWindowId)
 {
-  nsresult rv;
-
   // Register our pref observers if we haven't yet.
   if (MOZ_UNLIKELY(!gInitializedPrefCaches))
     InitPrefCaches();
-
-  // Get the image's URI string.
-  nsAutoCString uriString;
-  rv = aURI ? aURI->GetSpec(uriString) : NS_ERROR_FAILURE;
-  if (NS_FAILED(rv))
-    uriString.Assign("<unknown image URI>");
 
   // Compute the image's initialization flags.
   uint32_t imageFlags = ComputeImageFlags(aURI, aIsMultiPart);
 
   // Select the type of image to create based on MIME type.
-  if (aMimeType.Equals(SVG_MIMETYPE)) {
+  if (aMimeType.EqualsLiteral(IMAGE_SVG_XML)) {
     return CreateVectorImage(aRequest, aStatusTracker, aMimeType,
-                             uriString, imageFlags, aInnerWindowId);
+                             aURI, imageFlags, aInnerWindowId);
   } else {
     return CreateRasterImage(aRequest, aStatusTracker, aMimeType,
-                             uriString, imageFlags, aInnerWindowId);
+                             aURI, imageFlags, aInnerWindowId);
   }
 }
 
@@ -123,7 +116,7 @@ ImageFactory::CreateAnonymousImage(const nsCString& aMimeType)
 
   nsRefPtr<RasterImage> newImage = new RasterImage();
 
-  rv = newImage->Init(nullptr, aMimeType.get(), "<unknown>", Image::INIT_FLAG_NONE);
+  rv = newImage->Init(nullptr, aMimeType.get(), Image::INIT_FLAG_NONE);
   NS_ENSURE_SUCCESS(rv, BadImage(newImage));
 
   return newImage.forget();
@@ -134,16 +127,16 @@ ImageFactory::CreateAnonymousImage(const nsCString& aMimeType)
 ImageFactory::CreateRasterImage(nsIRequest* aRequest,
                                 imgStatusTracker* aStatusTracker,
                                 const nsCString& aMimeType,
-                                const nsCString& aURIString,
+                                nsIURI* aURI,
                                 uint32_t aImageFlags,
                                 uint32_t aInnerWindowId)
 {
   nsresult rv;
 
-  nsRefPtr<RasterImage> newImage = new RasterImage(aStatusTracker);
+  nsRefPtr<RasterImage> newImage = new RasterImage(aStatusTracker, aURI);
 
   rv = newImage->Init(aStatusTracker->GetDecoderObserver(),
-                      aMimeType.get(), aURIString.get(), aImageFlags);
+                      aMimeType.get(), aImageFlags);
   NS_ENSURE_SUCCESS(rv, BadImage(newImage));
 
   newImage->SetInnerWindowID(aInnerWindowId);
@@ -161,7 +154,7 @@ ImageFactory::CreateRasterImage(nsIRequest* aRequest,
       // its source buffer
       if (len > 0) {
         uint32_t sizeHint = (uint32_t) len;
-        sizeHint = NS_MIN<uint32_t>(sizeHint, 20000000); // Bound by something reasonable
+        sizeHint = std::min<uint32_t>(sizeHint, 20000000); // Bound by something reasonable
         rv = newImage->SetSourceSizeHint(sizeHint);
         if (NS_FAILED(rv)) {
           // Flush memory, try to get some back, and try again
@@ -183,16 +176,16 @@ ImageFactory::CreateRasterImage(nsIRequest* aRequest,
 ImageFactory::CreateVectorImage(nsIRequest* aRequest,
                                 imgStatusTracker* aStatusTracker,
                                 const nsCString& aMimeType,
-                                const nsCString& aURIString,
+                                nsIURI* aURI,
                                 uint32_t aImageFlags,
                                 uint32_t aInnerWindowId)
 {
   nsresult rv;
 
-  nsRefPtr<VectorImage> newImage = new VectorImage(aStatusTracker);
+  nsRefPtr<VectorImage> newImage = new VectorImage(aStatusTracker, aURI);
 
   rv = newImage->Init(aStatusTracker->GetDecoderObserver(),
-                      aMimeType.get(), aURIString.get(), aImageFlags);
+                      aMimeType.get(), aImageFlags);
   NS_ENSURE_SUCCESS(rv, BadImage(newImage));
 
   newImage->SetInnerWindowID(aInnerWindowId);

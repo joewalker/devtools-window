@@ -72,23 +72,62 @@ WebappsRegistry.prototype = {
     return uri.prePath;
   },
 
-  _validateScheme: function(aURL) {
-    let scheme = Services.io.newURI(aURL, null, null).scheme;
-    if (scheme != "http" && scheme != "https") {
+  _validateURL: function(aURL) {
+    let uri;
+    let res;
+    try {
+      uri = Services.io.newURI(aURL, null, null);
+      if (uri.schemeIs("http") || uri.schemeIs("https")) {
+        res = uri.spec;
+      }
+    } catch(e) {
       throw new Components.Exception(
-        "INVALID_URL_SCHEME: '" + scheme + "'; must be 'http' or 'https'",
+        "INVALID_URL: '" + aURL, Cr.NS_ERROR_FAILURE
+      );
+    }
+
+    // The scheme is incorrect, throw an exception.
+    if (!res) {
+      throw new Components.Exception(
+        "INVALID_URL_SCHEME: '" + uri.scheme + "'; must be 'http' or 'https'",
         Cr.NS_ERROR_FAILURE
       );
     }
+    return uri.spec;
+  },
+
+  // Checks that we run as a foreground page, and fire an error on the
+  // DOM Request if we aren't.
+  _ensureForeground: function(aRequest) {
+    let docShell = this._window.QueryInterface(Ci.nsIInterfaceRequestor)
+                               .getInterface(Ci.nsIWebNavigation)
+                               .QueryInterface(Ci.nsIDocShell);
+    if (docShell.isActive) {
+      return true;
+    }
+
+    let runnable = {
+      run: function run() {
+        Services.DOMRequest.fireError(aRequest, "BACKGROUND_APP");
+      }
+    }
+    Services.tm.currentThread.dispatch(runnable,
+                                       Ci.nsIThread.DISPATCH_NORMAL);
+    return false;
   },
 
   // mozIDOMApplicationRegistry implementation
 
   install: function(aURL, aParams) {
-    this._validateScheme(aURL);
+    let uri = this._validateURL(aURL);
+
+    let request = this.createRequest();
+
+    if (!this._ensureForeground(request)) {
+      return request;
+    }
 
     let installURL = this._window.location.href;
-    let request = this.createRequest();
     let requestID = this.getRequestId(request);
     let receipts = (aParams && aParams.receipts &&
                     Array.isArray(aParams.receipts)) ? aParams.receipts
@@ -101,8 +140,8 @@ WebappsRegistry.prototype = {
     cpmm.sendAsyncMessage("Webapps:Install",
                           { app: {
                               installOrigin: this._getOrigin(installURL),
-                              origin: this._getOrigin(aURL),
-                              manifestURL: aURL,
+                              origin: this._getOrigin(uri),
+                              manifestURL: uri,
                               receipts: receipts,
                               categories: categories
                             },
@@ -145,6 +184,10 @@ WebappsRegistry.prototype = {
   },
 
   get mgmt() {
+    if (!this.hasMgmtPrivilege) {
+      return null;
+    }
+
     if (!this._mgmt)
       this._mgmt = new WebappsApplicationMgmt(this._window);
     return this._mgmt;
@@ -159,10 +202,15 @@ WebappsRegistry.prototype = {
   // mozIDOMApplicationRegistry2 implementation
 
   installPackage: function(aURL, aParams) {
-    this._validateScheme(aURL);
+    let uri = this._validateURL(aURL);
+
+    let request = this.createRequest();
+
+    if (!this._ensureForeground(request)) {
+      return request;
+    }
 
     let installURL = this._window.location.href;
-    let request = this.createRequest();
     let requestID = this.getRequestId(request);
     let receipts = (aParams && aParams.receipts &&
                     Array.isArray(aParams.receipts)) ? aParams.receipts
@@ -175,8 +223,8 @@ WebappsRegistry.prototype = {
     cpmm.sendAsyncMessage("Webapps:InstallPackage",
                           { app: {
                               installOrigin: this._getOrigin(installURL),
-                              origin: this._getOrigin(aURL),
-                              manifestURL: aURL,
+                              origin: this._getOrigin(uri),
+                              manifestURL: uri,
                               receipts: receipts,
                               categories: categories
                             },
@@ -197,10 +245,19 @@ WebappsRegistry.prototype = {
                               "Webapps:GetSelf:Return:OK",
                               "Webapps:CheckInstalled:Return:OK" ]);
 
-    let util = this._window.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+    let util = this._window.QueryInterface(Ci.nsIInterfaceRequestor)
+                           .getInterface(Ci.nsIDOMWindowUtils);
     this._id = util.outerWindowID;
     cpmm.sendAsyncMessage("Webapps:RegisterForMessages",
                           ["Webapps:Install:Return:OK"]);
+
+    let principal = aWindow.document.nodePrincipal;
+    let perm = Services.perms
+               .testExactPermissionFromPrincipal(principal, "webapps-manage");
+
+    // Only pages with the webapps-manage permission set can get access to
+    // the mgmt object.
+    this.hasMgmtPrivilege = perm == Ci.nsIPermissionManager.ALLOW_ACTION;
   },
 
   classID: Components.ID("{fff440b3-fae2-45c1-bf03-3b5a2e432270}"),
@@ -318,15 +375,15 @@ WebappsApplication.prototype = {
 
     this._downloadError = null;
 
-    this.initHelper(aWindow, ["Webapps:Uninstall:Return:OK",
-                              "Webapps:Uninstall:Return:KO",
-                              "Webapps:OfflineCache",
+    this.initHelper(aWindow, ["Webapps:OfflineCache",
                               "Webapps:CheckForUpdate:Return:OK",
                               "Webapps:CheckForUpdate:Return:KO",
                               "Webapps:PackageEvent"]);
+
     cpmm.sendAsyncMessage("Webapps:RegisterForMessages",
-                          ["Webapps:Uninstall:Return:OK", "Webapps:OfflineCache",
-                           "Webapps:PackageEvent"]);
+                          ["Webapps:OfflineCache",
+                           "Webapps:PackageEvent",
+                           "Webapps:CheckForUpdate:Return:OK"]);
   },
 
   get manifest() {
@@ -412,14 +469,6 @@ WebappsApplication.prototype = {
     return request;
   },
 
-  uninstall: function() {
-    let request = this.createRequest();
-    cpmm.sendAsyncMessage("Webapps:Uninstall", { origin: this.origin,
-                                                 oid: this._id,
-                                                 requestID: this.getRequestId(request) });
-    return request;
-  },
-
   clearBrowserData: function() {
     let browserChild =
       BrowserElementPromptService.getBrowserElementChildForWindow(this._window);
@@ -431,8 +480,9 @@ WebappsApplication.prototype = {
   uninit: function() {
     this._onprogress = null;
     cpmm.sendAsyncMessage("Webapps:UnregisterForMessages",
-                          ["Webapps:Uninstall:Return:OK", "Webapps:OfflineCache",
-                           "Webapps:PackageEvent"]);
+                          ["Webapps:OfflineCache",
+                           "Webapps:PackageEvent",
+                           "Webapps:CheckForUpdate:Return:OK"]);
   },
 
   _fireEvent: function(aName, aHandler) {
@@ -445,22 +495,37 @@ WebappsApplication.prototype = {
   receiveMessage: function(aMessage) {
     let msg = aMessage.json;
     let req = this.takeRequest(msg.requestID);
+
+    // ondownload* callbacks should be triggered on all app instances
     if ((msg.oid != this._id || !req) &&
         aMessage.name !== "Webapps:OfflineCache" &&
-        aMessage.name !== "Webapps:PackageEvent")
+        aMessage.name !== "Webapps:PackageEvent" &&
+        aMessage.name !== "Webapps:CheckForUpdate:Return:OK")
       return;
     switch (aMessage.name) {
-      case "Webapps:Uninstall:Return:OK":
-        Services.DOMRequest.fireSuccess(req, msg.origin);
-        break;
-      case "Webapps:Uninstall:Return:KO":
-        Services.DOMRequest.fireError(req, "NOT_INSTALLED");
-        break;
       case "Webapps:Launch:Return:KO":
         Services.DOMRequest.fireError(req, "APP_INSTALL_PENDING");
         break;
-      case "Webapps:Uninstall:Return:KO":
-        Services.DOMRequest.fireError(req, "NOT_INSTALLED");
+      case "Webapps:CheckForUpdate:Return:KO":
+        Services.DOMRequest.fireError(req, msg.error);
+        break;
+      case "Webapps:CheckForUpdate:Return:OK":
+        if (msg.manifestURL != this.manifestURL)
+          return;
+
+        for (let prop in msg.app) {
+          this[prop] = msg.app[prop];
+        }
+
+        if (msg.event == "downloadapplied") {
+          this._fireEvent("downloadapplied", this._ondownloadapplied);
+        } else if (msg.event == "downloadavailable") {
+          this._fireEvent("downloadavailable", this._ondownloadavailable);
+        }
+
+        if (req) {
+          Services.DOMRequest.fireSuccess(req, this.manifestURL);
+        }
         break;
       case "Webapps:OfflineCache":
         if (msg.manifest != this.manifestURL)
@@ -468,6 +533,7 @@ WebappsApplication.prototype = {
 
         if ("installState" in msg) {
           this.installState = msg.installState;
+          this.progress = msg.progress;
           if (this.installState == "installed") {
             this._downloadError = null;
             this.downloading = false;
@@ -482,58 +548,48 @@ WebappsApplication.prototype = {
           this._fireEvent("downloaderror", this._ondownloaderror);
         }
         break;
-        case "Webapps:CheckForUpdate:Return:OK":
-          for (let prop in msg.app) {
-            this[prop] = msg.app[prop];
-          }
-          if (msg.event == "downloadapplied") {
-            Services.DOMRequest.fireSuccess(req, this.manifestURL);
+      case "Webapps:PackageEvent":
+        if (msg.manifestURL != this.manifestURL)
+          return;
+
+        // Set app values according to parent process results.
+        let app = msg.app;
+        this.downloading = app.downloading;
+        this.downloadAvailable = app.downloadAvailable;
+        this.downloadSize = app.downloadSize || 0;
+        this.installState = app.installState;
+        this.progress = app.progress || msg.progress || 0;
+        this.readyToApplyDownload = app.readyToApplyDownload;
+        this.updateTime = app.updateTime;
+
+        switch(msg.type) {
+          case "error":
+          case "canceled":
+            this._downloadError = msg.error;
+            this._fireEvent("downloaderror", this._ondownloaderror);
+            break;
+          case "progress":
+            this._fireEvent("downloadprogress", this._onprogress);
+            break;
+          case "installed":
+            this._manifest = msg.manifest;
+            this._fireEvent("downloadsuccess", this._ondownloadsuccess);
             this._fireEvent("downloadapplied", this._ondownloadapplied);
-          } else if (msg.event == "downloadavailable") {
-            Services.DOMRequest.fireSuccess(req, this.manifestURL);
-            this._fireEvent("downloadavailable", this._ondownloadavailable);
-          }
-          break;
-        case "Webapps:CheckForUpdate:Return:KO":
-          Services.DOMRequest.fireError(req, msg.error);
-          break;
-        case "Webapps:PackageEvent":
-          if (msg.manifestURL != this.manifestURL)
-            return;
-
-          // Set app values according to parent process results.
-          let app = msg.app;
-          this.downloading = app.downloading;
-          this.downloadAvailable = app.downloadAvailable;
-          this.downloadSize = app.downloadSize || 0;
-          this.installState = app.installState;
-          this.progress = app.progress || msg.progress || 0;
-          this.readyToApplyDownload = app.readyToApplyDownload;
-          this.updateTime = app.updateTime;
-
-          switch(msg.type) {
-            case "error":
-            case "canceled":
-              this._downloadError = msg.error;
-              this._fireEvent("downloaderror", this._ondownloaderror);
-              break;
-            case "progress":
-              this._fireEvent("downloadprogress", this._onprogress);
-              break;
-            case "installed":
+            break;
+          case "downloaded":
+            // We don't update the packaged apps manifests until they
+            // are installed or until the update is unstaged.
+            if (msg.manifest) {
               this._manifest = msg.manifest;
-              this._fireEvent("downloadsuccess", this._ondownloadsuccess);
-              this._fireEvent("downloadapplied", this._ondownloadapplied);
-              break;
-            case "downloaded":
-              this._manifest = msg.manifest;
-              this._fireEvent("downloadsuccess", this._ondownloadsuccess);
-              break;
-            case "applied":
-              this._fireEvent("downloadapplied", this._ondownloadapplied);
-              break;
-          }
-          break;
+            }
+            this._fireEvent("downloadsuccess", this._ondownloadsuccess);
+            break;
+          case "applied":
+            this._manifest = msg.manifest;
+            this._fireEvent("downloadapplied", this._ondownloadapplied);
+            break;
+        }
+        break;
     }
   },
 
@@ -552,22 +608,18 @@ WebappsApplication.prototype = {
   * mozIDOMApplicationMgmt object
   */
 function WebappsApplicationMgmt(aWindow) {
-  let principal = aWindow.document.nodePrincipal;
-  let secMan = Cc["@mozilla.org/scriptsecuritymanager;1"].getService(Ci.nsIScriptSecurityManager);
-
-  let perm = principal == secMan.getSystemPrincipal()
-               ? Ci.nsIPermissionManager.ALLOW_ACTION
-               : Services.perms.testExactPermissionFromPrincipal(principal, "webapps-manage");
-
-  //only pages with perm set can use some functions
-  this.hasPrivileges = perm == Ci.nsIPermissionManager.ALLOW_ACTION;
-
-  this.initHelper(aWindow, ["Webapps:GetAll:Return:OK", "Webapps:GetAll:Return:KO",
-                            "Webapps:Install:Return:OK", "Webapps:Uninstall:Return:OK",
+  this.initHelper(aWindow, ["Webapps:GetAll:Return:OK",
+                            "Webapps:GetAll:Return:KO",
+                            "Webapps:Uninstall:Return:OK",
+                            "Webapps:Uninstall:Broadcast:Return:OK",
+                            "Webapps:Uninstall:Return:KO",
+                            "Webapps:Install:Return:OK",
                             "Webapps:GetNotInstalled:Return:OK"]);
 
   cpmm.sendAsyncMessage("Webapps:RegisterForMessages",
-                        ["Webapps:Install:Return:OK", "Webapps:Uninstall:Return:OK"]);
+                        ["Webapps:Install:Return:OK",
+                         "Webapps:Uninstall:Return:OK",
+                         "Webapps:Uninstall:Broadcast:Return:OK"]);
 
   this._oninstall = null;
   this._onuninstall = null;
@@ -587,7 +639,9 @@ WebappsApplicationMgmt.prototype = {
     this._oninstall = null;
     this._onuninstall = null;
     cpmm.sendAsyncMessage("Webapps:UnregisterForMessages",
-                          ["Webapps:Install:Return:OK", "Webapps:Uninstall:Return:OK"]);
+                          ["Webapps:Install:Return:OK",
+                           "Webapps:Uninstall:Return:OK",
+                           "Webapps:Uninstall:Broadcast:Return:OK"]);
   },
 
   applyDownload: function(aApp) {
@@ -599,11 +653,19 @@ WebappsApplicationMgmt.prototype = {
                           { manifestURL: aApp.manifestURL });
   },
 
+  uninstall: function(aApp) {
+    dump("-- webapps.js uninstall " + aApp.manifestURL + "\n");
+    let request = this.createRequest();
+    cpmm.sendAsyncMessage("Webapps:Uninstall", { origin: aApp.origin,
+                                                 oid: this._id,
+                                                 requestID: this.getRequestId(request) });
+    return request;
+  },
+
   getAll: function() {
     let request = this.createRequest();
     cpmm.sendAsyncMessage("Webapps:GetAll", { oid: this._id,
-                                              requestID: this.getRequestId(request),
-                                              hasPrivileges: this.hasPrivileges });
+                                              requestID: this.getRequestId(request) });
     return request;
   },
 
@@ -623,27 +685,23 @@ WebappsApplicationMgmt.prototype = {
   },
 
   set oninstall(aCallback) {
-    if (this.hasPrivileges)
-      this._oninstall = aCallback;
-    else
-      throw new Components.Exception("Denied", Cr.NS_ERROR_FAILURE);
+    this._oninstall = aCallback;
   },
 
   set onuninstall(aCallback) {
-    if (this.hasPrivileges)
-      this._onuninstall = aCallback;
-    else
-      throw new Components.Exception("Denied", Cr.NS_ERROR_FAILURE);
+    this._onuninstall = aCallback;
   },
 
   receiveMessage: function(aMessage) {
     var msg = aMessage.json;
     let req = this.getRequest(msg.requestID);
-    // We want Webapps:Install:Return:OK and Webapps:Uninstall:Return:OK to be boradcasted
-    // to all instances of mozApps.mgmt
-    if (!((msg.oid == this._id && req)
-       || aMessage.name == "Webapps:Install:Return:OK" || aMessage.name == "Webapps:Uninstall:Return:OK"))
+    // We want Webapps:Install:Return:OK and Webapps:Uninstall:Broadcast:Return:OK
+    // to be boradcasted to all instances of mozApps.mgmt.
+    if (!((msg.oid == this._id && req) ||
+          aMessage.name == "Webapps:Install:Return:OK" ||
+          aMessage.name == "Webapps:Uninstall:Broadcast:Return:OK")) {
       return;
+    }
     switch (aMessage.name) {
       case "Webapps:GetAll:Return:OK":
         Services.DOMRequest.fireSuccess(req, convertAppsArray(msg.apps, this._window));
@@ -662,7 +720,7 @@ WebappsApplicationMgmt.prototype = {
           this._oninstall.handleEvent(event);
         }
         break;
-      case "Webapps:Uninstall:Return:OK":
+      case "Webapps:Uninstall:Broadcast:Return:OK":
         if (this._onuninstall) {
           let detail = {
             manifestURL: msg.manifestURL,
@@ -673,8 +731,16 @@ WebappsApplicationMgmt.prototype = {
           this._onuninstall.handleEvent(event);
         }
         break;
+      case "Webapps:Uninstall:Return:OK":
+        Services.DOMRequest.fireSuccess(req, msg.origin);
+        break;
+      case "Webapps:Uninstall:Return:KO":
+        Services.DOMRequest.fireError(req, "NOT_INSTALLED");
+        break;
     }
-    this.removeRequest(msg.requestID);
+    if (aMessage.name !== "Webapps:Uninstall:Broadcast:Return:OK") {
+      this.removeRequest(msg.requestID);
+    }
   },
 
   classID: Components.ID("{8c1bca96-266f-493a-8d57-ec7a95098c15}"),

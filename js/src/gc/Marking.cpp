@@ -8,17 +8,17 @@
 #include "mozilla/DebugOnly.h"
 
 #include "jsprf.h"
-#include "jsscope.h"
 #include "jsstr.h"
 #include "jsxml.h"
 
 #include "gc/Marking.h"
 #include "methodjit/MethodJIT.h"
+#include "vm/Shape.h"
 
 #include "jsobjinlines.h"
-#include "jsscopeinlines.h"
 
 #include "ion/IonCode.h"
+#include "vm/Shape-inl.h"
 #include "vm/String-inl.h"
 
 using namespace js;
@@ -119,8 +119,8 @@ CheckMarkedThing(JSTracer *trc, T *thing)
 {
     JS_ASSERT(trc);
     JS_ASSERT(thing);
-    JS_ASSERT(thing->compartment());
-    JS_ASSERT(thing->compartment()->rt == trc->runtime);
+    JS_ASSERT(thing->zone());
+    JS_ASSERT(thing->zone()->rt == trc->runtime);
     JS_ASSERT(trc->debugPrinter || trc->debugPrintArg);
 
     DebugOnly<JSRuntime *> rt = trc->runtime;
@@ -132,19 +132,26 @@ CheckMarkedThing(JSTracer *trc, T *thing)
     rt->assertValidThread();
 #endif
 
-    JS_ASSERT_IF(thing->compartment()->requireGCTracer(), IS_GC_MARKING_TRACER(trc));
+    JS_ASSERT_IF(thing->zone()->requireGCTracer(), IS_GC_MARKING_TRACER(trc));
 
     JS_ASSERT(thing->isAligned());
 
     JS_ASSERT_IF(rt->gcStrictCompartmentChecking,
-                 thing->compartment()->isCollecting() ||
+                 thing->zone()->isCollecting() ||
                  thing->compartment() == rt->atomsCompartment);
 
     JS_ASSERT_IF(IS_GC_MARKING_TRACER(trc) && ((GCMarker *)trc)->getMarkColor() == GRAY,
-                 thing->compartment()->isGCMarkingGray() ||
+                 thing->zone()->isGCMarkingGray() ||
                  thing->compartment() == rt->atomsCompartment);
 
-    JS_ASSERT(!IsThingPoisoned(thing));
+    /*
+     * Try to assert that the thing is allocated.  This is complicated by the
+     * fact that allocated things may still contain the poison pattern if that
+     * part has not been overwritten, and that the free span list head in the
+     * ArenaHeader may not be synced with the real one in ArenaLists.
+     */
+    JS_ASSERT_IF(IsThingPoisoned(thing) && rt->isHeapBusy(),
+                 !InFreeList(thing->arenaHeader(), thing));
 }
 
 static GCMarker *
@@ -169,7 +176,7 @@ MarkInternal(JSTracer *trc, T **thingp)
      * GC.
      */
     if (!trc->callback) {
-        if (thing->compartment()->isGCMarking()) {
+        if (thing->zone()->isGCMarking()) {
             PushMarkStack(AsGCMarker(trc), thing);
             thing->compartment()->maybeAlive = true;
         }
@@ -252,8 +259,8 @@ IsMarked(T **thingp)
 {
     JS_ASSERT(thingp);
     JS_ASSERT(*thingp);
-    JSCompartment *c = (*thingp)->compartment();
-    if (!c->isCollecting() || c->isGCFinished())
+    Zone *zone = (*thingp)->zone();
+    if (!zone->isCollecting() || zone->isGCFinished())
         return true;
     return (*thingp)->isMarked();
 }
@@ -264,7 +271,7 @@ IsAboutToBeFinalized(T **thingp)
 {
     JS_ASSERT(thingp);
     JS_ASSERT(*thingp);
-    if (!(*thingp)->compartment()->isGCSweeping())
+    if (!(*thingp)->zone()->isGCSweeping())
         return false;
     return !(*thingp)->isMarked();
 }
@@ -332,7 +339,6 @@ DeclMarkerImpl(Object, DebugScopeObject)
 DeclMarkerImpl(Object, GlobalObject)
 DeclMarkerImpl(Object, JSObject)
 DeclMarkerImpl(Object, JSFunction)
-DeclMarkerImpl(Object, RegExpObject)
 DeclMarkerImpl(Object, ScopeObject)
 DeclMarkerImpl(Script, JSScript)
 DeclMarkerImpl(Shape, Shape)
@@ -492,6 +498,24 @@ MarkValueInternal(JSTracer *trc, Value *v)
     }
 }
 
+static inline void
+MarkValueInternalMaybeNullPayload(JSTracer *trc, Value *v)
+{
+    if (v->isMarkable()) {
+        void *thing = v->toGCThing();
+        if (thing) {
+            JS_SET_TRACING_LOCATION(trc, (void *)v);
+            MarkKind(trc, &thing, v->gcKind());
+            if (v->isString())
+                v->setString((JSString *)thing);
+            else
+                v->setObjectOrNull((JSObject *)thing);
+            return;
+        }
+    }
+    JS_UNSET_TRACING_LOCATION(trc);
+}
+
 void
 gc::MarkValue(JSTracer *trc, EncapsulatedValue *v, const char *name)
 {
@@ -539,6 +563,16 @@ gc::MarkValueRootRange(JSTracer *trc, size_t len, Value *vec, const char *name)
     for (size_t i = 0; i < len; ++i) {
         JS_SET_TRACING_INDEX(trc, name, i);
         MarkValueInternal(trc, &vec[i]);
+    }
+}
+
+void
+gc::MarkValueRootRangeMaybeNullPayload(JSTracer *trc, size_t len, Value *vec, const char *name)
+{
+    JS_ROOT_MARKING_ASSERT(trc);
+    for (size_t i = 0; i < len; ++i) {
+        JS_SET_TRACING_INDEX(trc, name, i);
+        MarkValueInternalMaybeNullPayload(trc, &vec[i]);
     }
 }
 
@@ -610,7 +644,7 @@ ShouldMarkCrossCompartment(JSTracer *trc, RawObject src, Cell *cell)
     if (!IS_GC_MARKING_TRACER(trc))
         return true;
 
-    JSCompartment *c = cell->compartment();
+    JS::Zone *zone = cell->zone();
     uint32_t color = AsGCMarker(trc)->getMarkColor();
 
     JS_ASSERT(color == BLACK || color == GRAY);
@@ -623,12 +657,12 @@ ShouldMarkCrossCompartment(JSTracer *trc, RawObject src, Cell *cell)
          * but the source was marked black by the conservative scanner.
          */
         if (cell->isMarked(GRAY)) {
-            JS_ASSERT(!cell->compartment()->isCollecting());
+            JS_ASSERT(!zone->isCollecting());
             trc->runtime->gcFoundBlackGrayEdges = true;
         }
-        return c->isGCMarking();
+        return zone->isGCMarking();
     } else {
-        if (c->isGCMarkingBlack()) {
+        if (zone->isGCMarkingBlack()) {
             /*
              * The destination compartment is being not being marked gray now,
              * but it will be later, so record the cell so it can be marked gray
@@ -638,7 +672,7 @@ ShouldMarkCrossCompartment(JSTracer *trc, RawObject src, Cell *cell)
                 DelayCrossCompartmentGrayMarking(src);
             return false;
         }
-        return c->isGCMarkingGray();
+        return zone->isGCMarkingGray();
     }
 }
 
@@ -695,10 +729,10 @@ gc::IsCellAboutToBeFinalized(Cell **thingp)
 /*** Push Mark Stack ***/
 
 #define JS_COMPARTMENT_ASSERT(rt, thing)                                \
-    JS_ASSERT((thing)->compartment()->isGCMarking())
+    JS_ASSERT((thing)->zone()->isGCMarking())
 
 #define JS_COMPARTMENT_ASSERT_STR(rt, thing)                            \
-    JS_ASSERT((thing)->compartment()->isGCMarking() ||                  \
+    JS_ASSERT((thing)->zone()->isGCMarking() ||                         \
               (thing)->compartment() == (rt)->atomsCompartment);
 
 #if JS_HAS_XML_SUPPORT
@@ -1144,7 +1178,7 @@ struct SlotArrayLayout
 {
     union {
         HeapSlot *end;
-        js::Class *clasp;
+        HeapSlot::Kind kind;
     };
     union {
         HeapSlot *start;
@@ -1163,12 +1197,8 @@ struct SlotArrayLayout
  * the entire stack. At that point, JS code can run and reallocate slot arrays
  * that are stored on the stack. To prevent this from happening, we replace all
  * ValueArrayTag stack items with SavedValueArrayTag. In the latter, slots
- * pointers are replaced with slot indexes.
- *
- * We also replace the slot array end pointer (which can be derived from the obj
- * pointer) with the object's class. During JS executation, array slowification
- * can cause the layout of slots to change. We can observe that slowification
- * happened if the class changed; in that case, we completely rescan the array.
+ * pointers are replaced with slot indexes, and slot array end pointers are
+ * replaced with the kind of index (properties vs. elements).
  */
 void
 GCMarker::saveValueRanges()
@@ -1176,15 +1206,17 @@ GCMarker::saveValueRanges()
     for (uintptr_t *p = stack.tos; p > stack.stack; ) {
         uintptr_t tag = *--p & StackTagMask;
         if (tag == ValueArrayTag) {
+            *p &= ~StackTagMask;
             p -= 2;
             SlotArrayLayout *arr = reinterpret_cast<SlotArrayLayout *>(p);
             JSObject *obj = arr->obj;
+            JS_ASSERT(obj->isNative());
 
-            if (obj->getClass() == &ArrayClass) {
-                HeapSlot *vp = obj->getDenseArrayElements();
-                JS_ASSERT(arr->start >= vp &&
-                          arr->end == vp + obj->getDenseArrayInitializedLength());
+            HeapSlot *vp = obj->getDenseElements();
+            if (arr->end == vp + obj->getDenseInitializedLength()) {
+                JS_ASSERT(arr->start >= vp);
                 arr->index = arr->start - vp;
+                arr->kind = HeapSlot::Element;
             } else {
                 HeapSlot *vp = obj->fixedSlots();
                 unsigned nfixed = obj->numFixedSlots();
@@ -1198,8 +1230,8 @@ GCMarker::saveValueRanges()
                               arr->end == obj->slots + obj->slotSpan() - nfixed);
                     arr->index = (arr->start - obj->slots) + nfixed;
                 }
+                arr->kind = HeapSlot::Slot;
             }
-            arr->clasp = obj->getClass();
             p[2] |= SavedValueArrayTag;
         } else if (tag == SavedValueArrayTag) {
             p -= 2;
@@ -1211,17 +1243,14 @@ bool
 GCMarker::restoreValueArray(JSObject *obj, void **vpp, void **endp)
 {
     uintptr_t start = stack.pop();
-    js::Class *clasp = reinterpret_cast<js::Class *>(stack.pop());
+    HeapSlot::Kind kind = (HeapSlot::Kind) stack.pop();
 
-    JS_ASSERT(obj->getClass() == clasp ||
-              (clasp == &ArrayClass && obj->getClass() == &SlowArrayClass));
-
-    if (clasp == &ArrayClass) {
+    if (kind == HeapSlot::Element) {
         if (obj->getClass() != &ArrayClass)
             return false;
 
-        uint32_t initlen = obj->getDenseArrayInitializedLength();
-        HeapSlot *vp = obj->getDenseArrayElements();
+        uint32_t initlen = obj->getDenseInitializedLength();
+        HeapSlot *vp = obj->getDenseElements();
         if (start < initlen) {
             *vpp = vp + start;
             *endp = vp + initlen;
@@ -1230,6 +1259,7 @@ GCMarker::restoreValueArray(JSObject *obj, void **vpp, void **endp)
             *vpp = *endp = vp;
         }
     } else {
+        JS_ASSERT(kind == HeapSlot::Slot);
         HeapSlot *vp = obj->fixedSlots();
         unsigned nfixed = obj->numFixedSlots();
         unsigned nslots = obj->slotSpan();
@@ -1383,18 +1413,11 @@ GCMarker::processMarkStackTop(SliceBudget &budget)
         PushMarkStack(this, shape);
 
         /* Call the trace hook if necessary. */
-        Class *clasp = shape->getObjectClass();
+        Class *clasp = type->clasp;
         if (clasp->trace) {
-            if (clasp == &ArrayClass) {
-                JS_ASSERT(!shape->isNative());
-                vp = obj->getDenseArrayElements();
-                end = vp + obj->getDenseArrayInitializedLength();
-                goto scan_value_array;
-            } else {
-                JS_ASSERT_IF(runtime->gcMode == JSGC_MODE_INCREMENTAL &&
-                             runtime->gcIncrementalEnabled,
-                             clasp->flags & JSCLASS_IMPLEMENTS_BARRIERS);
-            }
+            JS_ASSERT_IF(runtime->gcMode == JSGC_MODE_INCREMENTAL &&
+                         runtime->gcIncrementalEnabled,
+                         clasp->flags & JSCLASS_IMPLEMENTS_BARRIERS);
             clasp->trace(this, obj);
         }
 
@@ -1402,6 +1425,15 @@ GCMarker::processMarkStackTop(SliceBudget &budget)
             return;
 
         unsigned nslots = obj->slotSpan();
+
+        if (!obj->hasEmptyElements()) {
+            vp = obj->getDenseElements();
+            end = vp + obj->getDenseInitializedLength();
+            if (!nslots)
+                goto scan_value_array;
+            pushValueArray(obj, vp, end);
+        }
+
         vp = obj->fixedSlots();
         if (obj->slots) {
             unsigned nfixed = obj->numFixedSlots();
@@ -1562,6 +1594,21 @@ struct UnmarkGrayTracer : public JSTracer
  * black in step 2 above. This must be done on everything reachable from the
  * object being returned. The following code takes care of the recursive
  * re-coloring.
+ *
+ * There is an additional complication for certain kinds of edges that are not
+ * contained explicitly in the source object itself, such as from a weakmap key
+ * to its value, and from an object being watched by a watchpoint to the
+ * watchpoint's closure. These "implicit edges" are represented in some other
+ * container object, such as the weakmap or the watchpoint itself. In these
+ * cases, calling unmark gray on an object won't find all of its children.
+ *
+ * Handling these implicit edges has two parts:
+ * - A special pass enumerating all of the containers that know about the
+ *   implicit edges to fix any black-gray edges that have been created. This
+ *   is implemented in nsXPConnect::FixWeakMappingGrayBits.
+ * - To prevent any incorrectly gray objects from escaping to live JS outside
+ *   of the containers, we must add unmark-graying read barriers to these
+ *   containers.
  */
 static void
 UnmarkGrayChildren(JSTracer *trc, void **thingp, JSGCTraceKind kind)
@@ -1613,7 +1660,7 @@ UnmarkGrayChildren(JSTracer *trc, void **thingp, JSGCTraceKind kind)
 }
 
 JS_FRIEND_API(void)
-js::UnmarkGrayGCThingRecursively(void *thing, JSGCTraceKind kind)
+JS::UnmarkGrayGCThingRecursively(void *thing, JSGCTraceKind kind)
 {
     JS_ASSERT(kind != JSTRACE_SHAPE);
 

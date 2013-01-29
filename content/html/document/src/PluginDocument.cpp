@@ -9,6 +9,7 @@
 #include "nsIPresShell.h"
 #include "nsIObjectFrame.h"
 #include "nsNPAPIPluginInstance.h"
+#include "nsIDocumentInlines.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsNodeInfoManager.h"
 #include "nsContentCreatorFunctions.h"
@@ -107,7 +108,6 @@ PluginDocument::PluginDocument()
 PluginDocument::~PluginDocument()
 {}
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(PluginDocument)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(PluginDocument, MediaDocument)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPluginContent)

@@ -13,7 +13,6 @@
 #include "mozilla/dom/workers/Workers.h"
 #include "mozilla/ErrorResult.h"
 
-#include "jsapi.h"
 #include "jsfriendapi.h"
 #include "jswrapper.h"
 
@@ -23,6 +22,7 @@
 #include "nsTraceRefcnt.h"
 #include "nsWrapperCacheInlines.h"
 #include "mozilla/Likely.h"
+#include "mozilla/dom/BindingDeclarations.h"
 
 // nsGlobalWindow implements nsWrapperCache, but doesn't always use it. Don't
 // try to use it without fixing that first.
@@ -193,7 +193,7 @@ UnwrapObject(JSContext* cx, JSObject* obj, U& value)
 }
 
 inline bool
-IsArrayLike(JSContext* cx, JSObject* obj)
+IsNotDateOrRegExp(JSContext* cx, JSObject* obj)
 {
   MOZ_ASSERT(obj);
   // For simplicity, check for security wrappers up front.  In case we
@@ -210,36 +210,33 @@ IsArrayLike(JSContext* cx, JSObject* obj)
     ac.construct(cx, obj);
   }
 
-  // XXXbz need to detect platform objects (including listbinding
-  // ones) with indexGetters here!
-  return JS_IsArrayObject(cx, obj) || JS_IsTypedArrayObject(obj);
+  // Everything except dates and regexps is arraylike
+  return !JS_ObjectIsDate(cx, obj) && !JS_ObjectIsRegExp(cx, obj);
 }
 
-inline bool
-IsPlatformObject(JSContext* cx, JSObject* obj)
+MOZ_ALWAYS_INLINE bool
+IsArrayLike(JSContext* cx, JSObject* obj)
 {
-  // XXXbz Should be treating list-binding objects as platform objects
-  // too?  The one consumer so far wants non-array-like platform
-  // objects, so listbindings that have an indexGetter should test
-  // false from here.  Maybe this function should have a different
-  // name?
-  MOZ_ASSERT(obj);
-  // Fast-path the common case
-  JSClass* clasp = js::GetObjectJSClass(obj);
-  if (IsDOMClass(clasp)) {
-    return true;
-  }
-  // Now for simplicity check for security wrappers before anything else
-  if (js::IsWrapper(obj)) {
-    obj = xpc::Unwrap(cx, obj, false);
-    if (!obj) {
-      // Let's say it's not
-      return false;
-    }
-    clasp = js::GetObjectJSClass(obj);
-  }
-  return IS_WRAPPER_CLASS(js::Valueify(clasp)) || IsDOMClass(clasp) ||
-    JS_IsArrayBufferObject(obj);
+  return IsNotDateOrRegExp(cx, obj);
+}
+
+MOZ_ALWAYS_INLINE bool
+IsConvertibleToDictionary(JSContext* cx, JSObject* obj)
+{
+  return IsNotDateOrRegExp(cx, obj);
+}
+
+MOZ_ALWAYS_INLINE bool
+IsConvertibleToDictionary(JSContext* cx, JS::Value val)
+{
+  return val.isNullOrUndefined() ||
+    (val.isObject() && IsConvertibleToDictionary(cx, &val.toObject()));
+}
+
+MOZ_ALWAYS_INLINE bool
+IsConvertibleToCallbackInterface(JSContext* cx, JSObject* obj)
+{
+  return IsNotDateOrRegExp(cx, obj);
 }
 
 // U must be something that a T* can be assigned to (e.g. T* or an nsRefPtr<T>).
@@ -367,20 +364,6 @@ DefineUnforgeableAttributes(JSContext* cx, JSObject* obj,
 
 bool
 DefineWebIDLBindingPropertiesOnXPCProto(JSContext* cx, JSObject* proto, const NativeProperties* properties);
-
-// If *vp is an object and *vp and obj are not in the same compartment, wrap *vp
-// into the compartment of obj (typically by replacing it with an Xray or
-// cross-compartment wrapper around the original object).
-inline bool
-MaybeWrapValue(JSContext* cx, JSObject* obj, JS::Value* vp)
-{
-  if (vp->isObject() &&
-      js::GetObjectCompartment(&vp->toObject()) != js::GetContextCompartment(cx)) {
-    return JS_WrapValue(cx, vp);
-  }
-
-  return true;
-}
 
 #ifdef _MSC_VER
 #define HAS_MEMBER_CHECK(_name)                                           \
@@ -515,6 +498,42 @@ SetSystemOnlyWrapper(JSObject* obj, nsWrapperCache* cache, JSObject& wrapper)
 {
   SetSystemOnlyWrapperSlot(obj, JS::ObjectValue(wrapper));
   cache->SetHasSystemOnlyWrapper();
+}
+
+// If *vp is a gcthing and is not in the compartment of cx, wrap *vp
+// into the compartment of cx (typically by replacing it with an Xray or
+// cross-compartment wrapper around the original object).
+MOZ_ALWAYS_INLINE bool
+MaybeWrapValue(JSContext* cx, JS::Value* vp)
+{
+  if (vp->isGCThing()) {
+    void* gcthing = vp->toGCThing();
+    // Might be null if vp.isNull() :(
+    if (gcthing &&
+        js::GetGCThingCompartment(gcthing) != js::GetContextCompartment(cx)) {
+      return JS_WrapValue(cx, vp);
+    }
+
+    // We're same-compartment, but even then we might need to wrap
+    // objects specially.  Check for that.
+    if (vp->isObject()) {
+      JSObject* obj = &vp->toObject();
+      if (GetSameCompartmentWrapperForDOMBinding(obj)) {
+        // We're a new-binding object, and "obj" now points to the right thing
+        *vp = JS::ObjectValue(*obj);
+        return true;
+      }
+
+      if (!IS_SLIM_WRAPPER(obj)) {
+        // We might need a SOW
+        return JS_WrapValue(cx, vp);
+      }
+
+      // Fall through to returning true
+    }
+  }
+
+  return true;
 }
 
 static inline void
@@ -683,19 +702,37 @@ HandleNewBindingWrappingFailure(JSContext* cx, JSObject* scope, T* value,
                                                   nullptr, true);
 }
 
-// Helper for smart pointers (nsAutoPtr/nsRefPtr/nsCOMPtr).
-template <template <typename> class SmartPtr, class T>
-MOZ_ALWAYS_INLINE bool
-HandleNewBindingWrappingFailure(JSContext* cx, JSObject* scope,
-                                const SmartPtr<T>& value, JS::Value* vp)
-{
-  return HandleNewBindingWrappingFailure(cx, scope, value.get(), vp);
-}
+// Helper for calling HandleNewBindingWrappingFailure with smart pointers
+// (nsAutoPtr/nsRefPtr/nsCOMPtr) or references.
+HAS_MEMBER(get)
 
-struct EnumEntry {
-  const char* value;
-  size_t length;
+template <class T, bool isSmartPtr=HasgetMember<T>::Value>
+struct HandleNewBindingWrappingFailureHelper
+{
+  static inline bool Wrap(JSContext* cx, JSObject* scope, const T& value,
+                          JS::Value* vp)
+  {
+    return HandleNewBindingWrappingFailure(cx, scope, value.get(), vp);
+  }
 };
+
+template <class T>
+struct HandleNewBindingWrappingFailureHelper<T, false>
+{
+  static inline bool Wrap(JSContext* cx, JSObject* scope, T& value,
+                          JS::Value* vp)
+  {
+    return HandleNewBindingWrappingFailure(cx, scope, &value, vp);
+  }
+};
+
+template<class T>
+inline bool
+HandleNewBindingWrappingFailure(JSContext* cx, JSObject* scope, T& value,
+                                JS::Value* vp)
+{
+  return HandleNewBindingWrappingFailureHelper<T>::Wrap(cx, scope, value, vp);
+}
 
 template<bool Fatal>
 inline bool
@@ -824,6 +861,17 @@ ClearWrapper(T* p, void*)
   CallQueryInterface(p, &cache);
   ClearWrapper(p, cache);
 }
+
+// Attempt to preserve the wrapper, if any, for a Paris DOM bindings object.
+// Return true if we successfully preserved the wrapper, or there is no wrapper
+// to preserve. In the latter case we don't need to preserve the wrapper, because
+// the object can only be obtained by JS once, or they cannot be meaningfully
+// owned from the native side.
+//
+// This operation will return false only for non-nsISupports cycle-collected
+// objects, because we cannot determine if they are wrappercached or not.
+bool
+TryPreserveWrapper(JSObject* obj);
 
 // Can only be called with the immediate prototype of the instance object. Can
 // only be called on the prototype of an object known to be a DOM instance.
@@ -1093,8 +1141,6 @@ WrapCallThisObject(JSContext* cx, JSObject* scope, const T& p)
 
 // Helper for calling WrapNewBindingObject with smart pointers
 // (nsAutoPtr/nsRefPtr/nsCOMPtr) or references.
-HAS_MEMBER(get)
-
 template <class T, bool isSmartPtr=HasgetMember<T>::Value>
 struct WrapNewBindingObjectHelper
 {
@@ -1121,6 +1167,41 @@ WrapNewBindingObject(JSContext* cx, JSObject* scope, T& value,
                      JS::Value* vp)
 {
   return WrapNewBindingObjectHelper<T>::Wrap(cx, scope, value, vp);
+}
+
+template <class T>
+inline JSObject*
+GetCallbackFromCallbackObject(T* aObj)
+{
+  return aObj->Callback();
+}
+
+// Helper for getting the callback JSObject* of a smart ptr around a
+// CallbackObject or a reference to a CallbackObject or something like
+// that.
+template <class T, bool isSmartPtr=HasgetMember<T>::Value>
+struct GetCallbackFromCallbackObjectHelper
+{
+  static inline JSObject* Get(const T& aObj)
+  {
+    return GetCallbackFromCallbackObject(aObj.get());
+  }
+};
+
+template <class T>
+struct GetCallbackFromCallbackObjectHelper<T, false>
+{
+  static inline JSObject* Get(T& aObj)
+  {
+    return GetCallbackFromCallbackObject(&aObj);
+  }
+};
+
+template<class T>
+inline JSObject*
+GetCallbackFromCallbackObject(T& aObj)
+{
+  return GetCallbackFromCallbackObjectHelper<T>::Get(aObj);
 }
 
 static inline bool
@@ -1561,7 +1642,7 @@ AddStringToIDVector(JSContext* cx, JS::AutoIdVector& vector, const char* name)
  */
 bool
 XrayResolveOwnProperty(JSContext* cx, JSObject* wrapper, JSObject* obj,
-                       jsid id, bool set, JSPropertyDescriptor* desc);
+                       jsid id, JSPropertyDescriptor* desc, unsigned flags);
 
 /**
  * This resolves operations, attributes and constants of the interfaces for obj.
@@ -1651,15 +1732,6 @@ MustInheritFromNonRefcountedDOMObject(NonRefcountedDOMObject*)
 // For Paris Bindings only. See the relevant infrastructure in XrayWrapper.cpp.
 JSObject* GetXrayExpandoChain(JSObject *obj);
 void SetXrayExpandoChain(JSObject *obj, JSObject *chain);
-
-struct MainThreadDictionaryBase
-{
-protected:
-  JSContext* ParseJSON(const nsAString& aJSON,
-                       mozilla::Maybe<JSAutoRequest>& aAr,
-                       mozilla::Maybe<JSAutoCompartment>& aAc,
-                       JS::Value& aVal);
-};
 
 /**
  * This creates a JSString containing the value that the toString function for

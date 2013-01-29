@@ -256,8 +256,12 @@ var gPluginHandler = {
 
     let cwu = contentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
                             .getInterface(Ci.nsIDOMWindowUtils);
-    let haveVisibleCTPPlugin = cwu.plugins.some(function(plugin) {
+    let plugins = cwu.plugins.filter(function(plugin) {
       let objLoadingContent = plugin.QueryInterface(Ci.nsIObjectLoadingContent);
+      return gPluginHandler.canActivatePlugin(objLoadingContent);
+    });
+
+    let haveVisibleCTPPlugin = plugins.some(function(plugin) {
       let doc = plugin.ownerDocument;
       let overlay = doc.getAnonymousElementByAttribute(plugin, "class", "mainBox");
       if (!overlay)
@@ -271,14 +275,12 @@ var gPluginHandler = {
       let isInvisible = ((computedStyle.width == "240px" &&
                           computedStyle.height == "200px") ||
                          gPluginHandler.isTooSmall(plugin, overlay));
-      return (!isInvisible &&
-              gPluginHandler.canActivatePlugin(objLoadingContent));
+      return !isInvisible;
     });
 
     let notification = PopupNotifications.getNotification("click-to-play-plugins", aBrowser);
-    if (notification && !haveVisibleCTPPlugin && !this._notificationDisplayedOnce) {
-      notification.dismissed = false;
-      PopupNotifications._update(notification.anchorElement);
+    if (notification && plugins.length > 0 && !haveVisibleCTPPlugin && !this._notificationDisplayedOnce) {
+      notification.reshow();
       this._notificationDisplayedOnce = true;
     }
 
@@ -310,7 +312,7 @@ var gPluginHandler = {
 
   activatePlugins: function PH_activatePlugins(aContentWindow) {
     let browser = gBrowser.getBrowserForDocument(aContentWindow.document);
-    browser._clickToPlayPluginsActivated = true;
+    browser._clickToPlayAllPluginsActivated = true;
     let cwu = aContentWindow.QueryInterface(Ci.nsIInterfaceRequestor)
                             .getInterface(Ci.nsIDOMWindowUtils);
     let plugins = cwu.plugins;
@@ -340,6 +342,12 @@ var gPluginHandler = {
     if (pluginNeedsActivation) {
       gPluginHandler._showClickToPlayNotification(browser);
     }
+  },
+
+  hideClickToPlayOverlay: function(aPlugin) {
+    let overlay = aPlugin.ownerDocument.getAnonymousElementByAttribute(aPlugin, "class", "mainBox");
+    if (overlay)
+      overlay.style.visibility = "hidden";
   },
 
   stopPlayPreview: function PH_stopPlayPreview(aPlugin, aPlayPlugin) {
@@ -433,7 +441,9 @@ var gPluginHandler = {
       return;
     }
 
-    if (browser._clickToPlayPluginsActivated) {
+    let pluginInfo = this._getPluginInfo(aPlugin);
+    if (browser._clickToPlayAllPluginsActivated ||
+        browser._clickToPlayPluginsActivated.get(pluginInfo.pluginName)) {
       objLoadingContent.playPlugin();
       return;
     }
@@ -442,11 +452,18 @@ var gPluginHandler = {
       overlay.addEventListener("click", function(aEvent) {
         // Have to check that the target is not the link to update the plugin
         if (!(aEvent.originalTarget instanceof HTMLAnchorElement) &&
+            !(aEvent.originalTarget instanceof HTMLButtonElement) &&
             aEvent.button == 0 && aEvent.isTrusted) {
           gPluginHandler.activateSinglePlugin(aEvent.target.ownerDocument.defaultView.top, aPlugin);
           aEvent.stopPropagation();
           aEvent.preventDefault();
         }
+      }, true);
+
+      let closeIcon = doc.getAnonymousElementByAttribute(aPlugin, "anonid", "closeIcon");
+      closeIcon.addEventListener("click", function(aEvent) {
+        if (aEvent.button == 0 && aEvent.isTrusted)
+          gPluginHandler.hideClickToPlayOverlay(aPlugin);
       }, true);
     }
 
@@ -570,6 +587,7 @@ var gPluginHandler = {
           for (let objLoadingContent of plugins) {
             objLoadingContent.playPlugin();
           }
+          aBrowser._clickToPlayPluginsActivated.set(this.message, true);
 
           let notification = PopupNotifications.getNotification("click-to-play-plugins", aBrowser);
           if (notification &&
@@ -637,6 +655,9 @@ var gPluginHandler = {
     }];
     let notification = PopupNotifications.getNotification("click-to-play-plugins", aBrowser);
     let dismissed = notification ? notification.dismissed : true;
+    // Always show the doorhanger if the anchor is not available.
+    if (!isElementVisible(gURLBar))
+      dismissed = false;
     let options = { dismissed: dismissed, centerActions: centerActions };
     let icon = haveVulnerablePlugin ? "blocked-plugins-notification-icon" : "plugins-notification-icon"
     PopupNotifications.show(aBrowser, "click-to-play-plugins",

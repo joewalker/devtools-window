@@ -32,7 +32,6 @@
 #endif
 
 #include "mozilla/StandardInteger.h"
-#include "mozilla/Scoped.h"
 
 using namespace std;
 
@@ -2138,7 +2137,7 @@ bool CanConvertTypedArrayItemTo(JSObject *baseType, JSObject *valObj, JSContext 
     return true;
   }
   TypeCode elementTypeCode;
-  switch (JS_GetTypedArrayType(valObj)) {
+  switch (JS_GetArrayBufferViewType(valObj)) {
   case TypedArray::TYPE_INT8:
     elementTypeCode = TYPE_int8_t;
     break;
@@ -5789,6 +5788,9 @@ FunctionType::Call(JSContext* cx,
     return false;
   }
 
+  // Let the runtime callback know that we are about to call into C.
+  js::AutoCTypesActivityCallback autoCallback(cx, js::CTYPES_CALL_BEGIN, js::CTYPES_CALL_END);
+
   uintptr_t fn = *reinterpret_cast<uintptr_t*>(CData::GetData(obj));
 
 #if defined(XP_WIN)
@@ -5815,6 +5817,9 @@ FunctionType::Call(JSContext* cx,
 #endif // defined(XP_WIN)
 
   errno = savedErrno;
+
+  // We're no longer calling into C.
+  autoCallback.DoEndCallback();
 
   // Store the error value for later consultation with |ctypes.getStatus|
   JSObject *objCTypes = CType::GetGlobalCTypes(cx, typeObj);
@@ -6097,6 +6102,12 @@ CClosure::ClosureStub(ffi_cif* cif, void* result, void** args, void* userData)
   // Retrieve the essentials from our closure object.
   ClosureInfo* cinfo = static_cast<ClosureInfo*>(userData);
   JSContext* cx = cinfo->cx;
+
+  // Let the runtime callback know that we are about to call into JS again. The end callback will
+  // fire automatically when we exit this function.
+  js::AutoCTypesActivityCallback autoCallback(cx, js::CTYPES_CALLBACK_BEGIN,
+                                              js::CTYPES_CALLBACK_END);
+
   RootedObject typeObj(cx, cinfo->typeObj);
   RootedObject thisObj(cx, cinfo->thisObj);
   RootedObject jsfnObj(cx, cinfo->jsfnObj);
@@ -6927,7 +6938,7 @@ CDataFinalizer::Construct(JSContext* cx, unsigned argc, jsval *vp)
     return TypeError(cx, "(an object with known size)", valData);
   }
 
-  ScopedFreePtr<void> cargs(malloc(sizeArg));
+  ScopedJSFreePtr<void> cargs(malloc(sizeArg));
 
   if (!ImplicitConvert(cx, valData, objArgType, cargs.get(),
                        false, &freePointer)) {
@@ -6942,7 +6953,7 @@ CDataFinalizer::Construct(JSContext* cx, unsigned argc, jsval *vp)
 
   // 4. Prepare buffer for holding return value
 
-  ScopedFreePtr<void> rvalue;
+  ScopedJSFreePtr<void> rvalue;
   if (CType::GetTypeCode(returnType) != TYPE_void_t) {
     rvalue = malloc(Align(CType::GetSize(returnType),
                           sizeof(ffi_arg)));
@@ -6998,7 +7009,7 @@ CDataFinalizer::Construct(JSContext* cx, unsigned argc, jsval *vp)
   }
 
   // 7. Store C information as private
-  ScopedFreePtr<CDataFinalizer::Private>
+  ScopedJSFreePtr<CDataFinalizer::Private>
     p((CDataFinalizer::Private*)malloc(sizeof(CDataFinalizer::Private)));
 
   memmove(&p->CIF, &funInfoFinalizer->mCIF, sizeof(ffi_cif));

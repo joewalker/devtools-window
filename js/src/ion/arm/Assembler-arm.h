@@ -14,6 +14,7 @@
 #include "ion/IonCode.h"
 #include "ion/arm/Architecture-arm.h"
 #include "ion/shared/IonAssemblerBufferWithConstantPools.h"
+#include "mozilla/Util.h"
 
 namespace js {
 namespace ion {
@@ -53,6 +54,10 @@ static const Register CallTempReg2 = r7;
 static const Register CallTempReg3 = r8;
 static const Register CallTempReg4 = r0;
 static const Register CallTempReg5 = r1;
+
+static const Register CallTempNonArgRegs[] = { r5, r6, r7, r8 };
+static const uint32_t NumCallTempNonArgRegs =
+    mozilla::ArrayLength(CallTempNonArgRegs);
 
 static const Register PreBarrierReg = r1;
 
@@ -1173,6 +1178,7 @@ class Assembler
     js::Vector<JumpPool *, 0, SystemAllocPolicy> jumpPools_;
     js::Vector<BufferOffset, 0, SystemAllocPolicy> tmpJumpRelocations_;
     js::Vector<BufferOffset, 0, SystemAllocPolicy> tmpDataRelocations_;
+    js::Vector<BufferOffset, 0, SystemAllocPolicy> tmpPreBarriers_;
     class JumpPool : TempObject
     {
         BufferOffset start;
@@ -1183,6 +1189,7 @@ class Assembler
     CompactBufferWriter jumpRelocations_;
     CompactBufferWriter dataRelocations_;
     CompactBufferWriter relocations_;
+    CompactBufferWriter preBarriers_;
     size_t dataBytesNeeded_;
 
     bool enoughMemory_;
@@ -1244,6 +1251,9 @@ class Assembler
         if (ptr.value)
             tmpDataRelocations_.append(nextOffset());
     }
+    void writePrebarrierOffset(CodeOffsetLabel label) {
+        tmpPreBarriers_.append(BufferOffset(label.offset()));
+    }
 
     enum RelocBranchStyle {
         B_MOVWT,
@@ -1280,8 +1290,9 @@ class Assembler
     void executableCopy(void *buffer);
     void processDeferredData(IonCode *code, uint8_t *data);
     void processCodeLabels(IonCode *code);
-    void copyJumpRelocationTable(uint8_t *buffer);
-    void copyDataRelocationTable(uint8_t *buffer);
+    void copyJumpRelocationTable(uint8_t *dest);
+    void copyDataRelocationTable(uint8_t *dest);
+    void copyPreBarrierTable(uint8_t *dest);
 
     bool addDeferredData(DeferredData *data, size_t bytes);
 
@@ -1292,6 +1303,8 @@ class Assembler
     // Size of the jump relocation table, in bytes.
     size_t jumpRelocationTableBytes() const;
     size_t dataRelocationTableBytes() const;
+    size_t preBarrierTableBytes() const;
+
     // Size of the data table, in bytes.
     size_t dataSize() const;
     size_t bytesNeeded() const;
@@ -1685,6 +1698,7 @@ class Assembler
     static void ToggleToJmp(CodeLocationLabel inst_);
     static void ToggleToCmp(CodeLocationLabel inst_);
 
+    static void ToggleCall(CodeLocationLabel inst_, bool enabled);
 }; // Assembler
 
 // An Instruction is a structure for both encoding and decoding any and all ARM instructions.
@@ -1774,6 +1788,20 @@ class InstLDR : public InstDTR
 
 };
 JS_STATIC_ASSERT(sizeof(InstDTR) == sizeof(InstLDR));
+
+class InstNOP : public Instruction
+{
+    static const uint32_t NopInst = 0x0320f000;
+
+  public:
+    InstNOP()
+      : Instruction(NopInst, Assembler::Always)
+    { }
+
+    static bool isTHIS(const Instruction &i);
+    static InstNOP *asTHIS(Instruction &i);
+};
+
 // Branching to a register, or calling a register
 class InstBranchReg : public Instruction
 {
@@ -1785,7 +1813,7 @@ class InstBranchReg : public Instruction
     };
     static const uint32_t IsBRegMask = 0x0ffffff0;
     InstBranchReg(BranchTag tag, Register rm, Assembler::Condition c)
-      : Instruction(tag | RM(rm), c)
+      : Instruction(tag | rm.code(), c)
     { }
   public:
     static bool isTHIS (const Instruction &i);
@@ -1828,6 +1856,10 @@ class InstBXReg : public InstBranchReg
 class InstBLXReg : public InstBranchReg
 {
   public:
+    InstBLXReg(Register reg, Assembler::Condition c)
+      : InstBranchReg(IsBLX, reg, c)
+    { }
+
     static bool isTHIS (const Instruction &i);
     static InstBLXReg *asTHIS (const Instruction &i);
 };
@@ -1952,6 +1984,26 @@ GetIntArgReg(uint32_t usedIntArgs, uint32_t usedFloatArgs, Register *out)
     return true;
 }
 
+// Get a register in which we plan to put a quantity that will be used as an
+// integer argument.  This differs from GetIntArgReg in that if we have no more
+// actual argument registers to use we will fall back on using whatever
+// CallTempReg* don't overlap the argument registers, and only fail once those
+// run out too.
+static inline bool
+GetTempRegForIntArg(uint32_t usedIntArgs, uint32_t usedFloatArgs, Register *out)
+{
+    if (GetIntArgReg(usedIntArgs, usedFloatArgs, out))
+        return true;
+    // Unfortunately, we have to assume things about the point at which
+    // GetIntArgReg returns false, because we need to know how many registers it
+    // can allocate.
+    usedIntArgs -= NumIntArgRegs;
+    if (usedIntArgs >= NumCallTempNonArgRegs)
+        return false;
+    *out = CallTempNonArgRegs[usedIntArgs];
+    return true;
+}
+
 static inline bool
 GetFloatArgReg(uint32_t usedIntArgs, uint32_t usedFloatArgs, FloatRegister *out)
 {
@@ -1990,11 +2042,31 @@ GetFloatArgStackDisp(uint32_t usedIntArgs, uint32_t usedFloatArgs, uint32_t *pad
 static inline bool
 GetIntArgReg(uint32_t arg, uint32_t floatArg, Register *out)
 {
-    if (arg < 4) {
+    if (arg < NumIntArgRegs) {
         *out = Register::FromCode(arg);
         return true;
     }
     return false;
+}
+
+// Get a register in which we plan to put a quantity that will be used as an
+// integer argument.  This differs from GetIntArgReg in that if we have no more
+// actual argument registers to use we will fall back on using whatever
+// CallTempReg* don't overlap the argument registers, and only fail once those
+// run out too.
+static inline bool
+GetTempRegForIntArg(uint32_t usedIntArgs, uint32_t usedFloatArgs, Register *out)
+{
+    if (GetIntArgReg(usedIntArgs, usedFloatArgs, out))
+        return true;
+    // Unfortunately, we have to assume things about the point at which
+    // GetIntArgReg returns false, because we need to know how many registers it
+    // can allocate.
+    usedIntArgs -= NumIntArgRegs;
+    if (usedIntArgs >= NumCallTempNonArgRegs)
+        return false;
+    *out = CallTempNonArgRegs[usedIntArgs];
+    return true;
 }
 
 static inline uint32_t

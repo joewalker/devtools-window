@@ -49,6 +49,7 @@ PRLogModuleInfo* gNesteggLog;
 
 static const unsigned NS_PER_USEC = 1000;
 static const double NS_PER_S = 1e9;
+static const double USEC_PER_S = 1e6;
 
 // If a seek request is within SEEK_DECODE_MARGIN microseconds of the
 // current time, decode ahead from the current frame rather than performing
@@ -467,11 +468,7 @@ nsresult WebMReader::ReadMetadata(VideoInfo* aInfo,
 #endif
 
   // We can't seek in buffered regions if we have no cues.
-  bool haveCues;
-  int64_t dummy = -1;
-  haveCues = nestegg_get_cue_point(mContext, 0, -1, &dummy, &dummy,
-                                   (uint64_t*)&dummy) == 0;
-  mDecoder->SetMediaSeekable(haveCues);
+  mDecoder->SetMediaSeekable(nestegg_has_cues(mContext) == 1);
 
   *aInfo = mInfo;
 
@@ -922,6 +919,38 @@ nsresult WebMReader::Seek(int64_t aTarget, int64_t aStartTime, int64_t aEndTime,
   return DecodeToTarget(aTarget);
 }
 
+#ifdef MOZ_DASH
+bool WebMReader::IsDataCachedAtEndOfSubsegments()
+{
+  MediaResource* resource = mDecoder->GetResource();
+  NS_ENSURE_TRUE(resource, false);
+  if (resource->IsDataCachedToEndOfResource(0)) {
+     return true;
+  }
+
+  if (mClusterByteRanges.IsEmpty()) {
+    return false;
+  }
+
+  nsTArray<MediaByteRange> ranges;
+  nsresult rv = resource->GetCachedRanges(ranges);
+  NS_ENSURE_SUCCESS(rv, false);
+  if (ranges.IsEmpty()) {
+    return false;
+  }
+
+  // Return true if data at the end of the final subsegment is cached.
+  uint32_t finalSubsegmentIndex = mClusterByteRanges.Length()-1;
+  uint64_t finalSubEndOffset = mClusterByteRanges[finalSubsegmentIndex].mEnd;
+  uint32_t finalRangeIndex = ranges.Length()-1;
+  uint64_t finalRangeStartOffset = ranges[finalRangeIndex].mStart;
+  uint64_t finalRangeEndOffset = ranges[finalRangeIndex].mEnd;
+
+  return (finalRangeStartOffset < finalSubEndOffset &&
+          finalSubEndOffset <= finalRangeEndOffset);
+}
+#endif
+
 nsresult WebMReader::GetBuffered(nsTimeRanges* aBuffered, int64_t aStartTime)
 {
   MediaResource* resource = mDecoder->GetResource();
@@ -959,7 +988,29 @@ nsresult WebMReader::GetBuffered(nsTimeRanges* aBuffered, int64_t aStartTime)
       if (rv) {
         double startTime = start * timecodeScale / NS_PER_S - aStartTime;
         double endTime = end * timecodeScale / NS_PER_S - aStartTime;
-
+#ifdef MOZ_DASH
+        // If this range extends to the end of a cluster, the true end time is
+        // the cluster's end timestamp. Since WebM frames do not have an end
+        // timestamp, a fully cached cluster must be reported with the correct
+        // end time of its final frame. Otherwise, buffered ranges could be
+        // reported with missing frames at cluster boundaries, specifically
+        // boundaries where stream switching has occurred.
+        if (!mClusterByteRanges.IsEmpty()) {
+          for (uint32_t clusterIndex = 0;
+               clusterIndex < (mClusterByteRanges.Length()-1);
+               clusterIndex++) {
+            if (ranges[index].mEnd >= mClusterByteRanges[clusterIndex].mEnd) {
+              double clusterEndTime =
+                  mClusterByteRanges[clusterIndex+1].mStartTime / USEC_PER_S;
+              if (endTime < clusterEndTime) {
+                LOG(PR_LOG_DEBUG, ("End of cluster: endTime becoming %0.3fs",
+                                   clusterEndTime));
+                endTime = clusterEndTime;
+              }
+            }
+          }
+        }
+#endif
         // If this range extends to the end of the file, the true end time
         // is the file's duration.
         if (resource->IsDataCachedToEndOfResource(ranges[index].mStart)) {
@@ -1030,10 +1081,10 @@ WebMReader::RequestSwitchAtSubsegment(int32_t aSubsegmentIdx,
   if (mSwitchingCluster != -1) {
     return;
   }
-  NS_ENSURE_TRUE((uint32_t)aSubsegmentIdx < mClusterByteRanges.Length(), );
+  NS_ENSURE_TRUE_VOID((uint32_t)aSubsegmentIdx < mClusterByteRanges.Length());
   mSwitchingCluster = aSubsegmentIdx;
-  NS_ENSURE_TRUE(aNextReader, );
-  NS_ENSURE_TRUE(aNextReader != this, );
+  NS_ENSURE_TRUE_VOID(aNextReader);
+  NS_ENSURE_TRUE_VOID(aNextReader != this);
   mNextReader = static_cast<WebMReader*>(aNextReader);
 }
 
@@ -1053,7 +1104,7 @@ WebMReader::RequestSeekToSubsegment(uint32_t aIdx)
   if (mSeekToCluster != -1) {
     return;
   }
-  NS_ENSURE_TRUE(aIdx < mClusterByteRanges.Length(), );
+  NS_ENSURE_TRUE_VOID(aIdx < mClusterByteRanges.Length());
   mSeekToCluster = aIdx;
 
   // XXX Hack to get the resource to seek to the correct offset if the decode
@@ -1080,12 +1131,12 @@ WebMReader::SeekToCluster(uint32_t aIdx)
 {
   NS_ASSERTION(mDecoder->OnDecodeThread(), "Should be on decode thread.");
   NS_ASSERTION(0 <= mSeekToCluster, "mSeekToCluster should be set.");
-  NS_ENSURE_TRUE(aIdx < mClusterByteRanges.Length(), );
+  NS_ENSURE_TRUE_VOID(aIdx < mClusterByteRanges.Length());
   LOG(PR_LOG_DEBUG, ("Reader [%p] for Decoder [%p]: seeking to "
                      "subsegment [%lld] at offset [%lld]",
                      this, mDecoder, aIdx, mClusterByteRanges[aIdx].mStart));
   int r = nestegg_offset_seek(mContext, mClusterByteRanges[aIdx].mStart);
-  NS_ENSURE_TRUE(r == 0, );
+  NS_ENSURE_TRUE_VOID(r == 0);
   mSeekToCluster = -1;
 }
 

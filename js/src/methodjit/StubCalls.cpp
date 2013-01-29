@@ -9,7 +9,6 @@
 #include "mozilla/FloatingPoint.h"
 
 #include "jscntxt.h"
-#include "jsscope.h"
 #include "jsobj.h"
 #include "jslibmath.h"
 #include "jsiter.h"
@@ -22,6 +21,7 @@
 #include "gc/Marking.h"
 #include "vm/Debugger.h"
 #include "vm/NumericConversions.h"
+#include "vm/Shape.h"
 #include "vm/String.h"
 #include "methodjit/Compiler.h"
 #include "methodjit/StubCalls.h"
@@ -34,12 +34,12 @@
 #include "jsinterpinlines.h"
 #include "jsnuminlines.h"
 #include "jsobjinlines.h"
-#include "jsscopeinlines.h"
 #include "jsscriptinlines.h"
 #include "jstypedarray.h"
 
 #include "StubCalls-inl.h"
 #include "vm/RegExpObject-inl.h"
+#include "vm/Shape-inl.h"
 #include "vm/String-inl.h"
 
 #ifdef JS_ION
@@ -100,9 +100,15 @@ stubs::Name(VMFrame &f)
 }
 
 void JS_FASTCALL
-stubs::IntrinsicName(VMFrame &f, PropertyName *name)
+stubs::IntrinsicName(VMFrame &f, PropertyName *nameArg)
 {
     RootedValue rval(f.cx);
+
+    // PropertyNames are atoms and will never be allocated from the nursery,
+    // and the ones passed to this stub are referenced by the script so it will
+    // root them. The compacting GC will discard methodjit code.
+    SkipRoot skip(f.cx, &nameArg);
+    HandlePropertyName name = HandlePropertyName::fromMarkedLocation(&nameArg);
     if (!f.cx->global().get()->getIntrinsicValue(f.cx, name, &rval))
         THROW();
     f.regs.sp[0] = rval;
@@ -136,7 +142,7 @@ stubs::SetElem(VMFrame &f)
     if (!obj)
         THROW();
 
-    if (!FetchElementId(f.cx, obj, idval, id.address(),
+    if (!FetchElementId(f.cx, obj, idval, &id,
                         MutableHandleValue::fromMarkedLocation(&regs.sp[-2])))
     {
         THROW();
@@ -144,28 +150,18 @@ stubs::SetElem(VMFrame &f)
 
     TypeScript::MonitorAssign(cx, obj, id);
 
-    do {
-        if (obj->isDenseArray() && JSID_IS_INT(id)) {
-            uint32_t length = obj->getDenseArrayInitializedLength();
-            int32_t i = JSID_TO_INT(id);
-            if ((uint32_t)i < length) {
-                if (obj->getDenseArrayElement(i).isMagic(JS_ARRAY_HOLE)) {
-                    if (js_PrototypeHasIndexedProperties(obj))
-                        break;
-                    if ((uint32_t)i >= obj->getArrayLength())
-                        JSObject::setArrayLength(cx, obj, i + 1);
-                }
-                JSObject::setDenseArrayElementWithType(cx, obj, i, rval);
-                goto end_setelem;
-            } else {
-                if (f.script()->hasAnalysis())
-                    f.script()->analysis()->getCode(f.pc()).arrayWriteHole = true;
-            }
+    if (obj->isArray() && JSID_IS_INT(id)) {
+        uint32_t length = obj->getDenseInitializedLength();
+        int32_t i = JSID_TO_INT(id);
+        if ((uint32_t)i >= length) {
+            if (f.script()->hasAnalysis())
+                f.script()->analysis()->getCode(f.pc()).arrayWriteHole = true;
         }
-    } while (0);
+    }
+
     if (!JSObject::setGeneric(cx, obj, obj, id, &rval, strict))
         THROW();
-  end_setelem:
+
     /* :FIXME: Moving the assigned object into the lowest stack slot
      * is a temporary hack. What we actually want is an implementation
      * of popAfterSet() that allows popping more than one value;
@@ -187,7 +183,7 @@ stubs::ToId(VMFrame &f)
         THROW();
 
     RootedId id(f.cx);
-    if (!FetchElementId(f.cx, obj, idval, id.address(), idval))
+    if (!FetchElementId(f.cx, obj, idval, &id, idval))
         THROW();
 
     if (!idval.isInt32()) {
@@ -476,9 +472,8 @@ StubEqualityOp(VMFrame &f)
     JSContext *cx = f.cx;
     FrameRegs &regs = f.regs;
 
-    RootedValue rval_(cx, regs.sp[-1]);
-    RootedValue lval_(cx, regs.sp[-2]);
-    Value &rval = rval_.get(), &lval = lval_.get();
+    Value &rval = regs.sp[-1];
+    Value &lval = regs.sp[-2];
 
     bool cond;
 
@@ -590,14 +585,13 @@ stubs::Add(VMFrame &f)
 {
     JSContext *cx = f.cx;
     FrameRegs &regs = f.regs;
-    RootedValue rval_(cx, regs.sp[-1]);
-    RootedValue lval_(cx, regs.sp[-2]);
-    Value &rval = rval_.get(), &lval = lval_.get();
+    Value &rval = regs.sp[-1];
+    Value &lval = regs.sp[-2];
 
     /* The string + string case is easily the hottest;  try it first. */
     bool lIsString = lval.isString();
     bool rIsString = rval.isString();
-    RootedString lstr(cx), rstr(cx);
+    JSString *lstr, *rstr;
     if (lIsString && rIsString) {
         lstr = lval.toString();
         rstr = rval.toString();
@@ -611,8 +605,7 @@ stubs::Add(VMFrame &f)
             THROW();
         regs.sp[-2] = rval;
         regs.sp--;
-        RootedScript fscript(cx, f.script());
-        TypeScript::MonitorUnknown(cx, fscript, f.pc());
+        TypeScript::MonitorUnknown(cx, f.script(), f.pc());
     } else
 #endif
     {
@@ -625,23 +618,22 @@ stubs::Add(VMFrame &f)
             if (lIsString) {
                 lstr = lval.toString();
             } else {
-                lstr = ToString(cx, lval);
+                lstr = ToString<CanGC>(cx, lval);
                 if (!lstr)
                     THROW();
-                regs.sp[-2].setString(lstr);
             }
             if (rIsString) {
                 rstr = rval.toString();
             } else {
-                rstr = ToString(cx, rval);
+                // Save/restore lstr in case of GC activity under ToString.
+                regs.sp[-2].setString(lstr);
+                rstr = ToString<CanGC>(cx, rval);
                 if (!rstr)
                     THROW();
-                regs.sp[-1].setString(rstr);
+                lstr = regs.sp[-2].toString();
             }
-            if (lIsObject || rIsObject) {
-                RootedScript fscript(cx, f.script());
-                TypeScript::MonitorString(cx, fscript, f.pc());
-            }
+            if (lIsObject || rIsObject)
+                TypeScript::MonitorString(cx, f.script(), f.pc());
             goto string_concat;
 
         } else {
@@ -649,19 +641,25 @@ stubs::Add(VMFrame &f)
             if (!ToNumber(cx, lval, &l) || !ToNumber(cx, rval, &r))
                 THROW();
             l += r;
-            if (!regs.sp[-2].setNumber(l) &&
-                (lIsObject || rIsObject || (!lval.isDouble() && !rval.isDouble()))) {
-                RootedScript fscript(cx, f.script());
-                TypeScript::MonitorOverflow(cx, fscript, f.pc());
+            Value nres = NumberValue(l);
+            if (nres.isDouble() &&
+                (lIsObject || rIsObject || (!lval.isDouble() && !rval.isDouble())))
+            {
+                TypeScript::MonitorOverflow(cx, f.script(), f.pc());
             }
+            regs.sp[-2] = nres;
         }
     }
     return;
 
   string_concat:
-    JSString *str = js_ConcatStrings(cx, lstr, rstr);
-    if (!str)
-        THROW();
+    JSString *str = ConcatStrings<NoGC>(cx, lstr, rstr);
+    if (!str) {
+        RootedString nlstr(cx, lstr), nrstr(cx, rstr);
+        str = ConcatStrings<CanGC>(cx, nlstr, nrstr);
+        if (!str)
+            THROW();
+    }
     regs.sp[-2].setString(str);
     regs.sp--;
 }
@@ -839,7 +837,10 @@ stubs::TriggerIonCompile(VMFrame &f)
             osrPC = NULL;
 
         RootedFunction scriptFunction(f.cx, script->function());
-        if (!ion::TestIonCompile(f.cx, script, scriptFunction, osrPC, f.fp()->isConstructing())) {
+        ion::MethodStatus compileStatus =
+            ion::TestIonCompile(f.cx, script, scriptFunction, osrPC, f.fp()->isConstructing());
+
+        if (compileStatus != ion::Method_Compiled) {
             if (f.cx->isExceptionPending())
                 THROW();
         }
@@ -1053,17 +1054,9 @@ stubs::Lambda(VMFrame &f, JSFunction *fun_)
 void JS_FASTCALL
 stubs::GetProp(VMFrame &f, PropertyName *name)
 {
-    JSContext *cx = f.cx;
-    FrameRegs &regs = f.regs;
-
     MutableHandleValue objval = MutableHandleValue::fromMarkedLocation(&f.regs.sp[-1]);
-
-    RootedValue rval(cx);
-    RootedScript fscript(cx, f.script());
-    if (!GetPropertyOperation(cx, fscript, f.pc(), objval, &rval))
+    if (!GetPropertyOperation(f.cx, f.script(), f.pc(), objval, objval))
         THROW();
-
-    regs.sp[-1] = rval;
 }
 
 void JS_FASTCALL
@@ -1317,63 +1310,6 @@ FindNativeCode(VMFrame &f, jsbytecode *target)
 }
 
 void * JS_FASTCALL
-stubs::LookupSwitch(VMFrame &f, jsbytecode *pc)
-{
-    AutoAssertNoGC nogc;
-    jsbytecode *jpc = pc;
-    UnrootedScript script = f.fp()->script();
-
-    /* This is correct because the compiler adjusts the stack beforehand. */
-    Value lval = f.regs.sp[-1];
-
-    if (!lval.isPrimitive())
-        return FindNativeCode(f, pc + GET_JUMP_OFFSET(pc));
-
-    JS_ASSERT(pc[0] == JSOP_LOOKUPSWITCH);
-
-    pc += JUMP_OFFSET_LEN;
-    uint32_t npairs = GET_UINT16(pc);
-    pc += UINT16_LEN;
-
-    JS_ASSERT(npairs);
-
-    if (lval.isString()) {
-        JSLinearString *str = lval.toString()->ensureLinear(f.cx);
-        if (!str)
-            THROWV(NULL);
-        for (uint32_t i = 1; i <= npairs; i++) {
-            Value rval = script->getConst(GET_UINT32_INDEX(pc));
-            pc += UINT32_INDEX_LEN;
-            if (rval.isString()) {
-                JSLinearString *rhs = &rval.toString()->asLinear();
-                if (rhs == str || EqualStrings(str, rhs))
-                    return FindNativeCode(f, jpc + GET_JUMP_OFFSET(pc));
-            }
-            pc += JUMP_OFFSET_LEN;
-        }
-    } else if (lval.isNumber()) {
-        double d = lval.toNumber();
-        for (uint32_t i = 1; i <= npairs; i++) {
-            Value rval = script->getConst(GET_UINT32_INDEX(pc));
-            pc += UINT32_INDEX_LEN;
-            if (rval.isNumber() && d == rval.toNumber())
-                return FindNativeCode(f, jpc + GET_JUMP_OFFSET(pc));
-            pc += JUMP_OFFSET_LEN;
-        }
-    } else {
-        for (uint32_t i = 1; i <= npairs; i++) {
-            Value rval = script->getConst(GET_UINT32_INDEX(pc));
-            pc += UINT32_INDEX_LEN;
-            if (lval == rval)
-                return FindNativeCode(f, jpc + GET_JUMP_OFFSET(pc));
-            pc += JUMP_OFFSET_LEN;
-        }
-    }
-
-    return FindNativeCode(f, jpc + GET_JUMP_OFFSET(jpc));
-}
-
-void * JS_FASTCALL
 stubs::TableSwitch(VMFrame &f, jsbytecode *origPc)
 {
     jsbytecode * const originalPC = origPc;
@@ -1540,7 +1476,7 @@ stubs::In(VMFrame &f)
 
     RootedObject obj(cx, &rref.toObject());
     RootedId id(cx);
-    if (!FetchElementId(f.cx, obj, f.regs.sp[-2], id.address(),
+    if (!FetchElementId(f.cx, obj, f.regs.sp[-2], &id,
                         MutableHandleValue::fromMarkedLocation(&f.regs.sp[-2])))
     {
         THROWV(JS_FALSE);
@@ -1574,7 +1510,7 @@ stubs::TypeBarrierHelper(VMFrame &f, uint32_t which)
      */
     RootedScript fscript(f.cx, f.script());
     if (fscript->hasAnalysis() && fscript->analysis()->ranInference()) {
-        AutoEnterTypeInference enter(f.cx);
+        AutoEnterAnalysis enter(f.cx);
         fscript->analysis()->breakTypeBarriers(f.cx, f.pc() - fscript->code, false);
     }
 
@@ -1588,7 +1524,7 @@ stubs::StubTypeHelper(VMFrame &f, int32_t which)
 
     RootedScript fscript(f.cx, f.script());
     if (fscript->hasAnalysis() && fscript->analysis()->ranInference()) {
-        AutoEnterTypeInference enter(f.cx);
+        AutoEnterAnalysis enter(f.cx);
         fscript->analysis()->breakTypeBarriers(f.cx, f.pc() - fscript->code, false);
     }
 
@@ -1624,7 +1560,7 @@ stubs::CheckArgumentTypes(VMFrame &f)
 
     {
         /* Postpone recompilations until all args have been updated. */
-        types::AutoEnterTypeInference enter(f.cx);
+        types::AutoEnterAnalysis enter(f.cx);
 
         if (!f.fp()->isConstructing())
             TypeScript::SetThis(f.cx, fscript, fp->thisValue());
@@ -1813,21 +1749,21 @@ void JS_FASTCALL
 stubs::WriteBarrier(VMFrame &f, Value *addr)
 {
 #ifdef JS_GC_ZEAL
-    if (!f.cx->compartment->needsBarrier())
+    if (!f.cx->zone()->needsBarrier())
         return;
 #endif
-    gc::MarkValueUnbarriered(f.cx->compartment->barrierTracer(), addr, "write barrier");
+    gc::MarkValueUnbarriered(f.cx->zone()->barrierTracer(), addr, "write barrier");
 }
 
 void JS_FASTCALL
 stubs::GCThingWriteBarrier(VMFrame &f, Value *addr)
 {
 #ifdef JS_GC_ZEAL
-    if (!f.cx->compartment->needsBarrier())
+    if (!f.cx->zone()->needsBarrier())
         return;
 #endif
 
     gc::Cell *cell = (gc::Cell *)addr->toGCThing();
     if (cell && !cell->isMarked())
-        gc::MarkValueUnbarriered(f.cx->compartment->barrierTracer(), addr, "write barrier");
+        gc::MarkValueUnbarriered(f.cx->zone()->barrierTracer(), addr, "write barrier");
 }

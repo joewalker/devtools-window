@@ -9,7 +9,7 @@
 #include "nsAccessibilityService.h"
 #include "nsAccUtils.h"
 #include "nsCoreUtils.h"
-#include "DocAccessible.h"
+#include "DocAccessible-inl.h"
 #include "nsEventShell.h"
 #include "FocusManager.h"
 #include "Role.h"
@@ -57,8 +57,6 @@ NotificationController::~NotificationController()
 
 NS_IMPL_CYCLE_COLLECTING_NATIVE_ADDREF(NotificationController)
 NS_IMPL_CYCLE_COLLECTING_NATIVE_RELEASE(NotificationController)
-
-NS_IMPL_CYCLE_COLLECTION_NATIVE_CLASS(NotificationController)
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(NotificationController)
   if (tmp->mDocument)
@@ -212,6 +210,10 @@ NotificationController::WillRefresh(mozilla::TimeStamp aTime)
     NS_ASSERTION(mContentInsertions.Length() == 0,
                  "Pending content insertions while initial accessible tree isn't created!");
   }
+
+  // Initialize scroll support if needed.
+  if (!(mDocument->mDocFlags & DocAccessible::eScrollInitialized))
+    mDocument->AddScrollListener();
 
   // Process content inserted notifications to update the tree. Process other
   // notifications like DOM events and then flush event queue. If any new
@@ -376,21 +378,6 @@ NotificationController::CoalesceEvents()
       }
     } break; // case eCoalesceOfSameType
 
-    case AccEvent::eRemoveDupes:
-    {
-      // Check for repeat events, coalesce newly appended event by more older
-      // event.
-      for (uint32_t index = tail - 1; index < tail; index--) {
-        AccEvent* accEvent = mEvents[index];
-        if (accEvent->mEventType == tailEvent->mEventType &&
-            accEvent->mEventRule == tailEvent->mEventRule &&
-            accEvent->mAccessible == tailEvent->mAccessible) {
-          tailEvent->mEventRule = AccEvent::eDoNotEmit;
-          return;
-        }
-      }
-    } break; // case eRemoveDupes
-
     case AccEvent::eCoalesceSelectionChange:
     {
       AccSelChangeEvent* tailSelChangeEvent = downcast_accEvent(tailEvent);
@@ -409,6 +396,43 @@ NotificationController::CoalesceEvents()
       }
 
     } break; // eCoalesceSelectionChange
+
+    case AccEvent::eCoalesceStateChange:
+    {
+      // If state change event is duped then ignore previous event. If state
+      // change event is opposite to previous event then no event is emitted
+      // (accessible state wasn't changed).
+      for (uint32_t index = tail - 1; index < tail; index--) {
+        AccEvent* thisEvent = mEvents[index];
+        if (thisEvent->mEventRule != AccEvent::eDoNotEmit &&
+            thisEvent->mEventType == tailEvent->mEventType &&
+            thisEvent->mAccessible == tailEvent->mAccessible) {
+          AccStateChangeEvent* thisSCEvent = downcast_accEvent(thisEvent);
+          AccStateChangeEvent* tailSCEvent = downcast_accEvent(tailEvent);
+          if (thisSCEvent->mState == tailSCEvent->mState) {
+            thisEvent->mEventRule = AccEvent::eDoNotEmit;
+            if (thisSCEvent->mIsEnabled != tailSCEvent->mIsEnabled)
+              tailEvent->mEventRule = AccEvent::eDoNotEmit;
+          }
+        }
+      }
+      break; // eCoalesceStateChange
+    }
+
+    case AccEvent::eRemoveDupes:
+    {
+      // Check for repeat events, coalesce newly appended event by more older
+      // event.
+      for (uint32_t index = tail - 1; index < tail; index--) {
+        AccEvent* accEvent = mEvents[index];
+        if (accEvent->mEventType == tailEvent->mEventType &&
+          accEvent->mEventRule == tailEvent->mEventRule &&
+          accEvent->mAccessible == tailEvent->mAccessible) {
+          tailEvent->mEventRule = AccEvent::eDoNotEmit;
+          return;
+        }
+      }
+    } break; // case eRemoveDupes
 
     default:
       break; // case eAllowDupes, eDoNotEmit
@@ -637,7 +661,6 @@ NotificationController::CoalesceTextChangeEventsFor(AccShowEvent* aTailEvent,
 void
 NotificationController::CreateTextChangeEventFor(AccMutationEvent* aEvent)
 {
-  DocAccessible* document = aEvent->GetDocAccessible();
   Accessible* container = aEvent->mAccessible->Parent();
   if (!container)
     return;
@@ -862,16 +885,8 @@ NotificationController::ContentInsertion::
   return haveToUpdate;
 }
 
-NS_IMPL_CYCLE_COLLECTION_NATIVE_CLASS(NotificationController::ContentInsertion)
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(NotificationController::ContentInsertion)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mContainer)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
-
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(NotificationController::ContentInsertion)
-  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mContainer");
-  cb.NoteXPCOMChild(static_cast<nsIAccessible*>(tmp->mContainer.get()));
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+NS_IMPL_CYCLE_COLLECTION_1(NotificationController::ContentInsertion,
+                           mContainer)
 
 NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(NotificationController::ContentInsertion,
                                      AddRef)

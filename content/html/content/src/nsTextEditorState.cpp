@@ -8,7 +8,7 @@
 
 #include "nsCOMPtr.h"
 #include "nsIPresShell.h"
-#include "nsIView.h"
+#include "nsView.h"
 #include "nsCaret.h"
 #include "nsEditorCID.h"
 #include "nsLayoutCID.h"
@@ -1426,7 +1426,7 @@ nsTextEditorState::UnbindFromFrame(nsTextControlFrame* aFrame)
 
   // If it was, however, it should be unbounded from the same frame.
   NS_ASSERTION(!aFrame || aFrame == mBoundFrame, "Unbinding from the wrong frame");
-  NS_ENSURE_TRUE(!aFrame || aFrame == mBoundFrame, );
+  NS_ENSURE_TRUE_VOID(!aFrame || aFrame == mBoundFrame);
 
   // We need to start storing the value outside of the editor if we're not
   // going to use it anymore, so retrieve it for now.

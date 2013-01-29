@@ -44,13 +44,13 @@ JSObject*
 AudioContext::WrapObject(JSContext* aCx, JSObject* aScope,
                          bool* aTriedToWrap)
 {
-  return mozAudioContextBinding::Wrap(aCx, aScope, this, aTriedToWrap);
+  return AudioContextBinding::Wrap(aCx, aScope, this, aTriedToWrap);
 }
 
 /* static */ already_AddRefed<AudioContext>
-AudioContext::Constructor(nsISupports* aGlobal, ErrorResult& aRv)
+AudioContext::Constructor(const GlobalObject& aGlobal, ErrorResult& aRv)
 {
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal);
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.Get());
   if (!window) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;

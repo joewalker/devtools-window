@@ -103,11 +103,11 @@ ion::EliminateDeadResumePointOperands(MIRGenerator *mir, MIRGraph &graph)
             // Walk the uses a second time, removing any in resume points after
             // the last use in a definition.
             for (MUseIterator uses(ins->usesBegin()); uses != ins->usesEnd(); ) {
-                if (uses->node()->isDefinition()) {
+                if (uses->consumer()->isDefinition()) {
                     uses++;
                     continue;
                 }
-                MResumePoint *mrp = uses->node()->toResumePoint();
+                MResumePoint *mrp = uses->consumer()->toResumePoint();
                 if (mrp->block() != *block ||
                     !mrp->instruction() ||
                     mrp->instruction() == *ins ||
@@ -188,8 +188,8 @@ IsPhiObservable(MPhi *phi, Observability observe)
 
       case ConservativeObservability:
         for (MUseIterator iter(phi->usesBegin()); iter != phi->usesEnd(); iter++) {
-            if (!iter->node()->isDefinition() ||
-                !iter->node()->toDefinition()->isPhi())
+            if (!iter->consumer()->isDefinition() ||
+                !iter->consumer()->toDefinition()->isPhi())
                 return true;
         }
         break;
@@ -201,11 +201,10 @@ IsPhiObservable(MPhi *phi, Observability observe)
         return true;
 
     // If the Phi is one of the formal argument, and we are using an argument
-    // object in the function.  The phi might be observable after a bailout.
+    // object in the function. The phi might be observable after a bailout.
+    // For inlined frames this is not needed, as they are captured in the inlineResumePoint.
     CompileInfo &info = phi->block()->info();
     if (info.fun() && info.hasArguments()) {
-        // We do not support arguments object inside inline frames yet.
-        JS_ASSERT(!phi->block()->callerResumePoint());
         uint32_t first = info.firstArgSlot();
         if (first <= slot && slot - first < info.nargs())
             return true;
@@ -375,6 +374,7 @@ class TypeAnalyzer
     bool respecialize(MPhi *phi, MIRType type);
     bool propagateSpecialization(MPhi *phi);
     bool specializePhis();
+    bool specializeTruncatedInstructions();
     void replaceRedundantPhi(MPhi *phi);
     void adjustPhiInputs(MPhi *phi);
     bool adjustInputs(MDefinition *def);
@@ -607,6 +607,8 @@ bool
 TypeAnalyzer::analyze()
 {
     if (!specializePhis())
+        return false;
+    if (!specializeTruncatedInstructions())
         return false;
     if (!insertConversions())
         return false;
@@ -877,15 +879,29 @@ CheckPredecessorImpliesSuccessor(MBasicBlock *A, MBasicBlock *B)
 }
 
 static bool
-CheckMarkedAsUse(MInstruction *ins, MDefinition *operand)
+CheckOperandImpliesUse(MInstruction *ins, MDefinition *operand)
 {
     for (MUseIterator i = operand->usesBegin(); i != operand->usesEnd(); i++) {
-        if (i->node()->isDefinition()) {
-            if (ins == i->node()->toDefinition())
-                return true;
-        }
+        if (i->consumer()->isDefinition() && i->consumer()->toDefinition() == ins)
+            return true;
     }
     return false;
+}
+
+static bool
+CheckUseImpliesOperand(MInstruction *ins, MUse *use)
+{
+    MNode *consumer = use->consumer();
+    uint32_t index = use->index();
+
+    if (consumer->isDefinition()) {
+        MDefinition *def = consumer->toDefinition();
+        return (def->getOperand(index) == ins);
+    }
+
+    JS_ASSERT(consumer->isResumePoint());
+    MResumePoint *res = consumer->toResumePoint();
+    return (res->getOperand(index) == ins);
 }
 #endif // DEBUG
 
@@ -924,9 +940,14 @@ ion::AssertGraphCoherency(MIRGraph &graph)
         for (size_t i = 0; i < block->numPredecessors(); i++)
             JS_ASSERT(CheckPredecessorImpliesSuccessor(*block, block->getPredecessor(i)));
 
+        // Assert that use chains are valid for this instruction.
         for (MInstructionIterator ins = block->begin(); ins != block->end(); ins++) {
             for (uint32_t i = 0; i < ins->numOperands(); i++)
-                JS_ASSERT(CheckMarkedAsUse(*ins, ins->getOperand(i)));
+                JS_ASSERT(CheckOperandImpliesUse(*ins, ins->getOperand(i)));
+        }
+        for (MInstructionIterator ins = block->begin(); ins != block->end(); ins++) {
+            for (MUseIterator i(ins->usesBegin()); i != ins->usesEnd(); i++)
+                JS_ASSERT(CheckUseImpliesOperand(*ins, *i));
         }
     }
 
@@ -1087,7 +1108,7 @@ ion::ExtractLinearInequality(MTest *test, BranchDirection direction,
     MDefinition *lhs = compare->getOperand(0);
     MDefinition *rhs = compare->getOperand(1);
 
-    if (compare->specialization() != MIRType_Int32)
+    if (compare->compareType() != MCompare::Compare_Int32)
         return false;
 
     JS_ASSERT(lhs->type() == MIRType_Int32);
@@ -1134,9 +1155,28 @@ ion::ExtractLinearInequality(MTest *test, BranchDirection direction,
 }
 
 static bool
-TryEliminateBoundsCheck(MBoundsCheck *dominating, MBoundsCheck *dominated, bool *eliminated)
+TryEliminateBoundsCheck(BoundsCheckMap &checks, size_t blockIndex, MBoundsCheck *dominated, bool *eliminated)
 {
     JS_ASSERT(!*eliminated);
+
+    // Replace all uses of the bounds check with the actual index.
+    // This is (a) necessary, because we can coalesce two different
+    // bounds checks and would otherwise use the wrong index and
+    // (b) helps register allocation. Note that this is safe since
+    // no other pass after bounds check elimination moves instructions.
+    dominated->replaceAllUsesWith(dominated->index());
+
+    if (!dominated->isMovable())
+        return true;
+
+    MBoundsCheck *dominating = FindDominatingBoundsCheck(checks, dominated, blockIndex);
+    if (!dominating)
+        return false;
+
+    if (dominating == dominated) {
+        // We didn't find a dominating bounds check.
+        return true;
+    }
 
     // We found two bounds checks with the same hash number, but we still have
     // to make sure the lengths and index terms are equal.
@@ -1177,6 +1217,99 @@ TryEliminateBoundsCheck(MBoundsCheck *dominating, MBoundsCheck *dominated, bool 
     return true;
 }
 
+static void
+TryEliminateTypeBarrierFromTest(MTypeBarrier *barrier, bool filtersNull, bool filtersUndefined,
+                                MTest *test, BranchDirection direction, bool *eliminated)
+{
+    JS_ASSERT(filtersNull || filtersUndefined);
+
+    // Watch for code patterns similar to 'if (x.f) { ... = x.f }'.  If x.f
+    // is either an object or null/undefined, there will be a type barrier on
+    // the latter read as the null/undefined value is never realized there.
+    // The type barrier can be eliminated, however, by looking at tests
+    // performed on the result of the first operation that filter out all
+    // types that have been seen in the first access but not the second.
+
+    // A test 'if (x.f)' filters both null and undefined.
+    if (test->getOperand(0) == barrier->input() && direction == TRUE_BRANCH) {
+        *eliminated = true;
+        barrier->replaceAllUsesWith(barrier->input());
+        return;
+    }
+
+    if (!test->getOperand(0)->isCompare())
+        return;
+
+    MCompare *compare = test->getOperand(0)->toCompare();
+    MCompare::CompareType compareType = compare->compareType();
+
+    if (compareType != MCompare::Compare_Undefined && compareType != MCompare::Compare_Null)
+        return;
+    if (compare->getOperand(0) != barrier->input())
+        return;
+
+    JSOp op = compare->jsop();
+    JS_ASSERT(op == JSOP_EQ || op == JSOP_STRICTEQ ||
+              op == JSOP_NE || op == JSOP_STRICTNE);
+
+    if ((direction == TRUE_BRANCH) != (op == JSOP_NE || op == JSOP_STRICTNE))
+        return;
+
+    // A test 'if (x.f != null)' or 'if (x.f != undefined)' filters both null
+    // and undefined. If strict equality is used, only the specified rhs is
+    // tested for.
+    if (op == JSOP_STRICTEQ || op == JSOP_STRICTNE) {
+        if (compareType == MCompare::Compare_Undefined && !filtersUndefined)
+            return;
+        if (compareType == MCompare::Compare_Null && !filtersNull)
+            return;
+    }
+
+    *eliminated = true;
+    barrier->replaceAllUsesWith(barrier->input());
+}
+
+static bool
+TryEliminateTypeBarrier(MTypeBarrier *barrier, bool *eliminated)
+{
+    JS_ASSERT(!*eliminated);
+
+    const types::StackTypeSet *barrierTypes = barrier->typeSet();
+    const types::StackTypeSet *inputTypes = barrier->input()->typeSet();
+
+    if (!barrierTypes || !inputTypes)
+        return true;
+
+    bool filtersNull = barrierTypes->filtersType(inputTypes, types::Type::NullType());
+    bool filtersUndefined = barrierTypes->filtersType(inputTypes, types::Type::UndefinedType());
+
+    if (!filtersNull && !filtersUndefined)
+        return true;
+
+    MBasicBlock *block = barrier->block();
+    while (true) {
+        BranchDirection direction;
+        MTest *test = block->immediateDominatorBranch(&direction);
+
+        if (test) {
+            TryEliminateTypeBarrierFromTest(barrier, filtersNull, filtersUndefined,
+                                            test, direction, eliminated);
+        }
+
+        MBasicBlock *previous = block->immediateDominator();
+        if (previous == block)
+            break;
+        block = previous;
+    }
+
+    return true;
+}
+
+// Eliminate checks which are redundant given each other or other instructions.
+//
+// A type barrier is considered redundant if all missing types have been tested
+// for by earlier control instructions.
+//
 // A bounds check is considered redundant if it's dominated by another bounds
 // check with the same length and the indexes differ by only a constant amount.
 // In this case we eliminate the redundant bounds check and update the other one
@@ -1186,7 +1319,7 @@ TryEliminateBoundsCheck(MBoundsCheck *dominating, MBoundsCheck *dominated, bool 
 // differences in constant offset, this offers a fast way to find redundant
 // checks.
 bool
-ion::EliminateRedundantBoundsChecks(MIRGraph &graph)
+ion::EliminateRedundantChecks(MIRGraph &graph)
 {
     BoundsCheckMap checks;
 
@@ -1220,41 +1353,18 @@ ion::EliminateRedundantBoundsChecks(MIRGraph &graph)
         }
 
         for (MDefinitionIterator iter(block); iter; ) {
-            if (!iter->isBoundsCheck()) {
-                iter++;
-                continue;
-            }
-
-            MBoundsCheck *check = iter->toBoundsCheck();
-
-            // Replace all uses of the bounds check with the actual index.
-            // This is (a) necessary, because we can coalesce two different
-            // bounds checks and would otherwise use the wrong index and
-            // (b) helps register allocation. Note that this is safe since
-            // no other pass after bounds check elimination moves instructions.
-            check->replaceAllUsesWith(check->index());
-
-            if (!check->isMovable()) {
-                iter++;
-                continue;
-            }
-
-            MBoundsCheck *dominating = FindDominatingBoundsCheck(checks, check, index);
-            if (!dominating)
-                return false;
-
-            if (dominating == check) {
-                // We didn't find a dominating bounds check.
-                iter++;
-                continue;
-            }
-
             bool eliminated = false;
-            if (!TryEliminateBoundsCheck(dominating, check, &eliminated))
-                return false;
+
+            if (iter->isBoundsCheck()) {
+                if (!TryEliminateBoundsCheck(checks, index, iter->toBoundsCheck(), &eliminated))
+                    return false;
+            } else if (iter->isTypeBarrier()) {
+                if (!TryEliminateTypeBarrier(iter->toTypeBarrier(), &eliminated))
+                    return false;
+            }
 
             if (eliminated)
-                iter = check->block()->discardDefAt(iter);
+                iter = block->discardDefAt(iter);
             else
                 iter++;
         }
@@ -1346,4 +1456,36 @@ LinearSum::print(Sprinter &sp) const
         sp.printf("+%d", constant_);
     else if (constant_ < 0)
         sp.printf("%d", constant_);
+}
+
+bool
+TypeAnalyzer::specializeTruncatedInstructions()
+{
+    // This specialization is a two step process: First we loop over the
+    // instruction stream forwards, marking all of the instructions that
+    // are computed purely from integers.  The theory is that we can observe
+    // values that don't fit into a 32 bit integer that can still be treated as
+    // integers.
+    for (ReversePostorderIterator block(graph.rpoBegin()); block != graph.rpoEnd(); block++) {
+        if (mir->shouldCancel("recoverBigInts (forwards loop)"))
+            return false;
+
+        for (MDefinitionIterator iter(*block); iter; iter++) {
+            iter->recalculateBigInt();
+        }
+    }
+
+    // Now, if these adds of doubles-that-are-really-big-ints get truncated
+    // on all reads, then we know that we don't care that any of these operations
+    // produces a value that is not an integer.  To achieve this, loop over the instruction
+    // stream backwards, marking every instruction where all reads are operations that truncate
+    // If we have a double operation that is marked both "bigInt" and "truncated", then we can
+    // safely convert it into an integer instruction
+    for (PostorderIterator block(graph.poBegin()); block != graph.poEnd(); block++) {
+        if (mir->shouldCancel("Propagate Truncates (backwards loop)"))
+            return false;
+        for (MInstructionReverseIterator riter(block->rbegin()); riter != block->rend(); riter++)
+            riter->analyzeTruncateBackward();
+    }
+    return true;
 }

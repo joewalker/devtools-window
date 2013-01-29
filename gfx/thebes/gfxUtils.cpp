@@ -20,13 +20,7 @@ using namespace mozilla;
 using namespace mozilla::layers;
 using namespace mozilla::gfx;
 
-const uint8_t gfxUtils::sPremultiplyTable[256*256] = {
-#include "sPremultiplyTable.h"
-};
-
-const uint8_t gfxUtils::sUnpremultiplyTable[256*256] = {
-#include "sUnpremultiplyTable.h"
-};
+#include "PremultiplyTables.h"
 
 static const uint8_t PremultiplyValue(uint8_t a, uint8_t v) {
     return gfxUtils::sPremultiplyTable[a*256+v];
@@ -216,6 +210,7 @@ OptimalFillOperator()
 #endif
 }
 
+#ifndef MOZ_GFX_OPTIMIZE_MOBILE
 // EXTEND_PAD won't help us here; we have to create a temporary surface to hold
 // the subimage of pixels we're allowed to sample.
 static already_AddRefed<gfxDrawable>
@@ -265,6 +260,7 @@ CreateSamplingRestrictedDrawable(gfxDrawable* aDrawable,
         new gfxSurfaceDrawable(temp, size, gfxMatrix().Translate(-needed.TopLeft()));
     return drawable.forget();
 }
+#endif // !MOZ_GFX_OPTIMIZE_MOBILE
 
 // working around cairo/pixman bug (bug 364968)
 // Our device-space-to-image-space transform may not be acceptable to pixman.
@@ -592,6 +588,29 @@ gfxUtils::PathFromRegionSnapped(gfxContext* aContext, const nsIntRegion& aRegion
   PathFromRegionInternal(aContext, aRegion, true);
 }
 
+gfxMatrix
+gfxUtils::TransformRectToRect(const gfxRect& aFrom, const gfxPoint& aToTopLeft,
+                              const gfxPoint& aToTopRight, const gfxPoint& aToBottomRight)
+{
+  gfxMatrix m;
+  if (aToTopRight.y == aToTopLeft.y && aToTopRight.x == aToBottomRight.x) {
+    // Not a rotation, so xy and yx are zero
+    m.xy = m.yx = 0.0;
+    m.xx = (aToBottomRight.x - aToTopLeft.x)/aFrom.width;
+    m.yy = (aToBottomRight.y - aToTopLeft.y)/aFrom.height;
+    m.x0 = aToTopLeft.x - m.xx*aFrom.x;
+    m.y0 = aToTopLeft.y - m.yy*aFrom.y;
+  } else {
+    NS_ASSERTION(aToTopRight.y == aToBottomRight.y && aToTopRight.x == aToTopLeft.x,
+                 "Destination rectangle not axis-aligned");
+    m.xx = m.yy = 0.0;
+    m.xy = (aToBottomRight.x - aToTopLeft.x)/aFrom.height;
+    m.yx = (aToBottomRight.y - aToTopLeft.y)/aFrom.width;
+    m.x0 = aToTopLeft.x - m.xy*aFrom.y;
+    m.y0 = aToTopLeft.y - m.yx*aFrom.x;
+  }
+  return m;
+}
 
 bool
 gfxUtils::GfxRectToIntRect(const gfxRect& aIn, nsIntRect* aOut)

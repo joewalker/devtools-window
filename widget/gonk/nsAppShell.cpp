@@ -135,6 +135,7 @@ sendMouseEvent(uint32_t msg, uint64_t timeMs, int x, int y, bool forwardToChildr
     event.refPoint.y = y;
     event.time = timeMs;
     event.button = nsMouseEvent::eLeftButton;
+    event.inputSource = nsIDOMMouseEvent::MOZ_SOURCE_TOUCH;
     if (msg != NS_MOUSE_MOVE)
         event.clickCount = 1;
 
@@ -207,7 +208,7 @@ sendKeyEventWithMsg(uint32_t keyCode,
     event.keyCode = keyCode;
     event.location = nsIDOMKeyEvent::DOM_KEY_LOCATION_MOBILE;
     event.time = timeMs;
-    event.mFlags |= flags;
+    event.mFlags.Union(flags);
     return nsWindow::DispatchInputEvent(event);
 }
 

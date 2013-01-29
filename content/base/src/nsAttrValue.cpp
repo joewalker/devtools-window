@@ -23,6 +23,7 @@
 #include "nsHTMLCSSStyleSheet.h"
 #include "nsCSSParser.h"
 #include "nsStyledElement.h"
+#include <algorithm>
 
 using namespace mozilla;
 
@@ -30,7 +31,7 @@ using namespace mozilla;
   reinterpret_cast<void*>((_cont)->mStringBits & NS_ATTRVALUE_POINTERVALUE_MASK)
 
 bool
-MiscContainer::GetString(nsDependentString& aString) const
+MiscContainer::GetString(nsAString& aString) const
 {
   void* ptr = MISC_STR_PTR(this);
 
@@ -46,8 +47,7 @@ MiscContainer::GetString(nsDependentString& aString) const
       return false;
     }
 
-    aString.Rebind(reinterpret_cast<PRUnichar*>(buffer->Data()),
-                   buffer->StorageSize() / sizeof(PRUnichar) - 1);
+    buffer->ToString(buffer->StorageSize() / sizeof(PRUnichar) - 1, aString);
     return true;
   }
 
@@ -56,7 +56,7 @@ MiscContainer::GetString(nsDependentString& aString) const
     return false;
   }
 
-  aString.Rebind(atom->GetUTF16String(), atom->GetLength());
+  atom->ToString(aString);
   return true;
 }
 
@@ -75,7 +75,7 @@ MiscContainer::Cache()
     return;
   }
 
-  nsDependentString str;
+  nsString str;
   bool gotString = GetString(str);
   if (!gotString) {
     return;
@@ -107,7 +107,7 @@ MiscContainer::Evict()
   nsHTMLCSSStyleSheet* sheet = rule->GetHTMLCSSStyleSheet();
   MOZ_ASSERT(sheet);
 
-  nsDependentString str;
+  nsString str;
   DebugOnly<bool> gotString = GetString(str);
   MOZ_ASSERT(gotString);
 
@@ -578,9 +578,7 @@ nsAttrValue::ToString(nsAString& aResult) const
   if (BaseType() == eOtherBase) {
     cont = GetMiscContainer();
 
-    nsDependentString str;
-    if (cont->GetString(str)) {
-      aResult = str;
+    if (cont->GetString(aResult)) {
       return;
     }
   }
@@ -1454,7 +1452,7 @@ nsAttrValue::ParseSpecialIntValue(const nsAString& aString)
     return false;
   }
 
-  int32_t val = NS_MAX(originalVal, 0);
+  int32_t val = std::max(originalVal, 0);
 
   // % (percent)
   if (isPercent || tmp.RFindChar('%') >= 0) {
@@ -1484,8 +1482,8 @@ nsAttrValue::ParseIntWithBounds(const nsAString& aString,
     return false;
   }
 
-  int32_t val = NS_MAX(originalVal, aMin);
-  val = NS_MIN(val, aMax);
+  int32_t val = std::max(originalVal, aMin);
+  val = std::min(val, aMax);
   strict = strict && (originalVal == val);
   SetIntValueAndType(val, eInteger, strict ? nullptr : &aString);
 

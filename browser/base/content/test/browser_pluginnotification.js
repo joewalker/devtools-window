@@ -537,7 +537,7 @@ function test15() {
   var mainBox = doc.getAnonymousElementByAttribute(plugin, "class", "mainBox");
   ok(mainBox, "Test 15, Plugin with id=" + plugin.id + " overlay should exist");
 
-  prepareTest(test16a, gTestRoot + "plugin_bug743421.html");
+  prepareTest(test16a, gTestRoot + "plugin_add_dynamically.html");
 }
 
 // Tests that a plugin dynamically added to a page after one plugin is clicked
@@ -827,9 +827,8 @@ function test21a() {
   }
 
   // we have to actually show the panel to get the bindings to instantiate
-  notification.options.dismissed = false;
   notification.options.eventCallback = test21b;
-  PopupNotifications._showPanel([notification], notification.anchorElement);
+  notification.reshow();
 }
 
 function test21b() {
@@ -887,9 +886,8 @@ function test21c() {
   }
 
   // we have to actually show the panel to get the bindings to instantiate
-  notification.options.dismissed = false;
   notification.options.eventCallback = test21d;
-  PopupNotifications._showPanel([notification], notification.anchorElement);
+  notification.reshow();
 }
 
 function test21d() {

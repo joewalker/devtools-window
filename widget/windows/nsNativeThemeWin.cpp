@@ -34,6 +34,7 @@
 
 #include "nsUXThemeData.h"
 #include "nsUXThemeConstants.h"
+#include <algorithm>
 
 using namespace mozilla::widget;
 
@@ -180,8 +181,8 @@ static SIZE GetGutterSize(HANDLE theme, HDC hdc)
     SIZE itemSize;
     GetThemePartSize(theme, hdc, MENU_POPUPITEM, MPI_NORMAL, NULL, TS_TRUE, &itemSize);
 
-    int width = NS_MAX(itemSize.cx, checkboxBGSize.cx + gutterSize.cx);
-    int height = NS_MAX(itemSize.cy, checkboxBGSize.cy);
+    int width = std::max(itemSize.cx, checkboxBGSize.cx + gutterSize.cx);
+    int height = std::max(itemSize.cy, checkboxBGSize.cy);
     SIZE ret;
     ret.cx = width;
     ret.cy = height;
@@ -1169,6 +1170,15 @@ nsNativeThemeWin::GetThemePartAndState(nsIFrame* aFrame, uint8_t aWidgetType,
   return NS_ERROR_FAILURE;
 }
 
+static bool
+AssumeThemePartAndStateAreTransparent(int32_t aPart, int32_t aState)
+{
+  if (aPart == MENU_POPUPITEM && aState == MBI_NORMAL) {
+    return true;
+  }
+  return false;
+}
+
 NS_IMETHODIMP
 nsNativeThemeWin::DrawWidgetBackground(nsRenderingContext* aContext,
                                        nsIFrame* aFrame,
@@ -1213,6 +1223,10 @@ nsNativeThemeWin::DrawWidgetBackground(nsRenderingContext* aContext,
   nsresult rv = GetThemePartAndState(aFrame, aWidgetType, part, state);
   if (NS_FAILED(rv))
     return rv;
+
+  if (AssumeThemePartAndStateAreTransparent(part, state)) {
+    return NS_OK;
+  }
 
   gfxFloat p2a = gfxFloat(aContext->AppUnitsPerDevPixel());
   RECT widgetRect;
@@ -3148,6 +3162,10 @@ nsresult nsNativeThemeWin::ClassicDrawWidgetBackground(nsRenderingContext* aCont
   rv = ClassicGetThemePartAndState(aFrame, aWidgetType, part, state, focused);
   if (NS_FAILED(rv))
     return rv;
+
+  if (AssumeThemePartAndStateAreTransparent(part, state)) {
+    return NS_OK;
+  }
 
   gfxFloat p2a = gfxFloat(aContext->AppUnitsPerDevPixel());
   RECT widgetRect;

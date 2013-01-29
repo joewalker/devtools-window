@@ -96,6 +96,7 @@ for each (let [setting, maxValue, streamTypes] in audioChannelSettings) {
 
 SettingsListener.observe('debug.console.enabled', true, function(value) {
   Services.prefs.setBoolPref('consoleservice.enabled', value);
+  Services.prefs.setBoolPref('layout.css.report_errors', value);
 });
 
 // =================== Languages ====================
@@ -203,15 +204,11 @@ SettingsListener.observe('devtools.debugger.remote-enabled', false, function(val
   Services.prefs.setBoolPref('devtools.debugger.remote-enabled', value);
   // This preference is consulted during startup
   Services.prefs.savePrefFile(null);
-  value ? startDebugger() : stopDebugger();
+  value ? RemoteDebugger.start() : RemoteDebugger.stop();
 });
 
 SettingsListener.observe('debug.log-animations.enabled', false, function(value) {
   Services.prefs.setBoolPref('layers.offmainthreadcomposition.log-animations', value);
-});
-
-SettingsListener.observe('debug.dev-mode', false, function(value) {
-  Services.prefs.setBoolPref('dom.mozApps.dev_mode', value);
 });
 
 // =================== Privacy ====================

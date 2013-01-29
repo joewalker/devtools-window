@@ -39,9 +39,6 @@ this.InspectorPanel = function InspectorPanel(iframeWindow, toolbox) {
   this.panelWin = iframeWindow;
   this.panelWin.inspector = this;
 
-  this.tabTarget = (this.target.tab != null);
-  this.winTarget = (this.target.window != null);
-
   EventEmitter.decorate(this);
 }
 
@@ -64,16 +61,28 @@ InspectorPanel.prototype = {
     this.nodemenu.addEventListener("popupshowing", this._setupNodeMenu, true);
     this.nodemenu.addEventListener("popuphiding", this._resetNodeMenu, true);
 
+    // Initialize the search related items
+    this.searchBox = this.panelDoc.getElementById("inspector-searchbox");
+    this._lastSearched = null;
+    this._searchResults = null;
+    this._searchIndex = 0;
+    this._onHTMLSearch = this._onHTMLSearch.bind(this);
+    this._onSearchKeypress = this._onSearchKeypress.bind(this);
+    this.searchBox.addEventListener("command", this._onHTMLSearch, true);
+    this.searchBox.addEventListener("keypress", this._onSearchKeypress, true);
+
     // Create an empty selection
     this._selection = new Selection();
     this.onNewSelection = this.onNewSelection.bind(this);
     this.selection.on("new-node", this.onNewSelection);
+    this.onBeforeNewSelection = this.onBeforeNewSelection.bind(this);
+    this.selection.on("before-new-node", this.onBeforeNewSelection);
     this.onDetached = this.onDetached.bind(this);
     this.selection.on("detached", this.onDetached);
 
     this.breadcrumbs = new HTMLBreadcrumbs(this);
 
-    if (this.tabTarget) {
+    if (this.target.isLocalTab) {
       this.browser = this.target.tab.linkedBrowser;
       this.scheduleLayoutChange = this.scheduleLayoutChange.bind(this);
       this.browser.addEventListener("resize", this.scheduleLayoutChange, true);
@@ -81,15 +90,43 @@ InspectorPanel.prototype = {
       this.highlighter = new Highlighter(this.target, this, this._toolbox);
       let button = this.panelDoc.getElementById("inspector-inspect-toolbutton");
       button.hidden = false;
-      this.updateInspectorButton = function() {
+      this.onLockStateChanged = function() {
         if (this.highlighter.locked) {
           button.removeAttribute("checked");
+          this._toolbox.raise();
         } else {
           button.setAttribute("checked", "true");
         }
       }.bind(this);
-      this.highlighter.on("locked", this.updateInspectorButton);
-      this.highlighter.on("unlocked", this.updateInspectorButton);
+      this.highlighter.on("locked", this.onLockStateChanged);
+      this.highlighter.on("unlocked", this.onLockStateChanged);
+
+      // Show a warning when the debugger is paused.
+      // We show the warning only when the inspector
+      // is selected.
+      this.updateDebuggerPausedWarning = function() {
+        let notificationBox = this._toolbox.getNotificationBox();
+        let notification = notificationBox.getNotificationWithValue("inspector-script-paused");
+        if (!notification && this._toolbox.currentToolId == "inspector" &&
+            this.target.isThreadPaused) {
+          let message = this.strings.GetStringFromName("debuggerPausedWarning.message");
+          notificationBox.appendNotification(message,
+            "inspector-script-paused", "", notificationBox.PRIORITY_WARNING_HIGH);
+        }
+
+        if (notification && this._toolbox.currentToolId != "inspector") {
+          notificationBox.removeNotification(notification);
+        }
+
+        if (notification && !this.target.isThreadPaused) {
+          notificationBox.removeNotification(notification);
+        }
+
+      }.bind(this);
+      this.target.on("thread-paused", this.updateDebuggerPausedWarning);
+      this.target.on("thread-resumed", this.updateDebuggerPausedWarning);
+      this._toolbox.on("select", this.updateDebuggerPausedWarning);
+      this.updateDebuggerPausedWarning();
     }
 
     this._initMarkup();
@@ -99,11 +136,10 @@ InspectorPanel.prototype = {
       this.isReady = true;
 
       // All the components are initialized. Let's select a node.
-      if (this.tabTarget) {
+      if (this.target.isLocalTab) {
         let root = this.browser.contentDocument.documentElement;
         this._selection.setNode(root);
-      }
-      if (this.winTarget) {
+      } else if (this.target.window) {
         let root = this.target.window.document.documentElement;
         this._selection.setNode(root);
       }
@@ -297,6 +333,17 @@ InspectorPanel.prototype = {
   },
 
   /**
+   * When a new node is selected, before the selection has changed.
+   */
+  onBeforeNewSelection: function InspectorPanel_onBeforeNewSelection(event,
+                                                                     node) {
+    if (this.breadcrumbs.indexOf(node) == -1) {
+      // only clear locks if we'd have to update breadcrumbs
+      this.clearPseudoClasses();
+    }
+  },
+
+  /**
    * When a node is deleted, select its parent node.
    */
   onDetached: function InspectorPanel_onDetached(event, parentNode) {
@@ -316,8 +363,6 @@ InspectorPanel.prototype = {
 
     this.cancelLayoutChange();
 
-    this._toolbox = null;
-
     if (this.browser) {
       this.browser.removeEventListener("resize", this.scheduleLayoutChange, true);
       this.browser = null;
@@ -327,10 +372,16 @@ InspectorPanel.prototype = {
     this.target.off("navigate", this.onNavigatedAway);
 
     if (this.highlighter) {
-      this.highlighter.off("locked", this.updateInspectorButton);
-      this.highlighter.off("unlocked", this.updateInspectorButton);
+      this.highlighter.off("locked", this.onLockStateChanged);
+      this.highlighter.off("unlocked", this.onLockStateChanged);
       this.highlighter.destroy();
     }
+
+    this.target.off("thread-paused", this.updateDebuggerPausedWarning);
+    this.target.off("thread-resumed", this.updateDebuggerPausedWarning);
+    this._toolbox.off("select", this.updateDebuggerPausedWarning);
+
+    this._toolbox = null;
 
     this.sidebar.off("select", this._setDefaultSidebar);
     this.sidebar.destroy();
@@ -338,8 +389,11 @@ InspectorPanel.prototype = {
 
     this.nodemenu.removeEventListener("popupshowing", this._setupNodeMenu, true);
     this.nodemenu.removeEventListener("popuphiding", this._resetNodeMenu, true);
+    this.searchBox.removeEventListener("command", this._onHTMLSearch, true);
+    this.searchBox.removeEventListener("keypress", this._onSearchKeypress, true);
     this.breadcrumbs.destroy();
     this.selection.off("new-node", this.onNewSelection);
+    this.selection.off("before-new-node", this.onBeforeNewSelection);
     this.selection.off("detached", this.onDetached);
     this._destroyMarkup();
     this._selection.destroy();
@@ -351,9 +405,77 @@ InspectorPanel.prototype = {
     this.breadcrumbs = null;
     this.lastNodemenuItem = null;
     this.nodemenu = null;
+    this.searchBox = null;
     this.highlighter = null;
 
     return Promise.resolve(null);
+  },
+
+  /**
+   * The command callback for the HTML search box. This function is
+   * automatically invoked as the user is typing.
+   */
+  _onHTMLSearch: function InspectorPanel__onHTMLSearch() {
+    let query = this.searchBox.value;
+    if (query == this._lastSearched) {
+      return;
+    }
+    this._lastSearched = query;
+    this._searchIndex = 0;
+
+    if (query.length == 0) {
+      this.searchBox.removeAttribute("filled");
+      this.searchBox.classList.remove("devtools-no-search-result");
+      return;
+    }
+
+    this.searchBox.setAttribute("filled", true);
+    this._searchResults = this.browser.contentDocument.querySelectorAll(query);
+    if (this._searchResults.length > 0) {
+      this.searchBox.classList.remove("devtools-no-search-result");
+      this.cancelLayoutChange();
+      this.selection.setNode(this._searchResults[0]);
+    } else {
+      this.searchBox.classList.add("devtools-no-search-result");
+    }
+  },
+
+  /**
+   * Search for the search box value as a query selector.
+   */
+  _onSearchKeypress: function InspectorPanel__onSearchKeypress(aEvent) {
+    let query = this.searchBox.value;
+    switch(aEvent.keyCode) {
+      case aEvent.DOM_VK_ENTER:
+      case aEvent.DOM_VK_RETURN:
+        if (query == this._lastSearched) {
+          this._searchIndex = (this._searchIndex + 1) % this._searchResults.length;
+        } else {
+          this._onHTMLSearch();
+          return;
+        }
+        break;
+
+      case aEvent.DOM_VK_UP:
+        if (--this._searchIndex < 0) {
+          this._searchIndex = this._searchResults.length - 1;
+        }
+        break;
+
+      case aEvent.DOM_VK_DOWN:
+        this._searchIndex = (this._searchIndex + 1) % this._searchResults.length;
+        break;
+
+      default:
+        return;
+    }
+
+    aEvent.preventDefault();
+    aEvent.stopPropagation();
+    this.cancelLayoutChange();
+    if (this._searchResults.length > 0) {
+      this.selection.setNode(this._searchResults[this._searchIndex]);
+    }
   },
 
   /**
@@ -429,12 +551,7 @@ InspectorPanel.prototype = {
 
     this._markupBox.removeAttribute("hidden");
 
-    let controllerWindow;
-    if (this.tabTarget) {
-      controllerWindow = this.target.tab.ownerDocument.defaultView;
-    } else if (this.winTarget) {
-      controllerWindow = this.target.window;
-    }
+    let controllerWindow = this._toolbox.doc.defaultView;
     this.markup = new MarkupView(this, this._markupFrame, controllerWindow);
 
     this.emit("markuploaded");
@@ -476,6 +593,15 @@ InspectorPanel.prototype = {
       }
     }
     this.selection.emit("pseudoclass");
+  },
+
+  /**
+   * Clear any pseudo-class locks applied to the current hierarchy.
+   */
+  clearPseudoClasses: function InspectorPanel_clearPseudoClasses() {
+    this.breadcrumbs.nodeHierarchy.forEach(function(crumb) {
+      DOMUtils.clearPseudoClassLocks(crumb.node);
+    });
   },
 
   /**

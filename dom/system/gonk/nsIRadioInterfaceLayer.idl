@@ -10,6 +10,7 @@ interface nsIDOMDOMRequest;
 interface nsIDOMWindow;
 interface nsIDOMMozVoicemailStatus;
 interface nsISmsRequest;
+interface nsIDOMMozSmsSegmentInfo;
 interface nsIDOMMozCellBroadcastMessage;
 
 [scriptable, uuid(0faabc35-644d-4ed5-b109-425280ff1cdf)]
@@ -137,6 +138,21 @@ interface nsIRILContactCallback : nsISupports
                            in jsval contacts);
 };
 
+[scriptable, function, uuid(ab954d56-12a1-4c6b-8753-14ad5664111d)]
+interface nsIRILContactUpdateCallback : nsISupports
+{
+  /**
+   * Called when an ICC contact is updated.
+   *
+   * @param errorMsg
+   *        Error message from RIL.
+   * @param contactType
+   *        Type of the contact, i.e. ADN.
+   */
+  void onUpdated(in DOMString errorMsg,
+                 in DOMString contactType);
+};
+
 [scriptable, uuid(c5e31c2c-a6a1-44c3-a30e-7fdfb4dc1750)]
 interface nsIRILCellBroadcastCallback : nsISupports
 {
@@ -224,9 +240,14 @@ interface nsIRILContentHelper : nsIMobileConnectionProvider
   readonly attribute DOMString voicemailDisplayName;
 };
 
-[scriptable, uuid(4efdb1d4-1e49-4f5d-a656-44e6180062a7)]
+[scriptable, uuid(7cb249b8-7ec9-4e31-a043-293121574dd0)]
 interface nsIICCRecords : nsISupports
 {
+  /**
+   * Integrated Circuit Card Identifier.
+   */
+  readonly attribute DOMString iccid;
+
   /**
    * Mobile Subscriber ISDN Number
    */
@@ -261,6 +282,29 @@ interface nsIICCRecords : nsISupports
    * Fixed Dialling Numbers
    */
   readonly attribute jsval fdn;
+
+  /**
+   * Service Provider Name (SPN) of the subscriber's home network.
+   */
+  readonly attribute DOMString spn;
+
+  /**
+   * Network name must be a part of displayed carrier name.
+   */
+  readonly attribute boolean isDisplayNetworkNameRequired;
+
+  /**
+   * Service provider name must be a part of displayed carrier name.
+   */
+  readonly attribute boolean isDisplaySpnRequired;
+};
+
+[scriptable, uuid(c0c5cb9f-6372-4b5a-b74c-baacc2da5e4f)]
+interface nsIVoicemailInfo : nsISupports
+{
+  readonly attribute DOMString number;
+
+  readonly attribute DOMString displayName;
 };
 
 [scriptable, uuid(e6dc89f2-0d4e-46fc-902c-cfeeaee15e40)]
@@ -277,7 +321,7 @@ interface nsIRilContext : nsISupports
   readonly attribute nsIDOMMozMobileConnectionInfo data;
 };
 
-[scriptable, uuid(a90fef2c-44aa-4f2b-a0ee-a590e9dd345e)]
+[scriptable, uuid(385345ee-f78c-4be4-abd2-07d3dae4e208)]
 interface nsIRadioInterfaceLayer : nsISupports
 {
   const unsigned short CALL_STATE_UNKNOWN = 0;
@@ -300,6 +344,8 @@ interface nsIRadioInterfaceLayer : nsISupports
 
   readonly attribute nsIRilContext rilContext;
 
+  readonly attribute nsIVoicemailInfo voicemailInfo;
+
   /**
    * PDP APIs
    */
@@ -319,10 +365,13 @@ interface nsIRadioInterfaceLayer : nsISupports
   void registerDataCallCallback(in nsIRILDataCallback callback);
   void unregisterDataCallCallback(in nsIRILDataCallback callback);
 
+  void updateRILNetworkInterface();
+
   /**
    * SMS-related functionality.
    */
-  unsigned short getNumberOfMessagesForText(in DOMString text);
+  nsIDOMMozSmsSegmentInfo getSegmentInfoForText(in DOMString text);
+
   void sendSMS(in DOMString number,
                in DOMString message,
                in nsISmsRequest request);
@@ -341,4 +390,23 @@ interface nsIRadioInterfaceLayer : nsISupports
    */
   void getICCContacts(in DOMString contactType,
                       in nsIRILContactCallback callback);
+
+  /**
+   * Update ICC Contact.
+   *
+   * This function allows two operations: update the existing contact or
+   *                                      insert a new contact.
+   * If the contact has 'recordId' property, the corresponding record will be
+   * updated. If not, the contact will be inserted.
+   *
+   * @param contactType One of the values below.
+   *                    "ADN" (Abbreviated Dialling Numbers)
+   * @param contact     The contact will be updated.
+   *                    If has 'recordId' property, updates corresponding record.
+   *                    If not, finds a free record and updates it.
+   * @param callback    A nsIRILContactUpdateCallback object.
+   */
+  void updateICCContact(in DOMString contactType,
+                        in jsval contact,
+                        in nsIRILContactUpdateCallback callback);
 };

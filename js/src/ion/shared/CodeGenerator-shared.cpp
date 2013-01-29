@@ -223,7 +223,11 @@ CodeGeneratorShared::encode(LSnapshot *snapshot)
         DebugOnly<jsbytecode *> bailPC = pc;
         if (mir->mode() == MResumePoint::ResumeAfter)
           bailPC = GetNextPc(pc);
-        JS_ASSERT_IF(GetIonContext()->cx,
+
+        // For fun.apply({}, arguments) the reconstructStackDepth will have stackdepth 4,
+        // but it could be that we inlined the funapply. In that case exprStackSlots,
+        // will have the real arguments in the slots and not be 4.
+        JS_ASSERT_IF(GetIonContext()->cx && JSOp(*bailPC) != JSOP_FUNAPPLY,
                      exprStack == js_ReconstructStackDepth(GetIonContext()->cx, script, bailPC));
 
 #ifdef TRACK_SNAPSHOTS
@@ -465,23 +469,19 @@ CodeGeneratorShared::visitOutOfLineTruncateSlow(OutOfLineTruncateSlow *ool)
 void
 CodeGeneratorShared::emitPreBarrier(Register base, const LAllocation *index, MIRType type)
 {
-    CodeOffsetLabel offset;
-
     if (index->isConstant()) {
         Address address(base, ToInt32(index) * sizeof(Value));
-        offset = masm.patchableCallPreBarrier(address, type);
+        masm.patchableCallPreBarrier(address, type);
     } else {
         BaseIndex address(base, ToRegister(index), TimesEight);
-        offset = masm.patchableCallPreBarrier(address, type);
+        masm.patchableCallPreBarrier(address, type);
     }
-
-    addPreBarrierOffset(offset);
 }
 
 void
 CodeGeneratorShared::emitPreBarrier(Address address, MIRType type)
 {
-    addPreBarrierOffset(masm.patchableCallPreBarrier(address, type));
+    masm.patchableCallPreBarrier(address, type);
 }
 
 void

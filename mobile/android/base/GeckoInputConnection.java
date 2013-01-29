@@ -10,6 +10,7 @@ import org.mozilla.gecko.gfx.InputConnectionHandler;
 import android.R;
 import android.content.Context;
 import android.os.Build;
+import android.os.SystemClock;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.Selection;
@@ -39,12 +40,13 @@ class GeckoInputConnection
 
     private static final int INLINE_IME_MIN_DISPLAY_SIZE = 480;
 
-    private static int mIMEState;
-    private static String mIMETypeHint = "";
-    private static String mIMEModeHint = "";
-    private static String mIMEActionHint = "";
+    // Managed only by notifyIMEEnabled; see comments in notifyIMEEnabled
+    private int mIMEState;
+    private String mIMETypeHint = "";
+    private String mIMEModeHint = "";
+    private String mIMEActionHint = "";
 
-    private String mCurrentInputMethod;
+    private String mCurrentInputMethod = "";
 
     private final GeckoEditableClient mEditableClient;
     protected int mBatchEditCount;
@@ -52,7 +54,8 @@ class GeckoInputConnection
     private final ExtractedText mUpdateExtract = new ExtractedText();
     private boolean mBatchSelectionChanged;
     private boolean mBatchTextChanged;
-    private Runnable mRestartInputRunnable;
+    private long mLastRestartInputTime;
+    private final InputConnection mPluginInputConnection;
 
     public static GeckoEditableListener create(View targetView,
                                                GeckoEditableClient editable) {
@@ -67,6 +70,8 @@ class GeckoInputConnection
         super(targetView, true);
         mEditableClient = editable;
         mIMEState = IME_STATE_DISABLED;
+        // InputConnection for plugins, which don't have full editors
+        mPluginInputConnection = new BaseInputConnection(targetView, false);
     }
 
     @Override
@@ -196,28 +201,53 @@ class GeckoInputConnection
         }
     }
 
-    private void restartInput() {
-        if (mRestartInputRunnable != null) {
+    private void tryRestartInput() {
+        // Coalesce restartInput calls because InputMethodManager.restartInput()
+        // is expensive and successive calls to it can lock up the keyboard
+        if (SystemClock.uptimeMillis() < mLastRestartInputTime + 200) {
             return;
         }
+        restartInput();
+    }
+
+    private void restartInput() {
+
+        mLastRestartInputTime = SystemClock.uptimeMillis();
+
         final InputMethodManager imm = getInputMethodManager();
         if (imm == null) {
             return;
         }
-        mRestartInputRunnable = new Runnable() {
-            @Override
-            public void run() {
-                final View v = getView();
-                final Editable editable = getEditable();
-                // Fake a selection change, so that when we restart the input,
-                // the IME will make sure that any old composition string is cleared
-                notifySelectionChange(Selection.getSelectionStart(editable),
-                                      Selection.getSelectionEnd(editable));
-                imm.restartInput(v);
-                mRestartInputRunnable = null;
-            }
-        };
-        GeckoApp.mAppContext.mMainHandler.postDelayed(mRestartInputRunnable, 200);
+        final View v = getView();
+        // InputMethodManager has internal logic to detect if we are restarting input
+        // in an already focused View, which is the case here because all content text
+        // fields are inside one LayerView. When this happens, InputMethodManager will
+        // tell the input method to soft reset instead of hard reset. Stock latin IME
+        // on Android 4.2+ has a quirk that when it soft resets, it does not clear the
+        // composition. The following workaround tricks the IME into clearing the
+        // composition when soft resetting.
+        if (InputMethods.needsSoftResetWorkaround(mCurrentInputMethod)) {
+            // Fake a selection change, because the IME clears the composition when
+            // the selection changes, even if soft-resetting. Offsets here must be
+            // different from the previous selection offsets, and -1 seems to be a
+            // reasonable, deterministic value
+            notifySelectionChange(-1, -1);
+        }
+        imm.restartInput(v);
+    }
+
+    private void resetInputConnection() {
+        if (mBatchEditCount != 0) {
+            Log.w(LOGTAG, "resetting with mBatchEditCount = " + mBatchEditCount);
+            mBatchEditCount = 0;
+        }
+        mBatchSelectionChanged = false;
+        mBatchTextChanged = false;
+        mUpdateRequest = null;
+
+        mCurrentInputMethod = "";
+
+        // Do not reset mIMEState here; see comments in notifyIMEEnabled
     }
 
     public void onTextChange(String text, int start, int oldEnd, int newEnd) {
@@ -287,6 +317,8 @@ class GeckoInputConnection
 
         if (mIMEState == IME_STATE_PASSWORD)
             outAttrs.inputType |= InputType.TYPE_TEXT_VARIATION_PASSWORD;
+        else if (mIMEState == IME_STATE_PLUGIN)
+            outAttrs.inputType = InputType.TYPE_NULL; // "send key events" mode
         else if (mIMETypeHint.equalsIgnoreCase("url"))
             outAttrs.inputType |= InputType.TYPE_TEXT_VARIATION_URI;
         else if (mIMETypeHint.equalsIgnoreCase("email"))
@@ -302,7 +334,7 @@ class GeckoInputConnection
                                  | InputType.TYPE_NUMBER_FLAG_DECIMAL;
         else if (mIMETypeHint.equalsIgnoreCase("week") ||
                  mIMETypeHint.equalsIgnoreCase("month"))
-             outAttrs.inputType = InputType.TYPE_CLASS_DATETIME
+            outAttrs.inputType = InputType.TYPE_CLASS_DATETIME
                                   | InputType.TYPE_DATETIME_VARIATION_DATE;
         else if (mIMEModeHint.equalsIgnoreCase("numeric"))
             outAttrs.inputType = InputType.TYPE_CLASS_NUMBER |
@@ -353,16 +385,22 @@ class GeckoInputConnection
         }
 
         // If the user has changed IMEs, then notify input method observers.
-        if (mCurrentInputMethod != prevInputMethod) {
+        if (!mCurrentInputMethod.equals(prevInputMethod)) {
             FormAssistPopup popup = app.mFormAssistPopup;
             if (popup != null) {
                 popup.onInputMethodChanged(mCurrentInputMethod);
             }
         }
 
-        // We don't know the selection
-        outAttrs.initialSelStart = -1;
-        outAttrs.initialSelEnd = -1;
+        if (mIMEState == IME_STATE_PLUGIN) {
+            // Since we are using a temporary string as the editable, the selection is at 0
+            outAttrs.initialSelStart = 0;
+            outAttrs.initialSelEnd = 0;
+            return mPluginInputConnection;
+        }
+        Editable editable = getEditable();
+        outAttrs.initialSelStart = Selection.getSelectionStart(editable);
+        outAttrs.initialSelEnd = Selection.getSelectionEnd(editable);
         return this;
     }
 
@@ -399,6 +437,7 @@ class GeckoInputConnection
 
         // KeyListener returns true if it handled the event for us.
         if (mIMEState == IME_STATE_DISABLED ||
+                mIMEState == IME_STATE_PLUGIN ||
                 keyCode == KeyEvent.KEYCODE_ENTER ||
                 keyCode == KeyEvent.KEYCODE_DEL ||
                 keyCode == KeyEvent.KEYCODE_TAB ||
@@ -430,6 +469,7 @@ class GeckoInputConnection
         KeyListener keyListener = TextKeyListener.getInstance();
 
         if (mIMEState == IME_STATE_DISABLED ||
+            mIMEState == IME_STATE_PLUGIN ||
             keyCode == KeyEvent.KEYCODE_ENTER ||
             keyCode == KeyEvent.KEYCODE_DEL ||
             (event.getFlags() & KeyEvent.FLAG_SOFT_KEYBOARD) != 0 ||
@@ -480,13 +520,12 @@ class GeckoInputConnection
             case NOTIFY_IME_RESETINPUTSTATE:
                 // Commit and end composition
                 finishComposingText();
-                restartInput();
+                tryRestartInput();
                 break;
 
             case NOTIFY_IME_FOCUSCHANGE:
                 // Showing/hiding vkb is done in notifyIMEEnabled
-                mBatchEditCount = 0;
-                mUpdateRequest = null;
+                resetInputConnection();
                 break;
 
             default:
@@ -502,14 +541,24 @@ class GeckoInputConnection
         // For some input type we will use a widget to display the ui, for those we must not
         // display the ime. We can display a widget for date and time types and, if the sdk version
         // is greater than 11, for datetime/month/week as well.
-        if (typeHint.equals("date") || typeHint.equals("time") ||
-            (Build.VERSION.SDK_INT > 10 &&
-            (typeHint.equals("datetime") || typeHint.equals("month") ||
-            typeHint.equals("week") || typeHint.equals("datetime-local")))) {
+        if (typeHint != null &&
+            (typeHint.equals("date") ||
+             typeHint.equals("time") ||
+             (Build.VERSION.SDK_INT > 10 && (typeHint.equals("datetime") ||
+                                             typeHint.equals("month") ||
+                                             typeHint.equals("week") ||
+                                             typeHint.equals("datetime-local"))))) {
             mIMEState = IME_STATE_DISABLED;
             return;
         }
 
+        // mIMEState and the mIME*Hint fields should only be changed by notifyIMEEnabled,
+        // and not reset anywhere else. Usually, notifyIMEEnabled is called right after a
+        // focus or blur, so resetting mIMEState during the focus or blur seems harmless.
+        // However, this behavior is not guaranteed. Gecko may call notifyIMEEnabled
+        // independent of focus change; that is, a focus change may not be accompanied by
+        // a notifyIMEEnabled call. So if we reset mIMEState inside focus, there may not
+        // be another notifyIMEEnabled call to set mIMEState to a proper value (bug 829318)
         /* When IME is 'disabled', IME processing is disabled.
            In addition, the IME UI is hidden */
         mIMEState = state;
@@ -607,4 +656,3 @@ final class DebugGeckoInputConnection
         return ret;
     }
 }
-

@@ -13,6 +13,7 @@
 #include "mozilla/css/ErrorReporter.h"
 #include "mozilla/Likely.h"
 #include "mozilla/Util.h"
+#include <algorithm>
 
 using mozilla::ArrayLength;
 
@@ -255,6 +256,9 @@ nsCSSScanner::nsCSSScanner(const nsAString& aBuffer, uint32_t aLineNumber)
   , mPushbackSize(ArrayLength(mLocalPushback))
   , mLineNumber(aLineNumber)
   , mLineOffset(0)
+  , mTokenLineNumber(aLineNumber)
+  , mTokenLineOffset(0)
+  , mTokenOffset(0)
   , mRecordStartOffset(0)
   , mReporter(nullptr)
   , mSVGMode(false)
@@ -297,7 +301,7 @@ nsCSSScanner::Read()
       // 0 is a magical line number meaning that we don't know (i.e., script)
       if (mLineNumber != 0)
         ++mLineNumber;
-      mLineOffset = 0;
+      mLineOffset = mOffset;
     }
   }
   return rv;
@@ -359,6 +363,19 @@ nsCSSScanner::StopRecording(nsString& aBuffer)
                  mOffset - mPushbackCount - mRecordStartOffset);
 }
 
+nsDependentSubstring
+nsCSSScanner::GetCurrentLine() const
+{
+  uint32_t end = mTokenOffset;
+  while (end < mCount &&
+         mReadPointer[end] != '\n' && mReadPointer[end] != '\r' &&
+         mReadPointer[end] != '\f') {
+    end++;
+  }
+  return nsDependentSubstring(mReadPointer + mTokenLineOffset,
+                              mReadPointer + end);
+}
+
 bool
 nsCSSScanner::LookAhead(PRUnichar aChar)
 {
@@ -406,6 +423,10 @@ bool
 nsCSSScanner::Next(nsCSSToken& aToken)
 {
   for (;;) { // Infinite loop so we can restart after comments.
+    mTokenOffset = mOffset;
+    mTokenLineOffset = mLineOffset;
+    mTokenLineNumber = mLineNumber;
+
     int32_t ch = Read();
     if (ch < 0) {
       return false;
@@ -931,9 +952,9 @@ nsCSSScanner::ParseNumber(int32_t c, nsCSSToken& aToken)
   } else if (!gotDot) {
     // Clamp values outside of integer range.
     if (sign > 0) {
-      aToken.mInteger = int32_t(NS_MIN(intPart, double(INT32_MAX)));
+      aToken.mInteger = int32_t(std::min(intPart, double(INT32_MAX)));
     } else {
-      aToken.mInteger = int32_t(NS_MAX(-intPart, double(INT32_MIN)));
+      aToken.mInteger = int32_t(std::max(-intPart, double(INT32_MIN)));
     }
     aToken.mIntegerValid = true;
   }

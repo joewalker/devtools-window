@@ -13,10 +13,10 @@
 #include "jsdbgapi.h"
 #include "jsinfer.h"
 #include "jsopcode.h"
-#include "jsscope.h"
 
 #include "gc/Barrier.h"
 #include "gc/Root.h"
+#include "vm/Shape.h"
 
 ForwardDeclareJS(Script);
 
@@ -474,6 +474,8 @@ class JSScript : public js::gc::Cell
                                                    undefined properties in this
                                                    script */
     bool            hasSingletons:1;  /* script has singleton objects */
+    bool            treatAsRunOnce:1; /* script is a lambda to treat as running once. */
+    bool            hasBeenCloned:1;  /* script has been reused for a clone. */
     bool            isActiveEval:1;   /* script came from eval(), and is still active */
     bool            isCachedEval:1;   /* script came from eval(), and is in eval cache */
     bool            uninlineable:1;   /* script is considered uninlineable by analysis */
@@ -641,10 +643,10 @@ class JSScript : public js::gc::Cell
      * Ensure the script has bytecode analysis information. Performed when the
      * script first runs, or first runs after a TypeScript GC purge.
      */
-    static inline bool ensureRanAnalysis(JSContext *cx, JS::HandleScript script);
+    inline bool ensureRanAnalysis(JSContext *cx);
 
     /* Ensure the script has type inference analysis information. */
-    static inline bool ensureRanInference(JSContext *cx, JS::HandleScript script);
+    inline bool ensureRanInference(JSContext *cx);
 
     inline bool hasAnalysis();
     inline void clearAnalysis();
@@ -1036,9 +1038,7 @@ struct ScriptSource
     // possible to get source at all.
     bool sourceRetrievable_:1;
     bool argumentsNotIncluded_:1;
-#ifdef DEBUG
     bool ready_:1;
-#endif
 
   public:
     ScriptSource()
@@ -1047,10 +1047,8 @@ struct ScriptSource
         compressedLength_(0),
         sourceMap_(NULL),
         sourceRetrievable_(false),
-        argumentsNotIncluded_(false)
-#ifdef DEBUG
-       ,ready_(true)
-#endif
+        argumentsNotIncluded_(false),
+        ready_(true)
     {
         data.source = NULL;
     }
@@ -1066,12 +1064,10 @@ struct ScriptSource
                        bool argumentsNotIncluded,
                        SourceCompressionToken *tok);
     void setSource(const jschar *src, uint32_t length);
-#ifdef DEBUG
     bool ready() const { return ready_; }
-#endif
     void setSourceRetrievable() { sourceRetrievable_ = true; }
     bool sourceRetrievable() const { return sourceRetrievable_; }
-    bool hasSourceData() const { return !!data.source; }
+    bool hasSourceData() const { return !!data.source || !ready(); }
     uint32_t length() const {
         JS_ASSERT(hasSourceData());
         return length_;
@@ -1173,6 +1169,7 @@ class SourceCompressorThread
     void compress(SourceCompressionToken *tok);
     void waitOnCompression(SourceCompressionToken *userTok);
     void abort(SourceCompressionToken *userTok);
+    const jschar *currentChars() const;
 };
 #endif
 
@@ -1304,6 +1301,9 @@ CurrentScriptFileLineOrigin(JSContext *cx, unsigned *linenop, LineOption = NOT_C
 
 extern UnrootedScript
 CloneScript(JSContext *cx, HandleObject enclosingScope, HandleFunction fun, HandleScript script);
+
+bool
+CloneFunctionScript(JSContext *cx, HandleFunction original, HandleFunction clone);
 
 /*
  * NB: after a successful XDR_DECODE, XDRScript callers must do any required

@@ -44,7 +44,7 @@ typedef enum JSOp {
 #define JOF_ATOM          2       /* unsigned 16-bit constant index */
 #define JOF_UINT16        3       /* unsigned 16-bit immediate operand */
 #define JOF_TABLESWITCH   4       /* table switch */
-#define JOF_LOOKUPSWITCH  5       /* lookup switch */
+/* 5 is unused */
 #define JOF_QARG          6       /* quickened get/set function argument ops */
 #define JOF_LOCAL         7       /* var or block-local variable */
 #define JOF_DOUBLE        8       /* uint32_t index for double value */
@@ -345,7 +345,7 @@ namespace js {
  * errors containing decompiled values that are useful for the user, instead of
  * values used internally by the self-hosted code.
  *
- * The caller must call JS_free on the result after a succsesful call.
+ * The caller must call JS_free on the result after a successful call.
  */
 char *
 DecompileValueGenerator(JSContext *cx, int spindex, HandleValue v,

@@ -8,13 +8,14 @@
   <binding id="chatbox">
     <content orient="vertical" mousethrough="never">
       <xul:hbox class="chat-titlebar" xbl:inherits="minimized,selected,activity"
-                onclick="document.getBindingParent(this).toggle();" align="baseline">
+                onclick="document.getBindingParent(this).onTitlebarClick(event);" align="baseline">
         <xul:image class="chat-status-icon" xbl:inherits="src=image"/>
         <xul:label class="chat-title" flex="1" xbl:inherits="value=label" crop="center"/>
         <xul:toolbarbutton class="chat-close-button chat-toolbarbutton"
                            oncommand="document.getBindingParent(this).close();"/>
       </xul:hbox>
       <xul:iframe anonid="iframe" class="chat-frame" flex="1"
+                  context="contentAreaContextMenu"
                   xbl:inherits="src,origin,collapsed=minimized" type="content"/>
     </content>
 
@@ -57,6 +58,16 @@
         </setter>
       </property>
 
+      <method name="onTitlebarClick">
+        <parameter name="aEvent"/>
+        <body><![CDATA[
+          if (aEvent.button == 0) // left-click: toggle minimized.
+            this.toggle();
+          else if (aEvent.button == 1) // middle-click: close chat
+            this.close();
+        ]]></body>
+      </method>
+
       <method name="close">
         <body><![CDATA[
           this.parentNode.remove(this);
@@ -71,7 +82,7 @@
     </implementation>
 
     <handlers>
-      <handler event="focus" phase="capturing">
+      <handler event="focus">
         this.parentNode.selectedChat = this;
       </handler>
       <handler event="DOMTitleChanged"><![CDATA[
@@ -345,6 +356,7 @@
           if (this.selectedChat == aChatbox) {
             this._selectAnotherChat();
           }
+          aChatbox.iframe.socialErrorListener.remove();
           this.removeChild(aChatbox);
           // child might have been collapsed.
           let menuitem = this.menuitemMap.get(aChatbox);
@@ -382,6 +394,11 @@
           // to null in DOMContentLoaded, so null means DOMContentLoaded has
           // already fired and new callbacks can be made immediately.
           aChatBox._callbacks = [aCallback];
+          var tmp = {};
+          Components.utils.import("resource:///modules/Social.jsm", tmp);
+          tmp.Social.setErrorListener(aChatBox.iframe, function(iframe) {
+            iframe.webNavigation.loadURI("about:socialerror?mode=compactInfo", null, null, null, null);
+          });
           let iframeWindow = aChatBox.iframe.contentWindow;
           aChatBox.addEventListener("DOMContentLoaded", function DOMContentLoaded() {
             aChatBox.removeEventListener("DOMContentLoaded", DOMContentLoaded);

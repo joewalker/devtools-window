@@ -74,9 +74,6 @@ class Bytecode
     /* Whether this instruction is the fall through point of a conditional jump. */
     bool jumpFallthrough : 1;
 
-    /* Whether this instruction can be branched to from a switch statement. Implies jumpTarget. */
-    bool switchTarget : 1;
-
     /*
      * Whether this instruction must always execute, unless the script throws
      * an exception which it does not later catch.
@@ -250,7 +247,6 @@ BytecodeNoFallThrough(JSOp op)
       case JSOP_RETRVAL:
       case JSOP_THROW:
       case JSOP_TABLESWITCH:
-      case JSOP_LOOKUPSWITCH:
       case JSOP_FILTER:
         return true;
       case JSOP_GOSUB:
@@ -888,6 +884,7 @@ class ScriptAnalysis
     bool failed() const { return hadFailure; }
     bool ionInlineable() const { return isIonInlineable; }
     bool ionInlineable(uint32_t argc) const { return isIonInlineable && argc == script_->function()->nargs; }
+    void setIonUninlineable() { isIonInlineable = false; }
     bool jaegerInlineable() const { return isJaegerInlineable; }
     bool jaegerInlineable(uint32_t argc) const { return isJaegerInlineable && argc == script_->function()->nargs; }
     bool jaegerCompileable() { return isJaegerCompileable; }
@@ -996,7 +993,8 @@ class ScriptAnalysis
     void addTypeBarrier(JSContext *cx, const jsbytecode *pc,
                         types::TypeSet *target, types::Type type);
     void addSingletonTypeBarrier(JSContext *cx, const jsbytecode *pc,
-                                 types::TypeSet *target, HandleObject singleton, jsid singletonId);
+                                 types::TypeSet *target,
+                                 HandleObject singleton, HandleId singletonId);
 
     /* Remove obsolete type barriers at the given offset. */
     void pruneTypeBarriers(JSContext *cx, uint32_t offset);
@@ -1205,39 +1203,6 @@ class ScriptAnalysis
 #else
     void assertMatchingDebugMode() { }
 #endif
-};
-
-/* Protect analysis structures from GC while they are being used. */
-class AutoEnterAnalysis
-{
-    JSCompartment *compartment;
-    bool oldActiveAnalysis;
-    bool left;
-
-    void construct(JSCompartment *compartment)
-    {
-        this->compartment = compartment;
-        oldActiveAnalysis = compartment->activeAnalysis;
-        compartment->activeAnalysis = true;
-        left = false;
-    }
-
-  public:
-    AutoEnterAnalysis(JSContext *cx) { construct(cx->compartment); }
-    AutoEnterAnalysis(JSCompartment *compartment) { construct(compartment); }
-
-    void leave()
-    {
-        if (!left) {
-            left = true;
-            compartment->activeAnalysis = oldActiveAnalysis;
-        }
-    }
-
-    ~AutoEnterAnalysis()
-    {
-        leave();
-    }
 };
 
 /* SSA value as used by CrossScriptSSA, identifies the frame it came from. */

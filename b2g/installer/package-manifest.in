@@ -157,7 +157,9 @@
 @BINPATH@/components/dom.xpt
 @BINPATH@/components/dom_activities.xpt
 @BINPATH@/components/dom_apps.xpt
+@BINPATH@/components/dom_audiochannel.xpt
 @BINPATH@/components/dom_base.xpt
+@BINPATH@/components/dom_system.xpt
 #ifdef MOZ_B2G_RIL
 @BINPATH@/components/dom_telephony.xpt
 @BINPATH@/components/dom_wifi.xpt
@@ -483,6 +485,8 @@
 @BINPATH@/components/WeaveCrypto.manifest
 @BINPATH@/components/WeaveCrypto.js
 #endif
+@BINPATH@/components/servicesComponents.manifest
+@BINPATH@/components/cryptoComponents.manifest
 #ifdef MOZ_SERVICES_HEALTHREPORT
 @BINPATH@/components/HealthReportComponents.manifest
 @BINPATH@/components/HealthReportService.js
@@ -583,9 +587,6 @@
 ; Services (gre) prefs
 #ifdef MOZ_SERVICES_SYNC
 @BINPATH@/defaults/pref/services-sync.js
-#endif
-#ifdef MOZ_SERVICES_HEALTHREPORT
-@BINPATH@/defaults/pref/healthreport-prefs.js
 #endif
 
 ; [Layout Engine Resources]

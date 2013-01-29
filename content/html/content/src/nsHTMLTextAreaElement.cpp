@@ -97,6 +97,7 @@ public:
   NS_IMETHOD SubmitNamesValues(nsFormSubmission* aFormSubmission);
   NS_IMETHOD SaveState();
   virtual bool RestoreState(nsPresState* aState);
+  virtual bool IsDisabledForEvents(uint32_t aMessage);
 
   virtual void FieldSetDisabledChanged(bool aNotify);
 
@@ -299,14 +300,15 @@ nsHTMLTextAreaElement::nsHTMLTextAreaElement(already_AddRefed<nsINodeInfo> aNode
 }
 
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsHTMLTextAreaElement)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsHTMLTextAreaElement,
                                                 nsGenericHTMLFormElement)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mValidity)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mControllers)
   tmp->mState.Unlink();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsHTMLTextAreaElement,
                                                   nsGenericHTMLFormElement)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mValidity)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mControllers)
   tmp->mState.Traverse(cb);
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
@@ -665,17 +667,22 @@ nsHTMLTextAreaElement::GetAttributeMappingFunction() const
   return &MapAttributesIntoRule;
 }
 
-nsresult
-nsHTMLTextAreaElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
+bool
+nsHTMLTextAreaElement::IsDisabledForEvents(uint32_t aMessage)
 {
   nsIFormControlFrame* formControlFrame = GetFormControlFrame(false);
   nsIFrame* formFrame = NULL;
   if (formControlFrame) {
     formFrame = do_QueryFrame(formControlFrame);
   }
+  return IsElementDisabledForEvents(aMessage, formFrame);
+}
 
+nsresult
+nsHTMLTextAreaElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
+{
   aVisitor.mCanHandle = false;
-  if (IsElementDisabledForEvents(aVisitor.mEvent->message, formFrame)) {
+  if (IsDisabledForEvents(aVisitor.mEvent->message)) {
     return NS_OK;
   }
 

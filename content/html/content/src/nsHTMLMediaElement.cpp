@@ -76,6 +76,7 @@
 #include "nsIPowerManagerService.h"
 #include <cstdlib> // for std::abs(int/long)
 #include <cmath> // for std::abs(float/double)
+#include <algorithm>
 
 #ifdef MOZ_OGG
 #include "OggDecoder.h"
@@ -429,8 +430,6 @@ NS_IMETHODIMP nsHTMLMediaElement::MediaLoadListener::GetInterface(const nsIID & 
 NS_IMPL_ADDREF_INHERITED(nsHTMLMediaElement, nsGenericHTMLElement)
 NS_IMPL_RELEASE_INHERITED(nsHTMLMediaElement, nsGenericHTMLElement)
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsHTMLMediaElement)
-
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsHTMLMediaElement, nsGenericHTMLElement)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSrcStream)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mSrcAttrStream)
@@ -459,6 +458,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(nsHTMLMediaElement)
   NS_INTERFACE_MAP_ENTRY(nsIObserver)
+  NS_INTERFACE_MAP_ENTRY(nsIAudioChannelAgentCallback)
 NS_INTERFACE_MAP_END_INHERITING(nsGenericHTMLElement)
 
 // nsIDOMHTMLMediaElement
@@ -733,8 +733,18 @@ NS_IMETHODIMP nsHTMLMediaElement::Load()
   AbortExistingLoads();
   SetPlaybackRate(mDefaultPlaybackRate);
   QueueSelectResourceTask();
+  ResetState();
   mIsRunningLoadMethod = false;
   return NS_OK;
+}
+
+void nsHTMLMediaElement::ResetState()
+{
+  mMediaSize = nsIntSize(-1, -1);
+  VideoFrameContainer* container = GetVideoFrameContainer();
+  if (container) {
+    container->Reset();
+  }
 }
 
 static bool HasSourceChildren(nsIContent *aElement)
@@ -1238,6 +1248,7 @@ NS_IMETHODIMP nsHTMLMediaElement::MozLoadFrom(nsIDOMHTMLMediaElement* aOther)
     ChangeDelayLoadStatus(false);
     return rv;
   }
+  mMimeType = other->mMimeType;
 
   SetPlaybackRate(mDefaultPlaybackRate);
   DispatchAsyncEvent(NS_LITERAL_STRING("loadstart"));
@@ -1311,10 +1322,10 @@ NS_IMETHODIMP nsHTMLMediaElement::SetCurrentTime(double aCurrentTime)
   }
 
   // Clamp the time to [0, duration] as required by the spec.
-  double clampedTime = NS_MAX(0.0, aCurrentTime);
+  double clampedTime = std::max(0.0, aCurrentTime);
   double duration = mDecoder->GetDuration();
   if (duration >= 0) {
-    clampedTime = NS_MIN(clampedTime, duration);
+    clampedTime = std::min(clampedTime, duration);
   }
 
   mPlayingBeforeSeek = IsPotentiallyPlaying();
@@ -1492,6 +1503,11 @@ nsHTMLMediaElement::BuildObjectFromTags(nsCStringHashKey::KeyType aKey,
 
   nsString wideValue = NS_ConvertUTF8toUTF16(aValue);
   JSString* string = JS_NewUCStringCopyZ(args->cx, wideValue.Data());
+  if (!string) {
+    NS_WARNING("Failed to perform string copy");
+    args->error = true;
+    return PL_DHASH_STOP;
+  }
   JS::Value value = STRING_TO_JSVAL(string);
   if (!JS_DefineProperty(args->cx, args->tags, aKey.Data(), value,
                          NULL, NULL, JSPROP_ENUMERATE)) {
@@ -2314,8 +2330,8 @@ nsresult nsHTMLMediaElement::FinishDecoderSetup(MediaDecoder* aDecoder,
 
   // The new stream has not been suspended by us.
   mPausedForInactiveDocumentOrChannel = false;
-  mPendingEvents.Clear();
   mEventDeliveryPaused = false;
+  mPendingEvents.Clear();
 
   aDecoder->SetAudioChannelType(mAudioChannelType);
   aDecoder->SetAudioCaptured(mAudioCaptured);
@@ -2591,6 +2607,7 @@ void nsHTMLMediaElement::ProcessMediaFragmentURI()
 void nsHTMLMediaElement::MetadataLoaded(int aChannels,
                                         int aRate,
                                         bool aHasAudio,
+                                        bool aHasVideo,
                                         const MetadataTags* aTags)
 {
   mChannels = aChannels;
@@ -2603,6 +2620,13 @@ void nsHTMLMediaElement::MetadataLoaded(int aChannels,
   if (mDecoder && mDecoder->IsTransportSeekable() && mDecoder->IsMediaSeekable()) {
     ProcessMediaFragmentURI();
     mDecoder->SetFragmentEndTime(mFragmentEnd);
+  }
+
+  // If this element had a video track, but consists only of an audio track now,
+  // delete the VideoFrameContainer. This happens when the src is changed to an
+  // audio only file.
+  if (!aHasVideo) {
+    mVideoFrameContainer = nullptr;
   }
 }
 
@@ -2947,6 +2971,14 @@ void nsHTMLMediaElement::NotifyAutoplayDataReady()
 
 VideoFrameContainer* nsHTMLMediaElement::GetVideoFrameContainer()
 {
+  // If we have loaded the metadata, and the size of the video is still
+  // (-1, -1), the media has no video. Don't go a create a video frame
+  // container.
+  if (mReadyState >= nsIDOMHTMLMediaElement::HAVE_METADATA &&
+      mMediaSize == nsIntSize(-1, -1)) {
+    return nullptr;
+  }
+
   if (mVideoFrameContainer)
     return mVideoFrameContainer;
 
@@ -3107,8 +3139,8 @@ void nsHTMLMediaElement::SuspendOrResumeElement(bool aPauseElement, bool aSuspen
         GetSrcMediaStream()->ChangeExplicitBlockerCount(-1);
       }
       if (mEventDeliveryPaused) {
-        DispatchPendingMediaEvents();
         mEventDeliveryPaused = false;
+        DispatchPendingMediaEvents();
       }
     }
   }
@@ -3504,12 +3536,14 @@ NS_IMETHODIMP nsHTMLMediaElement::SetPlaybackRate(double aPlaybackRate)
 
   mPlaybackRate = ClampPlaybackRate(aPlaybackRate);
 
-  if (mPlaybackRate < 0 ||
-      mPlaybackRate > THRESHOLD_HIGH_PLAYBACKRATE_AUDIO ||
-      mPlaybackRate < THRESHOLD_LOW_PLAYBACKRATE_AUDIO) {
-    SetMutedInternal(true);
-  } else {
-    SetMutedInternal(false);
+  if (!mMuted) {
+    if (mPlaybackRate < 0 ||
+        mPlaybackRate > THRESHOLD_HIGH_PLAYBACKRATE_AUDIO ||
+        mPlaybackRate < THRESHOLD_LOW_PLAYBACKRATE_AUDIO) {
+      SetMutedInternal(true);
+    } else {
+      SetMutedInternal(false);
+    }
   }
 
   if (mDecoder) {
@@ -3564,9 +3598,10 @@ void nsHTMLMediaElement::UpdateAudioChannelPlayingState()
   // The nsHTMLMediaElement is registered to the AudioChannelService only on B2G.
 #ifdef MOZ_B2G
   bool playingThroughTheAudioChannel =
-     (mReadyState >= nsIDOMHTMLMediaElement::HAVE_CURRENT_DATA &&
-      !mPaused &&
-      !IsPlaybackEnded());
+     (!mPaused &&
+      (HasAttr(kNameSpaceID_None, nsGkAtoms::loop) ||
+       (mReadyState >= nsIDOMHTMLMediaElement::HAVE_CURRENT_DATA &&
+        !IsPlaybackEnded())));
   if (playingThroughTheAudioChannel != mPlayingThroughTheAudioChannel) {
     mPlayingThroughTheAudioChannel = playingThroughTheAudioChannel;
 
@@ -3577,6 +3612,13 @@ void nsHTMLMediaElement::UpdateAudioChannelPlayingState()
         return;
       }
       mAudioChannelAgent->Init(mAudioChannelType, this);
+
+      nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(OwnerDoc());
+      if (domDoc) {
+        bool hidden = false;
+        domDoc->GetHidden(&hidden);
+        mAudioChannelAgent->SetVisibilityState(!hidden);
+      }
     }
 
     if (mPlayingThroughTheAudioChannel) {
@@ -3593,6 +3635,8 @@ void nsHTMLMediaElement::UpdateAudioChannelPlayingState()
 /* void canPlayChanged (in boolean canPlay); */
 NS_IMETHODIMP nsHTMLMediaElement::CanPlayChanged(bool canPlay)
 {
+  NS_ENSURE_TRUE(nsContentUtils::IsCallerChrome(), NS_ERROR_NOT_AVAILABLE);
+
   UpdateChannelMuteState(canPlay);
   return NS_OK;
 }

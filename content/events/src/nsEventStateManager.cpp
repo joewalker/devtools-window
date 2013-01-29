@@ -37,6 +37,7 @@
 #include "nsIDocShellTreeNode.h"
 #include "nsIWebNavigation.h"
 #include "nsIContentViewer.h"
+#include <algorithm>
 #ifdef MOZ_XUL
 #include "nsXULPopupManager.h"
 #endif
@@ -92,7 +93,7 @@
 #include "nsICommandParams.h"
 #include "mozilla/Services.h"
 #include "mozAutoDocUpdate.h"
-#include "nsHTMLLabelElement.h"
+#include "mozilla/dom/HTMLLabelElement.h"
 
 #include "mozilla/Preferences.h"
 #include "mozilla/LookAndFeel.h"
@@ -175,8 +176,7 @@ PrintDocTree(nsIDocShellTreeItem* aParentItem, int aLevel)
   nsCOMPtr<nsIDocShell> parentAsDocShell(do_QueryInterface(aParentItem));
   int32_t type;
   aParentItem->GetItemType(&type);
-  nsCOMPtr<nsIPresShell> presShell;
-  parentAsDocShell->GetPresShell(getter_AddRefs(presShell));
+  nsCOMPtr<nsIPresShell> presShell = parentAsDocShell->GetPresShell();
   nsRefPtr<nsPresContext> presContext;
   parentAsDocShell->GetPresContext(getter_AddRefs(presContext));
   nsCOMPtr<nsIContentViewer> cv;
@@ -877,8 +877,6 @@ nsEventStateManager::Observe(nsISupports *aSubject,
   return NS_OK;
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsEventStateManager)
-
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsEventStateManager)
    NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIObserver)
    NS_INTERFACE_MAP_ENTRY(nsIObserver)
@@ -1467,8 +1465,7 @@ nsEventStateManager::HandleAccessKey(nsPresContext* aPresContext,
 
       nsCOMPtr<nsIDocShell> subDS = do_QueryInterface(subShellItem);
       if (subDS && IsShellVisible(subDS)) {
-        nsCOMPtr<nsIPresShell> subPS;
-        subDS->GetPresShell(getter_AddRefs(subPS));
+        nsCOMPtr<nsIPresShell> subPS = subDS->GetPresShell();
 
         // Docshells need not have a presshell (eg. display:none
         // iframes, docshells in transition between documents, etc).
@@ -1504,9 +1501,7 @@ nsEventStateManager::HandleAccessKey(nsPresContext* aPresContext,
     docShell->GetParent(getter_AddRefs(parentShellItem));
     nsCOMPtr<nsIDocShell> parentDS = do_QueryInterface(parentShellItem);
     if (parentDS) {
-      nsCOMPtr<nsIPresShell> parentPS;
-
-      parentDS->GetPresShell(getter_AddRefs(parentPS));
+      nsCOMPtr<nsIPresShell> parentPS = parentDS->GetPresShell();
       NS_ASSERTION(parentPS, "Our PresShell exists but the parent's does not?");
 
       nsPresContext *parentPC = parentPS->GetPresContext();
@@ -1807,9 +1802,10 @@ nsEventStateManager::KillClickHoldTimer()
 void
 nsEventStateManager::sClickHoldCallback(nsITimer *aTimer, void* aESM)
 {
-  nsEventStateManager* self = static_cast<nsEventStateManager*>(aESM);
-  if (self)
+  nsRefPtr<nsEventStateManager> self = static_cast<nsEventStateManager*>(aESM);
+  if (self) {
     self->FireContextClick();
+  }
 
   // NOTE: |aTimer| and |self->mAutoHideTimer| are invalid after calling ClosePopup();
 
@@ -1853,7 +1849,9 @@ nsEventStateManager::FireContextClick()
   // when we're through because no one else is doing anything more with this
   // event and it will get reset on the very next event to the correct frame).
   mCurrentTarget = mPresContext->GetPrimaryFrameFor(mGestureDownContent);
-  if (mCurrentTarget) {
+  // make sure the widget sticks around
+  nsCOMPtr<nsIWidget> targetWidget;
+  if (mCurrentTarget && (targetWidget = mCurrentTarget->GetNearestWidget())) {
     NS_ASSERTION(mPresContext == mCurrentTarget->PresContext(),
                  "a prescontext returned a primary frame that didn't belong to it?");
 
@@ -1899,6 +1897,8 @@ nsEventStateManager::FireContextClick()
                              type == NS_FORM_INPUT_PASSWORD ||
                              type == NS_FORM_INPUT_FILE ||
                              type == NS_FORM_INPUT_NUMBER ||
+                             type == NS_FORM_INPUT_DATE ||
+                             type == NS_FORM_INPUT_TIME ||
                              type == NS_FORM_TEXTAREA);
       }
       else if (tag == nsGkAtoms::applet ||
@@ -1909,8 +1909,6 @@ nsEventStateManager::FireContextClick()
     }
 
     if (allowedToDispatch) {
-      // make sure the widget sticks around
-      nsCOMPtr<nsIWidget> targetWidget(mCurrentTarget->GetNearestWidget());
       // init the event while mCurrentTarget is still good
       nsMouseEvent event(true, NS_CONTEXTMENU,
                          targetWidget,
@@ -3317,6 +3315,9 @@ nsEventStateManager::PostHandleEvent(nsPresContext* aPresContext,
       widget::WheelEvent* wheelEvent = static_cast<widget::WheelEvent*>(aEvent);
       switch (WheelPrefs::GetInstance()->ComputeActionFor(wheelEvent)) {
         case WheelPrefs::ACTION_SCROLL: {
+          if (!wheelEvent->deltaX && !wheelEvent->deltaY) {
+            break;
+          }
           // For scrolling of default action, we should honor the mouse wheel
           // transaction.
           nsIScrollableFrame* scrollTarget =
@@ -3333,15 +3334,34 @@ nsEventStateManager::PostHandleEvent(nsPresContext* aPresContext,
           }
           break;
         }
-        case WheelPrefs::ACTION_HISTORY:
-          DoScrollHistory(wheelEvent->GetPreferredIntDelta());
+        case WheelPrefs::ACTION_HISTORY: {
+          // If this event doesn't cause NS_MOUSE_SCROLL event or the direction
+          // is oblique, don't perform history back/forward.
+          int32_t intDelta = wheelEvent->GetPreferredIntDelta();
+          if (!intDelta) {
+            break;
+          }
+          DoScrollHistory(intDelta);
           break;
-
-        case WheelPrefs::ACTION_ZOOM:
-          DoScrollZoom(aTargetFrame, wheelEvent->GetPreferredIntDelta());
+        }
+        case WheelPrefs::ACTION_ZOOM: {
+          // If this event doesn't cause NS_MOUSE_SCROLL event or the direction
+          // is oblique, don't perform zoom in/out.
+          int32_t intDelta = wheelEvent->GetPreferredIntDelta();
+          if (!intDelta) {
+            break;
+          }
+          DoScrollZoom(aTargetFrame, intDelta);
           break;
-
+        }
+        case WheelPrefs::ACTION_NONE:
         default:
+          // If we don't handle the wheel event, all of the delta values must
+          // be overflown delta values.
+          wheelEvent->overflowDeltaX = wheelEvent->deltaX;
+          wheelEvent->overflowDeltaY = wheelEvent->deltaY;
+          WheelPrefs::GetInstance()->
+            CancelApplyingUserPrefsFromOverflowDelta(wheelEvent);
           break;
       }
       *aStatus = nsEventStatus_eConsumeNoDefault;
@@ -3827,7 +3847,7 @@ nsEventStateManager::SetCursor(int32_t aCursor, imgIContainer* aContainer,
       aContainer->GetWidth(&imgWidth);
       aContainer->GetHeight(&imgHeight);
 
-      // XXX NS_MAX(NS_lround(x), 0)?
+      // XXX std::max(NS_lround(x), 0)?
       hotspotX = aHotspotX > 0.0f
                    ? uint32_t(aHotspotX + 0.5f) : uint32_t(0);
       if (hotspotX >= uint32_t(imgWidth))
@@ -4613,7 +4633,8 @@ nsEventStateManager::GetEventTargetContent(nsEvent* aEvent)
 static Element*
 GetLabelTarget(nsIContent* aPossibleLabel)
 {
-  nsHTMLLabelElement* label = nsHTMLLabelElement::FromContent(aPossibleLabel);
+  mozilla::dom::HTMLLabelElement* label =
+    mozilla::dom::HTMLLabelElement::FromContent(aPossibleLabel);
   if (!label)
     return nullptr;
 
@@ -5531,10 +5552,6 @@ nsEventStateManager::WheelPrefs::CancelApplyingUserPrefsFromOverflowDelta(
 nsEventStateManager::WheelPrefs::Action
 nsEventStateManager::WheelPrefs::ComputeActionFor(widget::WheelEvent* aEvent)
 {
-  if (!aEvent->deltaX && !aEvent->deltaY) {
-    return ACTION_NONE;
-  }
-
   Index index = GetIndexFor(aEvent);
   Init(index);
 
@@ -5554,9 +5571,7 @@ nsEventStateManager::WheelPrefs::ComputeActionFor(widget::WheelEvent* aEvent)
                                                        ACTION_NONE;
   }
 
-  // If this event doesn't cause NS_MOUSE_SCROLL event or the direction is
-  // oblique, history and zoom shouldn't be executed.
-  return !aEvent->GetPreferredIntDelta() ? ACTION_NONE : actions[index];
+  return actions[index];
 }
 
 bool

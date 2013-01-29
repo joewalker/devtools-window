@@ -20,17 +20,26 @@ webidl_files = \
   BiquadFilterNode.webidl \
   Blob.webidl \
   CanvasRenderingContext2D.webidl \
+  CaretPosition.webidl \
+  CDATASection.webidl \
+  CharacterData.webidl \
   ClientRectList.webidl \
+  Comment.webidl \
+  CSS.webidl \
   CSSPrimitiveValue.webidl \
   CSSStyleDeclaration.webidl \
   CSSValue.webidl \
   CSSValueList.webidl \
   DelayNode.webidl \
+  Document.webidl \
+  DocumentFragment.webidl \
+  DocumentType.webidl \
   DOMImplementation.webidl \
   DOMParser.webidl \
   DOMSettableTokenList.webidl \
   DOMStringMap.webidl \
   DOMTokenList.webidl \
+  DOMTransaction.webidl \
   DynamicsCompressorNode.webidl \
   Element.webidl \
   EventHandler.webidl \
@@ -44,12 +53,37 @@ webidl_files = \
   FormData.webidl \
   Function.webidl \
   GainNode.webidl \
+  HTMLAnchorElement.webidl \
+  HTMLBodyElement.webidl \
   HTMLCollection.webidl \
+  HTMLDataListElement.webidl \
   HTMLDivElement.webidl \
+  HTMLDListElement.webidl \
+  HTMLDocument.webidl \
   HTMLElement.webidl \
+  HTMLFontElement.webidl \
+  HTMLFrameSetElement.webidl \
+  HTMLHeadingElement.webidl \
+  HTMLImageElement.webidl \
+  HTMLLabelElement.webidl \
+  HTMLLIElement.webidl \
+  HTMLOListElement.webidl \
   HTMLOptionsCollection.webidl \
+  HTMLParagraphElement.webidl \
+  HTMLPreElement.webidl \
   HTMLPropertiesCollection.webidl \
+  HTMLScriptElement.webidl \
+  HTMLSpanElement.webidl \
+  HTMLTableCaptionElement.webidl \
+  HTMLTableCellElement.webidl \
+  HTMLTableColElement.webidl \
+  HTMLTableElement.webidl \
+  HTMLTableRowElement.webidl \
+  HTMLTableSectionElement.webidl \
+  HTMLTitleElement.webidl \
+  HTMLUListElement.webidl \
   ImageData.webidl \
+  Location.webidl \
   MutationObserver.webidl \
   Node.webidl \
   NodeFilter.webidl \
@@ -60,17 +94,87 @@ webidl_files = \
   Performance.webidl \
   PerformanceNavigation.webidl \
   PerformanceTiming.webidl \
+  ProcessingInstruction.webidl \
+  Rect.webidl \
   RGBColor.webidl \
   Screen.webidl \
+  SVGAElement.webidl \
+  SVGAltGlyphElement.webidl \
+  SVGAngle.webidl \
+  SVGAnimatedAngle.webidl \
+  SVGAnimatedBoolean.webidl \
+  SVGAnimatedLength.webidl \
+  SVGAnimatedLengthList.webidl \
+  SVGAnimatedNumberList.webidl \
+  SVGAnimatedPathData.webidl \
+  SVGAnimatedPoints.webidl \
+  SVGAnimatedPreserveAspectRatio.webidl \
+  SVGAnimatedTransformList.webidl \
+  SVGAnimateElement.webidl \
+  SVGAnimateMotionElement.webidl \
+  SVGAnimateTransformElement.webidl \
+  SVGAnimationElement.webidl \
+  SVGCircleElement.webidl \
+  SVGClipPathElement.webidl \
+  SVGDefsElement.webidl \
+  SVGDescElement.webidl \
+  SVGElement.webidl \
+  SVGEllipseElement.webidl \
+  SVGFitToViewBox.webidl \
+  SVGForeignObjectElement.webidl \
+  SVGGElement.webidl \
+  SVGGradientElement.webidl \
+  SVGGraphicsElement.webidl \
+  SVGImageElement.webidl \
   SVGLengthList.webidl \
+  SVGLinearGradientElement.webidl \
+  SVGLineElement.webidl \
+  SVGLocatableElement.webidl \
+  SVGMaskElement.webidl \
+  SVGMatrix.webidl \
+  SVGMetadataElement.webidl \
+  SVGMPathElement.webidl \
   SVGNumberList.webidl \
+  SVGPathElement.webidl \
+  SVGPathSeg.webidl \
   SVGPathSegList.webidl \
+  SVGPatternElement.webidl \
+  SVGPoint.webidl \
   SVGPointList.webidl \
+  SVGPolygonElement.webidl \
+  SVGPolylineElement.webidl \
+  SVGPreserveAspectRatio.webidl \
+  SVGRadialGradientElement.webidl \
+  SVGRectElement.webidl \
+  SVGScriptElement.webidl \
+  SVGSetElement.webidl \
+  SVGStopElement.webidl \
+  SVGStyleElement.webidl \
+  SVGSVGElement.webidl \
+  SVGSwitchElement.webidl \
+  SVGSymbolElement.webidl \
+  SVGTests.webidl \
+  SVGTextContentElement.webidl \
+  SVGTextElement.webidl \
+  SVGTextPathElement.webidl \
+  SVGTextPositioningElement.webidl \
+  SVGTitleElement.webidl \
+  SVGTransform.webidl \
+  SVGTransformableElement.webidl \
   SVGTransformList.webidl \
+  SVGTSpanElement.webidl \
+  SVGUnitTypes.webidl \
+  SVGUseElement.webidl \
+  SVGURIReference.webidl \
+  SVGViewElement.webidl \
+  SVGZoomAndPan.webidl \
+  Text.webidl \
   TextDecoder.webidl \
   TextEncoder.webidl \
   URL.webidl \
+  ValidityState.webidl \
   WebSocket.webidl \
+  UndoManager.webidl \
   XMLHttpRequest.webidl \
   XMLHttpRequestEventTarget.webidl \
   XMLHttpRequestUpload.webidl \
@@ -87,12 +191,14 @@ endif
 ifdef MOZ_WEBRTC
 webidl_files += \
   MediaStreamList.webidl \
+  RTCIceServer.webidl \
   $(NULL)
 endif
 
 ifdef MOZ_B2G_RIL
 webidl_files += \
   USSDReceivedEvent.webidl \
+  CFStateChangeEvent.webidl \
   $(NULL)
 endif
 

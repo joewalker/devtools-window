@@ -47,6 +47,7 @@
 #include "mozilla/dom/Element.h"
 #include "CSSCalc.h"
 #include "nsWrapperCacheInlines.h"
+#include <algorithm>
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -3806,7 +3807,7 @@ nsComputedDOMStyle::SetValueToCoord(nsROCSSPrimitiveValue* aValue,
             (this->*aPercentageBaseGetter)(percentageBase)) {
           nscoord val = NSCoordSaturatingMultiply(percentageBase,
                                                   aCoord.GetPercentValue());
-          aValue->SetAppUnits(NS_MAX(aMinAppUnits, NS_MIN(val, aMaxAppUnits)));
+          aValue->SetAppUnits(std::max(aMinAppUnits, std::min(val, aMaxAppUnits)));
         } else {
           aValue->SetPercent(aCoord.GetPercentValue());
         }
@@ -3820,7 +3821,7 @@ nsComputedDOMStyle::SetValueToCoord(nsROCSSPrimitiveValue* aValue,
     case eStyleUnit_Coord:
       {
         nscoord val = aCoord.GetCoordValue();
-        aValue->SetAppUnits(NS_MAX(aMinAppUnits, NS_MIN(val, aMaxAppUnits)));
+        aValue->SetAppUnits(std::max(aMinAppUnits, std::min(val, aMaxAppUnits)));
       }
       break;
 
@@ -3847,7 +3848,7 @@ nsComputedDOMStyle::SetValueToCoord(nsROCSSPrimitiveValue* aValue,
                             "parser should have rejected value");
           val = 0;
         }
-        aValue->SetAppUnits(NS_MAX(aMinAppUnits, NS_MIN(val, aMaxAppUnits)));
+        aValue->SetAppUnits(std::max(aMinAppUnits, std::min(val, aMaxAppUnits)));
       } else if (aPercentageBaseGetter &&
                  (this->*aPercentageBaseGetter)(percentageBase)) {
         nscoord val =
@@ -3857,7 +3858,7 @@ nsComputedDOMStyle::SetValueToCoord(nsROCSSPrimitiveValue* aValue,
                             "parser should have rejected value");
           val = 0;
         }
-        aValue->SetAppUnits(NS_MAX(aMinAppUnits, NS_MIN(val, aMaxAppUnits)));
+        aValue->SetAppUnits(std::max(aMinAppUnits, std::min(val, aMaxAppUnits)));
       } else {
         nsStyleCoord::Calc *calc = aCoord.GetCalcValue();
         SetValueToCalc(calc, aValue);
@@ -4369,6 +4370,17 @@ nsComputedDOMStyle::DoGetMaskType()
   val->SetIdent(
     nsCSSProps::ValueToKeywordEnum(GetStyleSVGReset()->mMaskType,
                                    nsCSSProps::kMaskTypeKTable));
+  return val;
+}
+
+CSSValue*
+nsComputedDOMStyle::DoGetPaintOrder()
+{
+  nsROCSSPrimitiveValue *val = GetROCSSPrimitiveValue();
+  nsAutoString string;
+  uint8_t paintOrder = GetStyleSVG()->mPaintOrder;
+  nsStyleUtil::AppendPaintOrderValue(paintOrder, string);
+  val->SetString(string);
   return val;
 }
 
@@ -4940,6 +4952,7 @@ nsComputedDOMStyle::GetQueryablePropertyMap(uint32_t* aLength)
     COMPUTED_STYLE_MAP_ENTRY(marker_start,                  MarkerStart),
     COMPUTED_STYLE_MAP_ENTRY(mask,                          Mask),
     COMPUTED_STYLE_MAP_ENTRY(mask_type,                     MaskType),
+    COMPUTED_STYLE_MAP_ENTRY(paint_order,                   PaintOrder),
     COMPUTED_STYLE_MAP_ENTRY(shape_rendering,               ShapeRendering),
     COMPUTED_STYLE_MAP_ENTRY(stop_color,                    StopColor),
     COMPUTED_STYLE_MAP_ENTRY(stop_opacity,                  StopOpacity),

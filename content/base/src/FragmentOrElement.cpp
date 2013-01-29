@@ -19,7 +19,7 @@
 #include "nsDOMAttributeMap.h"
 #include "nsIAtom.h"
 #include "nsINodeInfo.h"
-#include "nsIDocument.h"
+#include "nsIDocumentInlines.h"
 #include "nsIDOMNodeList.h"
 #include "nsIDOMDocument.h"
 #include "nsIContentIterator.h"
@@ -92,8 +92,8 @@
 #include "nsEventDispatcher.h"
 #include "nsContentCreatorFunctions.h"
 #include "nsIControllers.h"
-#include "nsIView.h"
-#include "nsIViewManager.h"
+#include "nsView.h"
+#include "nsViewManager.h"
 #include "nsIScrollableFrame.h"
 #include "nsXBLInsertionPoint.h"
 #include "mozilla/css/StyleRule.h" /* For nsCSSSelectorList */
@@ -101,6 +101,7 @@
 #include "nsAsyncDOMEvent.h"
 #include "nsTextNode.h"
 #include "mozilla/dom/NodeListBinding.h"
+#include "mozilla/dom/UndoManager.h"
 
 #ifdef MOZ_XUL
 #include "nsIXULDocument.h"
@@ -226,9 +227,9 @@ nsIContent::GetEditingHost()
   }
 
   nsIContent* content = this;
-  for (dom::Element* parent = GetElementParent();
+  for (dom::Element* parent = GetParentElement();
        parent && parent->HasFlag(NODE_IS_EDITABLE);
-       parent = content->GetElementParent()) {
+       parent = content->GetParentElement()) {
     content = parent;
   }
   return content->AsElement();
@@ -539,6 +540,7 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsInlineEventHandlersTearoff)
 FragmentOrElement::nsDOMSlots::nsDOMSlots()
   : nsINode::nsSlots(),
     mDataset(nullptr),
+    mUndoManager(nullptr),
     mBindingParent(nullptr)
 {
 }
@@ -566,6 +568,9 @@ FragmentOrElement::nsDOMSlots::Traverse(nsCycleCollectionTraversalCallback &cb, 
   NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mSlots->mAttributeMap");
   cb.NoteXPCOMChild(mAttributeMap.get());
 
+  NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mSlots->mUndoManager");
+  cb.NoteXPCOMChild(mUndoManager.get());
+
   if (aIsXUL) {
     NS_CYCLE_COLLECTION_NOTE_EDGE_NAME(cb, "mSlots->mControllers");
     cb.NoteXPCOMChild(mControllers);
@@ -590,6 +595,7 @@ FragmentOrElement::nsDOMSlots::Unlink(bool aIsXUL)
   if (aIsXUL)
     NS_IF_RELEASE(mControllers);
   mChildrenList = nullptr;
+  mUndoManager = nullptr;
   if (mClassList) {
     mClassList->DropReference();
     mClassList = nullptr;
@@ -956,8 +962,6 @@ FragmentOrElement::FireNodeInserted(nsIDocument* aDoc,
 //----------------------------------------------------------------------
 
 // nsISupports implementation
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(FragmentOrElement)
 
 #define SUBTREE_UNBINDINGS_PER_RUNNABLE 500
 

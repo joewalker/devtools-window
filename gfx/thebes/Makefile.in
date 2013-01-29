@@ -14,6 +14,10 @@ LIBRARY_NAME	= thebes
 LIBXUL_LIBRARY	= 1
 EXPORT_LIBRARY	= 1
 
+ifndef _MSC_VER
+FAIL_ON_WARNINGS = 1
+endif # !_MSC_VER
+
 EXPORTS	= \
 	gfx2DGlue.h \
 	gfx3DMatrix.h \
@@ -345,9 +349,7 @@ CMMSRCS = \
 
 endif
 
-CSRCS += woff.c
-
-DEFINES += -DIMPL_THEBES -DWOFF_MOZILLA_CLIENT -DHB_DONT_DEFINE_STDINT
+DEFINES += -DIMPL_THEBES -DHB_DONT_DEFINE_STDINT
 DEFINES += -DMOZ_OTS_REPORT_ERRORS
 
 ifeq (WINNT,$(OS_TARGET))
@@ -394,8 +396,7 @@ gfxAlphaRecoverySSE2.$(OBJ_SUFFIX): OS_CXXFLAGS += -xarch=sse2 -xO4
 endif
 endif
 
-.PHONY: CONSTANT_TABLES
-CONSTANT_TABLES:
+PremultiplyTables.h: $(srcdir)/genTables.py
 	$(PYTHON) $(srcdir)/genTables.py
 
-gfxUtils.$(OBJ_SUFFIX): CONSTANT_TABLES
+gfxUtils.$(OBJ_SUFFIX): PremultiplyTables.h

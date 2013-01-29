@@ -35,9 +35,9 @@ config/Makefile
 config/autoconf.mk
 config/nspr/Makefile
 config/doxygen.cfg
-config/expandlibs_config.py
 mfbt/Makefile
 probes/Makefile
+python/Makefile
 extensions/Makefile
 "
 

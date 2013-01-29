@@ -36,7 +36,7 @@ const PROMPT_ACTION = Ci.nsIPermissionManager.PROMPT_ACTION;
 this.PermissionsTable =  { geolocation: {
                              app: PROMPT_ACTION,
                              privileged: PROMPT_ACTION,
-                             certified: ALLOW_ACTION
+                             certified: PROMPT_ACTION
                            },
                            camera: {
                              app: DENY_ACTION,
@@ -202,8 +202,8 @@ this.PermissionsTable =  { geolocation: {
                              certified: ALLOW_ACTION
                            },
                            "storage": {
-                             app: DENY_ACTION,
-                             privileged: DENY_ACTION,
+                             app: ALLOW_ACTION,
+                             privileged: ALLOW_ACTION,
                              certified: ALLOW_ACTION,
                              substitute: [
                                "indexedDB-unlimited",

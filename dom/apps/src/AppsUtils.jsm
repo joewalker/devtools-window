@@ -25,6 +25,13 @@ function debug(s) {
   //dump("-*- AppsUtils.jsm: " + s + "\n");
 }
 
+function isAbsoluteURI(aURI) {
+  let foo = Services.io.newURI("http://foo", null, null);
+  let bar = Services.io.newURI("http://bar", null, null);
+  return Services.io.newURI(aURI, null, foo).prePath != foo.prePath ||
+         Services.io.newURI(aURI, null, bar).prePath != bar.prePath;
+}
+
 this.AppsUtils = {
   // Clones a app, without the manifest.
   cloneAppObject: function cloneAppObject(aApp) {
@@ -38,7 +45,9 @@ this.AppsUtils = {
       manifestURL: aApp.manifestURL,
       appStatus: aApp.appStatus,
       removable: aApp.removable,
+      id: aApp.id,
       localId: aApp.localId,
+      basePath: aApp.basePath,
       progress: aApp.progress || 0.0,
       installState: aApp.installState || "installed",
       downloadAvailable: aApp.downloadAvailable,
@@ -49,6 +58,9 @@ this.AppsUtils = {
       updateTime: aApp.updateTime,
       etag: aApp.etag,
       packageEtag: aApp.packageEtag,
+      manifestHash: aApp.manifestHash,
+      packageHash: aApp.packageHash,
+      staged: aApp.staged,
       installerAppId: aApp.installerAppId || Ci.nsIScriptSecurityManager.NO_APP_ID,
       installerIsBrowser: !!aApp.installerIsBrowser
     };
@@ -155,25 +167,17 @@ this.AppsUtils = {
    * from https://developer.mozilla.org/en/OpenWebApps/The_Manifest
    * only the name property is mandatory
    */
-  checkManifest: function(aManifest) {
+  checkManifest: function(aManifest, app) {
     if (aManifest.name == undefined)
       return false;
 
-    function isAbsolute(uri) {
-      // See bug 810551
-      let foo = Services.io.newURI("http://foo", null, null);
-      let bar = Services.io.newURI("http://bar", null, null);
-      return Services.io.newURI(uri, null, foo).prePath != foo.prePath ||
-             Services.io.newURI(uri, null, bar).prePath != bar.prePath;
-    }
-
-    // launch_path and entry_points launch paths can't be absolute
-    if (aManifest.launch_path && isAbsolute(aManifest.launch_path))
+    // launch_path, entry_points launch paths, message hrefs, and activity hrefs can't be absolute
+    if (aManifest.launch_path && isAbsoluteURI(aManifest.launch_path))
       return false;
 
     function checkAbsoluteEntryPoints(entryPoints) {
       for (let name in entryPoints) {
-        if (entryPoints[name].launch_path && isAbsolute(entryPoints[name].launch_path)) {
+        if (entryPoints[name].launch_path && isAbsoluteURI(entryPoints[name].launch_path)) {
           return true;
         }
       }
@@ -189,6 +193,38 @@ this.AppsUtils = {
       }
     }
 
+    if (aManifest.activities) {
+      for (let activityName in aManifest.activities) {
+        let activity = aManifest.activities[activityName];
+        if (activity.href && isAbsoluteURI(activity.href)) {
+          return false;
+        }
+      }
+    }
+
+    // |messages| is an array of items, where each item is either a string or
+    // a {name: href} object.
+    let messages = aManifest.messages;
+    if (messages) {
+      if (!Array.isArray(messages)) {
+        return false;
+      }
+      for (let item of aManifest.messages) {
+        if (typeof item == "object") {
+          let keys = Object.keys(item);
+          if (keys.length != 1) {
+            return false;
+          }
+          if (isAbsoluteURI(item[keys[0]])) {
+            return false;
+          }
+        }
+      }
+    }
+
+    // Ensure that non-updatable fields contains the current app value
+    AppsUtils.normalizeManifest(aManifest, app);
+
     return true;
   },
 
@@ -202,6 +238,43 @@ this.AppsUtils = {
       return false;
     }
     return true;
+  },
+
+  /**
+   * Method to apply modifications to webapp manifests file saved internally.
+   * For now, only ensure app can't rename itself.
+   */
+  normalizeManifest: function normalizeManifest(aManifest, aApp) {
+    // As normalizeManifest isn't only called on update but also
+    // during app install, we need to bail out on install.
+    if (aApp.installState != "installed" &&
+        aApp.installState != "updating") {
+      return;
+    }
+
+    let previousManifest = aApp.manifest;
+
+    // Ensure that app name can't be updated
+    aManifest.name = aApp.name;
+
+    // Nor through localized names
+    if ('locales' in aManifest) {
+      let defaultName = new ManifestHelper(aManifest, aApp.origin).name;
+      for (let locale in aManifest.locales) {
+        let entry = aManifest.locales[locale];
+        if (!entry.name) {
+          continue;
+        }
+        // In case previous manifest didn't had a name,
+        // we use the default app name
+        let localizedName = defaultName;
+        if (previousManifest && 'locales' in previousManifest &&
+            locale in previousManifest.locales) {
+          localizedName = previousManifest.locales[locale].name;
+        }
+        entry.name = localizedName;
+      }
+    }
   },
 
   /**
@@ -305,7 +378,8 @@ this.AppsUtils = {
         return false;
       }
 
-      return (dev1.name === dev2.name && dev1.url === dev2.url);
+      return (!dev1 && !dev2) ||
+             (dev1.name === dev2.name && dev1.url === dev2.url);
     }
 
     // 2. For each locale, check if the name and dev info are the same.
@@ -371,7 +445,9 @@ ManifestHelper.prototype = {
   },
 
   get developer() {
-    return this._localeProp("developer");
+    // Default to {} in order to avoid exception in code
+    // that doesn't check for null `developer`
+    return this._localeProp("developer") || {};
   },
 
   get icons() {
@@ -438,6 +514,10 @@ ManifestHelper.prototype = {
   },
 
   resolveFromOrigin: function(aURI) {
+    // This should be enforced higher up, but check it here just in case.
+    if (isAbsoluteURI(aURI)) {
+      throw new Error("Webapps.jsm: non-relative URI passed to resolveFromOrigin");
+    }
     return this._origin.resolve(aURI);
   },
 

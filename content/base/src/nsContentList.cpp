@@ -21,8 +21,10 @@
 #include "nsGkAtoms.h"
 #include "mozilla/dom/HTMLCollectionBinding.h"
 #include "mozilla/dom/NodeListBinding.h"
+#include "mozilla/dom/BindingUtils.h"
 #include "mozilla/Likely.h"
 #include "nsGenericHTMLElement.h"
+#include <algorithm>
 
 // Form related includes
 #include "nsIDOMHTMLFormElement.h"
@@ -42,7 +44,6 @@ nsBaseContentList::~nsBaseContentList()
 {
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsBaseContentList)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsBaseContentList)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mElements)
   NS_IMPL_CYCLE_COLLECTION_UNLINK_PRESERVED_WRAPPER
@@ -143,7 +144,6 @@ nsBaseContentList::IndexOf(nsIContent* aContent)
   return IndexOf(aContent, true);
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsSimpleContentList)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsSimpleContentList,
                                                   nsBaseContentList)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mRoot)
@@ -566,7 +566,7 @@ nsContentList::Item(uint32_t aIndex, bool aDoFlush)
   }
 
   if (mState != LIST_UP_TO_DATE)
-    PopulateSelf(NS_MIN(aIndex, UINT32_MAX - 1) + 1);
+    PopulateSelf(std::min(aIndex, UINT32_MAX - 1) + 1);
 
   ASSERT_IN_SYNC;
   NS_ASSERTION(!mRootNode || mState != LIST_DIRTY,

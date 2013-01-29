@@ -11,10 +11,12 @@
 #include "nsCOMPtr.h"
 #include "nsITimer.h"
 #include "nsIWidget.h"
+#include "nsWindowBase.h"
 #include "mozilla/Attributes.h"
 
 #include <msctf.h>
 #include <textstor.h>
+#include <InputScope.h>
 
 struct ITfThreadMgr;
 struct ITfDocumentMgr;
@@ -22,6 +24,9 @@ struct ITfDisplayAttributeMgr;
 struct ITfCategoryMgr;
 class nsWindow;
 class nsTextEvent;
+#ifdef MOZ_METRO
+class MetroWidget;
+#endif
 
 // It doesn't work well when we notify TSF of text change
 // during a mutation observer call because things get broken.
@@ -97,11 +102,13 @@ public:
   static void     SetInputContext(const InputContext& aContext)
   {
     if (!sTsfTextStore) return;
+    sTsfTextStore->SetInputScope(aContext.mHTMLInputType);
     sTsfTextStore->SetInputContextInternal(aContext.mIMEState.mEnabled);
   }
 
-  static nsresult OnFocusChange(bool, nsWindow*, IMEState::Enabled);
-
+  static nsresult OnFocusChange(bool aGotFocus,
+                                nsWindowBase* aFocusedWidget,
+                                IMEState::Enabled aIMEEnabled);
   static nsresult OnTextChange(uint32_t aStart,
                                uint32_t aOldEnd,
                                uint32_t aNewEnd)
@@ -154,7 +161,8 @@ protected:
   nsTextStore();
   ~nsTextStore();
 
-  bool     Create(nsWindow*, IMEState::Enabled);
+  bool     Create(nsWindowBase* aWidget,
+                  IMEState::Enabled aIMEEnabled);
   bool     Destroy(void);
 
   bool     IsReadLock(DWORD aLock) const
@@ -191,7 +199,13 @@ protected:
   HRESULT  SendTextEventForCompositionString();
   HRESULT  SaveTextEvent(const nsTextEvent* aEvent);
   nsresult OnCompositionTimer();
+  HRESULT  ProcessScopeRequest(DWORD dwFlags,
+                               ULONG cFilterAttrs,
+                               const TS_ATTRID *paFilterAttrs);
+  void     SetInputScope(const nsString& aHTMLInputType);
 
+  // Holds the pointer to our current win32 or metro widget
+  nsRefPtr<nsWindowBase>       mWidget;
   // Document manager for the currently focused editor
   nsRefPtr<ITfDocumentMgr>     mDocumentMgr;
   // Edit cookie associated with the current editing context
@@ -202,8 +216,6 @@ protected:
   nsRefPtr<ITextStoreACPSink>  mSink;
   // TS_AS_* mask of what events to notify
   DWORD                        mSinkMask;
-  // Window containing the focused editor
-  nsWindow*                    mWindow;
   // 0 if not locked, otherwise TS_LF_* indicating the current lock
   DWORD                        mLock;
   // 0 if no lock is queued, otherwise TS_LF_* indicating the queue lock
@@ -236,6 +248,10 @@ protected:
   // Timer for calling ITextStoreACPSink::OnLayoutChange. This is only used
   // during composing.
   nsCOMPtr<nsITimer>           mCompositionTimer;
+  // The input scopes for this context, defaults to IS_DEFAULT.
+  nsTArray<InputScope>         mInputScopes;
+  bool                         mInputScopeDetected;
+  bool                         mInputScopeRequested;
 
   // TSF thread manager object for the current application
   static ITfThreadMgr*  sTsfThreadMgr;

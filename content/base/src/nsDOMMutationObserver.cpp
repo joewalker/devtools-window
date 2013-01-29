@@ -44,8 +44,6 @@ nsDOMMutationRecord::RemovedNodes()
   return mRemovedNodes;
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMMutationRecord)
-
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDOMMutationRecord)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(nsISupports)
@@ -340,8 +338,6 @@ void nsMutationReceiver::NodeWillBeDestroyed(const nsINode *aNode)
 
 // Observer
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsDOMMutationObserver)
-
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDOMMutationObserver)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_MAP_ENTRY(nsISupports)
@@ -552,11 +548,11 @@ nsDOMMutationObserver::TakeRecords(
 
 // static
 already_AddRefed<nsDOMMutationObserver>
-nsDOMMutationObserver::Constructor(nsISupports* aGlobal,
+nsDOMMutationObserver::Constructor(const mozilla::dom::GlobalObject& aGlobal,
                                    mozilla::dom::MutationCallback& aCb,
                                    mozilla::ErrorResult& aRv)
 {
-  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal);
+  nsCOMPtr<nsPIDOMWindow> window = do_QueryInterface(aGlobal.Get());
   if (!window) {
     aRv.Throw(NS_ERROR_FAILURE);
     return nullptr;

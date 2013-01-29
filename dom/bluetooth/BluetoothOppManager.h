@@ -68,6 +68,10 @@ public:
   void ExtractPacketHeaders(const ObexHeaderSet& aHeader);
   bool ExtractBlobHeaders();
   nsresult HandleShutdown();
+
+  // Return true if there is an ongoing file-transfer session, please see
+  // Bug 827267 for more information.
+  bool IsTransferring();
 private:
   BluetoothOppManager();
   void StartFileTransfer();
@@ -83,6 +87,9 @@ private:
   void AfterOppConnected();
   void AfterFirstPut();
   void AfterOppDisconnected();
+  void ValidateFileName();
+  bool IsReservedChar(PRUnichar c);
+
   virtual void OnConnectSuccess() MOZ_OVERRIDE;
   virtual void OnConnectError() MOZ_OVERRIDE;
   virtual void OnDisconnect() MOZ_OVERRIDE;

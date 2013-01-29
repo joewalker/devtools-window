@@ -7,6 +7,7 @@
 #define GLCONTEXT_H_
 
 #include <stdio.h>
+#include <algorithm>
 #if defined(XP_UNIX)
 #include <stdint.h>
 #endif
@@ -1585,8 +1586,8 @@ protected:
                             TextureImage::Flags aFlags = TextureImage::NoFlags);
 
     bool IsOffscreenSizeAllowed(const gfxIntSize& aSize) const {
-        int32_t biggerDimension = NS_MAX(aSize.width, aSize.height);
-        int32_t maxAllowed = NS_MIN(mMaxRenderbufferSize, mMaxTextureSize);
+        int32_t biggerDimension = std::max(aSize.width, aSize.height);
+        int32_t maxAllowed = std::min(mMaxRenderbufferSize, mMaxTextureSize);
         return biggerDimension <= maxAllowed;
     }
 
@@ -1783,7 +1784,7 @@ public:
 
     void PushScissorRect(const nsIntRect& aRect) {
         mScissorStack.AppendElement(aRect);
-        raw_fScissor(aRect.x, aRect.y, aRect.width, aRect.height);
+        fScissor(aRect.x, aRect.y, aRect.width, aRect.height);
     }
 
     void PopScissorRect() {
@@ -1795,8 +1796,8 @@ public:
         nsIntRect thisRect = ScissorRect();
         mScissorStack.TruncateLength(mScissorStack.Length() - 1);
         if (!thisRect.IsEqualInterior(ScissorRect())) {
-            raw_fScissor(ScissorRect().x, ScissorRect().y,
-                              ScissorRect().width, ScissorRect().height);
+            fScissor(ScissorRect().x, ScissorRect().y,
+                     ScissorRect().width, ScissorRect().height);
         }
     }
 

@@ -6,6 +6,7 @@
 // Main header first:
 // This is also necessary to ensure our definition of M_SQRT1_2 is picked up
 #include "nsSVGUtils.h"
+#include <algorithm>
 
 // Keep others in (case-insensitive) order:
 #include "gfxContext.h"
@@ -44,11 +45,11 @@
 #include "nsSVGLength2.h"
 #include "nsSVGMaskFrame.h"
 #include "nsSVGOuterSVGFrame.h"
-#include "nsSVGPathElement.h"
+#include "mozilla/dom/SVGPathElement.h"
 #include "nsSVGPathGeometryElement.h"
 #include "nsSVGPathGeometryFrame.h"
 #include "nsSVGPaintServerFrame.h"
-#include "nsSVGSVGElement.h"
+#include "mozilla/dom/SVGSVGElement.h"
 #include "nsSVGTextContainerFrame.h"
 #include "nsTextFrame.h"
 #include "SVGContentUtils.h"
@@ -132,16 +133,9 @@ static const uint8_t gsRGBToLinearRGBMap[256] = {
 239, 242, 244, 246, 248, 250, 253, 255
 };
 
-static bool sSMILEnabled;
 static bool sSVGDisplayListHitTestingEnabled;
 static bool sSVGDisplayListPaintingEnabled;
 static bool sSVGTextCSSFramesEnabled;
-
-bool
-NS_SMILEnabled()
-{
-  return sSMILEnabled;
-}
 
 bool
 NS_SVGDisplayListHitTestingEnabled()
@@ -214,10 +208,6 @@ SVGAutoRenderState::IsPaintingToWindow(nsRenderingContext *aContext)
 void
 nsSVGUtils::Init()
 {
-  Preferences::AddBoolVarCache(&sSMILEnabled,
-                               "svg.smil.enabled",
-                               true);
-
   Preferences::AddBoolVarCache(&sSVGDisplayListHitTestingEnabled,
                                "svg.display-lists.hit-testing.enabled");
 
@@ -329,7 +319,7 @@ nsSVGUtils::CoordToFloat(nsPresContext *aPresContext,
     return nsPresContext::AppUnitsToFloatCSSPixels(aCoord.GetCoordValue());
 
   case eStyleUnit_Percent: {
-      nsSVGSVGElement* ctx = aContent->GetCtx();
+      SVGSVGElement* ctx = aContent->GetCtx();
       return ctx ? aCoord.GetPercentValue() * ctx->GetLength(SVGContentUtils::XY) : 0.0f;
     }
   default:
@@ -452,7 +442,7 @@ nsSVGUtils::InvalidateBounds(nsIFrame *aFrame, bool aDuringUpdate,
         aFrame->GetStyleDisplay()->IsScrollableOverflow()) {
       // Clip rect to the viewport established by this inner-<svg>:
       float x, y, width, height;
-      static_cast<nsSVGSVGElement*>(aFrame->GetContent())->
+      static_cast<SVGSVGElement*>(aFrame->GetContent())->
         GetAnimatedLengthValues(&x, &y, &width, &height, nullptr);
       if (width <= 0.0f || height <= 0.0f) {
         return; // Nothing to invalidate
@@ -616,7 +606,7 @@ nsSVGUtils::ObjectSpace(const gfxRect &aRect, const nsSVGLength2 *aLength)
     // Multiply first to avoid precision errors:
     return axis * aLength->GetAnimValInSpecifiedUnits() / 100;
   }
-  return aLength->GetAnimValue(static_cast<nsSVGSVGElement*>(nullptr)) * axis;
+  return aLength->GetAnimValue(static_cast<SVGSVGElement*>(nullptr)) * axis;
 }
 
 float
@@ -1070,9 +1060,9 @@ nsSVGUtils::ConvertToSurfaceSize(const gfxSize& aSize,
     surfaceSize.height != ceil(aSize.height);
 
   if (!gfxASurface::CheckSurfaceSize(surfaceSize)) {
-    surfaceSize.width = NS_MIN(NS_SVG_OFFSCREEN_MAX_DIMENSION,
+    surfaceSize.width = std::min(NS_SVG_OFFSCREEN_MAX_DIMENSION,
                                surfaceSize.width);
-    surfaceSize.height = NS_MIN(NS_SVG_OFFSCREEN_MAX_DIMENSION,
+    surfaceSize.height = std::min(NS_SVG_OFFSCREEN_MAX_DIMENSION,
                                 surfaceSize.height);
     *aResultOverflows = true;
   }
@@ -1733,8 +1723,8 @@ GetStrokeDashData(nsIFrame* aFrame,
     gfxFloat pathScale = 1.0;
 
     if (content->Tag() == nsGkAtoms::path) {
-      pathScale = static_cast<nsSVGPathElement*>(content)->
-        GetPathLengthScale(nsSVGPathElement::eForStroking);
+      pathScale = static_cast<SVGPathElement*>(content)->
+        GetPathLengthScale(SVGPathElement::eForStroking);
       if (pathScale <= 0) {
         return false;
       }

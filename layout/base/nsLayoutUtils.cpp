@@ -19,7 +19,7 @@
 #include "nsCSSPseudoElements.h"
 #include "nsCSSAnonBoxes.h"
 #include "nsCSSColorUtils.h"
-#include "nsIView.h"
+#include "nsView.h"
 #include "nsPlaceholderFrame.h"
 #include "nsIScrollableFrame.h"
 #include "nsCSSFrameConstructor.h"
@@ -49,14 +49,15 @@
 #include "gfxTypes.h"
 #include "gfxUserFontSet.h"
 #include "nsTArray.h"
-#include "nsHTMLCanvasElement.h"
+#include "mozilla/dom/HTMLCanvasElement.h"
 #include "nsICanvasRenderingContextInternal.h"
 #include "gfxPlatform.h"
 #include "nsClientRect.h"
+#include <algorithm>
 #ifdef MOZ_MEDIA
 #include "nsHTMLVideoElement.h"
 #endif
-#include "nsHTMLImageElement.h"
+#include "mozilla/dom/HTMLImageElement.h"
 #include "imgIRequest.h"
 #include "nsIImageLoadingContent.h"
 #include "nsCOMPtr.h"
@@ -265,12 +266,12 @@ nsLayoutUtils::GetMaximumAnimatedScale(nsIContent* aContent)
             AnimationPropertySegment& segment = prop.mSegments[segIdx];
             gfxSize from = GetScaleForValue(segment.mFromValue,
                                             aContent->GetPrimaryFrame());
-            result.width = NS_MAX<float>(result.width, from.width);
-            result.height = NS_MAX<float>(result.height, from.height);
+            result.width = std::max<float>(result.width, from.width);
+            result.height = std::max<float>(result.height, from.height);
             gfxSize to = GetScaleForValue(segment.mToValue,
                                           aContent->GetPrimaryFrame());
-            result.width = NS_MAX<float>(result.width, to.width);
-            result.height = NS_MAX<float>(result.height, to.height);
+            result.width = std::max<float>(result.width, to.width);
+            result.height = std::max<float>(result.height, to.height);
           }
         }
       }
@@ -290,12 +291,12 @@ nsLayoutUtils::GetMaximumAnimatedScale(nsIContent* aContent)
       if (pt.mProperty == eCSSProperty_transform) {
         gfxSize start = GetScaleForValue(pt.mStartValue,
                                          aContent->GetPrimaryFrame());
-        result.width = NS_MAX<float>(result.width, start.width);
-        result.height = NS_MAX<float>(result.height, start.height);
+        result.width = std::max<float>(result.width, start.width);
+        result.height = std::max<float>(result.height, start.height);
         gfxSize end = GetScaleForValue(pt.mEndValue,
                                        aContent->GetPrimaryFrame());
-        result.width = NS_MAX<float>(result.width, end.width);
-        result.height = NS_MAX<float>(result.height, end.height);
+        result.width = std::max<float>(result.width, end.width);
+        result.height = std::max<float>(result.height, end.height);
       }
     }
   }
@@ -777,7 +778,7 @@ nsLayoutUtils::GetCrossDocParentFrame(const nsIFrame* aFrame,
   if (p)
     return p;
 
-  nsIView* v = aFrame->GetView();
+  nsView* v = aFrame->GetView();
   if (!v)
     return nullptr;
   v = v->GetParent(); // anonymous inner view
@@ -1010,16 +1011,16 @@ nsIFrame* nsLayoutUtils::GetLastSibling(nsIFrame* aFrame) {
 }
 
 // static
-nsIView*
-nsLayoutUtils::FindSiblingViewFor(nsIView* aParentView, nsIFrame* aFrame) {
+nsView*
+nsLayoutUtils::FindSiblingViewFor(nsView* aParentView, nsIFrame* aFrame) {
   nsIFrame* parentViewFrame = aParentView->GetFrame();
   nsIContent* parentViewContent = parentViewFrame ? parentViewFrame->GetContent() : nullptr;
-  for (nsIView* insertBefore = aParentView->GetFirstChild(); insertBefore;
+  for (nsView* insertBefore = aParentView->GetFirstChild(); insertBefore;
        insertBefore = insertBefore->GetNextSibling()) {
     nsIFrame* f = insertBefore->GetFrame();
     if (!f) {
       // this view could be some anonymous view attached to a meaningful parent
-      for (nsIView* searchView = insertBefore->GetParent(); searchView;
+      for (nsView* searchView = insertBefore->GetParent(); searchView;
            searchView = searchView->GetParent()) {
         f = searchView->GetFrame();
         if (f) {
@@ -1152,6 +1153,40 @@ nsLayoutUtils::GetNearestScrollableFrame(nsIFrame* aFrame)
   return nullptr;
 }
 
+// static
+nsRect
+nsLayoutUtils::GetScrolledRect(nsIFrame* aScrolledFrame,
+                               const nsRect& aScrolledFrameOverflowArea,
+                               const nsSize& aScrollPortSize,
+                               uint8_t aDirection)
+{
+  nscoord x1 = aScrolledFrameOverflowArea.x,
+          x2 = aScrolledFrameOverflowArea.XMost(),
+          y1 = aScrolledFrameOverflowArea.y,
+          y2 = aScrolledFrameOverflowArea.YMost();
+  if (y1 < 0) {
+    y1 = 0;
+  }
+  if (aDirection != NS_STYLE_DIRECTION_RTL) {
+    if (x1 < 0) {
+      x1 = 0;
+    }
+  } else {
+    if (x2 > aScrollPortSize.width) {
+      x2 = aScrollPortSize.width;
+    }
+    // When the scrolled frame chooses a size larger than its available width (because
+    // its padding alone is larger than the available width), we need to keep the
+    // start-edge of the scroll frame anchored to the start-edge of the scrollport.
+    // When the scrolled frame is RTL, this means moving it in our left-based
+    // coordinate system, so we need to compensate for its extra width here by
+    // effectively repositioning the frame.
+    nscoord extraWidth = std::max(0, aScrolledFrame->GetSize().width - aScrollPortSize.width);
+    x2 += extraWidth;
+  }
+  return nsRect(x1, y1, x2 - x1, y2 - y1);
+}
+
 //static
 bool
 nsLayoutUtils::HasPseudoStyle(nsIContent* aContent,
@@ -1227,7 +1262,7 @@ nsLayoutUtils::GetEventCoordinatesRelativeTo(nsIWidget* aWidget,
     return nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
   }
 
-  nsIView* view = aFrame->GetView();
+  nsView* view = aFrame->GetView();
   if (view) {
     nsIWidget* frameWidget = view->GetWidget();
     if (frameWidget && frameWidget == aWidget) {
@@ -1255,7 +1290,7 @@ nsLayoutUtils::GetEventCoordinatesRelativeTo(nsIWidget* aWidget,
     rootFrame = f;
   }
 
-  nsIView* rootView = rootFrame->GetView();
+  nsView* rootView = rootFrame->GetView();
   if (!rootView) {
     return nsPoint(NS_UNCONSTRAINEDSIZE, NS_UNCONSTRAINEDSIZE);
   }
@@ -1367,17 +1402,17 @@ nsLayoutUtils::RoundedRectIntersectRect(const nsRect& aRoundedRect,
   // rectFullHeight and rectFullWidth together will approximately contain
   // the total area of the frame minus the rounded corners.
   nsRect rectFullHeight = aRoundedRect;
-  nscoord xDiff = NS_MAX(aRadii[NS_CORNER_TOP_LEFT_X], aRadii[NS_CORNER_BOTTOM_LEFT_X]);
+  nscoord xDiff = std::max(aRadii[NS_CORNER_TOP_LEFT_X], aRadii[NS_CORNER_BOTTOM_LEFT_X]);
   rectFullHeight.x += xDiff;
-  rectFullHeight.width -= NS_MAX(aRadii[NS_CORNER_TOP_RIGHT_X],
+  rectFullHeight.width -= std::max(aRadii[NS_CORNER_TOP_RIGHT_X],
                                  aRadii[NS_CORNER_BOTTOM_RIGHT_X]) + xDiff;
   nsRect r1;
   r1.IntersectRect(rectFullHeight, aContainedRect);
 
   nsRect rectFullWidth = aRoundedRect;
-  nscoord yDiff = NS_MAX(aRadii[NS_CORNER_TOP_LEFT_Y], aRadii[NS_CORNER_TOP_RIGHT_Y]);
+  nscoord yDiff = std::max(aRadii[NS_CORNER_TOP_LEFT_Y], aRadii[NS_CORNER_TOP_RIGHT_Y]);
   rectFullWidth.y += yDiff;
-  rectFullWidth.height -= NS_MAX(aRadii[NS_CORNER_BOTTOM_LEFT_Y],
+  rectFullWidth.height -= std::max(aRadii[NS_CORNER_BOTTOM_LEFT_Y],
                                  aRadii[NS_CORNER_BOTTOM_RIGHT_Y]) + yDiff;
   nsRect r2;
   r2.IntersectRect(rectFullWidth, aContainedRect);
@@ -1573,7 +1608,7 @@ static nsIntPoint GetWidgetOffset(nsIWidget* aWidget, nsIWidget*& aRootWidget) {
 nsPoint
 nsLayoutUtils::TranslateWidgetToView(nsPresContext* aPresContext,
                                      nsIWidget* aWidget, nsIntPoint aPt,
-                                     nsIView* aView)
+                                     nsView* aView)
 {
   nsPoint viewOffset;
   nsIWidget* viewWidget = aView->GetNearestWidget(&viewOffset);
@@ -1736,7 +1771,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
 {
   SAMPLE_LABEL("nsLayoutUtils","PaintFrame");
   if (aFlags & PAINT_WIDGET_LAYERS) {
-    nsIView* view = aFrame->GetView();
+    nsView* view = aFrame->GetView();
     if (!(view && view->GetWidget() && GetDisplayRootFrame(aFrame) == aFrame)) {
       aFlags &= ~PAINT_WIDGET_LAYERS;
       NS_ASSERTION(aRenderingContext, "need a rendering context");
@@ -1898,7 +1933,7 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
     // If the passed in backstop color makes us draw something different from
     // normal, we need to flush layers.
     if ((aFlags & PAINT_WIDGET_LAYERS) && !willFlushRetainedLayers) {
-      nsIView* view = aFrame->GetView();
+      nsView* view = aFrame->GetView();
       if (view) {
         nscolor backstop = presShell->ComputeBackstopColor(view);
         // The PresShell's canvas background color doesn't get updated until
@@ -1971,6 +2006,9 @@ nsLayoutUtils::PaintFrame(nsRenderingContext* aRenderingContext, nsIFrame* aFram
   }
   if (aFlags & PAINT_NO_COMPOSITE) {
     flags |= nsDisplayList::PAINT_NO_COMPOSITE;
+  }
+  if (aFlags & PAINT_NO_CLEAR_INVALIDATIONS) {
+    flags |= nsDisplayList::PAINT_NO_CLEAR_INVALIDATIONS;
   }
 
   list.PaintRoot(&builder, aRenderingContext, flags);
@@ -2525,7 +2563,7 @@ GetPercentHeight(const nsStyleCoord& aStyle,
   }
 
   if (aStyle.IsCalcUnit()) {
-    aResult = NS_MAX(nsRuleNode::ComputeComputedCalc(aStyle, h), 0);
+    aResult = std::max(nsRuleNode::ComputeComputedCalc(aStyle, h), 0);
     return true;
   }
 
@@ -2724,14 +2762,14 @@ nsLayoutUtils::IntrinsicForContainer(nsRenderingContext *aRenderingContext,
         nscoord h;
         if (GetAbsoluteCoord(styleHeight, h) ||
             GetPercentHeight(styleHeight, aFrame, h)) {
-          h = NS_MAX(0, h - heightTakenByBoxSizing);
+          h = std::max(0, h - heightTakenByBoxSizing);
           result =
             NSToCoordRound(h * (float(ratio.width) / float(ratio.height)));
         }
 
         if (GetAbsoluteCoord(styleMaxHeight, h) ||
             GetPercentHeight(styleMaxHeight, aFrame, h)) {
-          h = NS_MAX(0, h - heightTakenByBoxSizing);
+          h = std::max(0, h - heightTakenByBoxSizing);
           nscoord maxWidth =
             NSToCoordRound(h * (float(ratio.width) / float(ratio.height)));
           if (maxWidth < result)
@@ -2740,7 +2778,7 @@ nsLayoutUtils::IntrinsicForContainer(nsRenderingContext *aRenderingContext,
 
         if (GetAbsoluteCoord(styleMinHeight, h) ||
             GetPercentHeight(styleMinHeight, aFrame, h)) {
-          h = NS_MAX(0, h - heightTakenByBoxSizing);
+          h = std::max(0, h - heightTakenByBoxSizing);
           nscoord minWidth =
             NSToCoordRound(h * (float(ratio.width) / float(ratio.height)));
           if (minWidth > result)
@@ -2935,7 +2973,7 @@ nsLayoutUtils::ComputeWidthValue(
                    min = aFrame->GetMinWidth(aRenderingContext),
                   fill = aContainingBlockWidth -
                          (aBoxSizingToMarginEdge + aContentEdgeToBoxSizing);
-          result = NS_MAX(min, NS_MIN(pref, fill));
+          result = std::max(min, std::min(pref, fill));
           NS_ASSERTION(result >= 0, "width less than zero");
         }
         break;
@@ -2945,7 +2983,7 @@ nsLayoutUtils::ComputeWidthValue(
     }
   }
 
-  return NS_MAX(0, result);
+  return std::max(0, result);
 }
 
 /* static */ nscoord
@@ -3460,7 +3498,7 @@ nsLayoutUtils::PaintTextShadow(const nsIFrame* aFrame,
     nsCSSShadowItem* shadowDetails = textStyle->mTextShadow->ShadowAt(i - 1);
     nsPoint shadowOffset(shadowDetails->mXOffset,
                          shadowDetails->mYOffset);
-    nscoord blurRadius = NS_MAX(shadowDetails->mRadius, 0);
+    nscoord blurRadius = std::max(shadowDetails->mRadius, 0);
 
     nsRect shadowRect(aTextRect);
     shadowRect.MoveBy(shadowOffset);
@@ -3645,11 +3683,11 @@ CalculateBlockContentBottom(nsBlockFrame* aFrame)
     if (line->IsBlock()) {
       nsIFrame* child = line->mFirstChild;
       nscoord offset = child->GetRect().y - child->GetRelativeOffset().y;
-      contentBottom = NS_MAX(contentBottom,
+      contentBottom = std::max(contentBottom,
                         nsLayoutUtils::CalculateContentBottom(child) + offset);
     }
     else {
-      contentBottom = NS_MAX(contentBottom, line->mBounds.YMost());
+      contentBottom = std::max(contentBottom, line->mBounds.YMost());
     }
   }
   return contentBottom;
@@ -3671,7 +3709,7 @@ nsLayoutUtils::CalculateContentBottom(nsIFrame* aFrame)
     nsBlockFrame* blockFrame = GetAsBlock(aFrame);
     if (blockFrame) {
       contentBottom =
-        NS_MAX(contentBottom, CalculateBlockContentBottom(blockFrame));
+        std::max(contentBottom, CalculateBlockContentBottom(blockFrame));
       skip |= nsIFrame::kPrincipalList;
     }
     nsIFrame::ChildListIterator lists(aFrame);
@@ -3681,7 +3719,7 @@ nsLayoutUtils::CalculateContentBottom(nsIFrame* aFrame)
         for (; !childFrames.AtEnd(); childFrames.Next()) {
           nsIFrame* child = childFrames.get();
           nscoord offset = child->GetRect().y - child->GetRelativeOffset().y;
-          contentBottom = NS_MAX(contentBottom,
+          contentBottom = std::max(contentBottom,
                                  CalculateContentBottom(child) + offset);
         }
       }
@@ -3824,15 +3862,20 @@ ComputeSnappedImageDrawingParameters(gfxContext*     aCtx,
   gfxRect devPixelDirty =
     nsLayoutUtils::RectToGfxRect(aDirty, aAppUnitsPerDevPixel);
 
-  bool ignoreScale = false;
-#ifdef MOZ_GFX_OPTIMIZE_MOBILE
-  ignoreScale = true;
-#endif
-  gfxRect fill = devPixelFill;
-  bool didSnap = aCtx->UserToDevicePixelSnapped(fill, ignoreScale);
   gfxMatrix currentMatrix = aCtx->CurrentMatrix();
-  if (didSnap && currentMatrix.HasNonAxisAlignedTransform()) {
-    // currentMatrix must have some rotation by a multiple of 90 degrees.
+  gfxRect fill = devPixelFill;
+  bool didSnap;
+  // Snap even if we have a scale in the context. But don't snap if
+  // we have something that's not translation+scale, or if the scale flips in
+  // the X or Y direction, because snapped image drawing can't handle that yet.
+  if (!currentMatrix.HasNonAxisAlignedTransform() &&
+      currentMatrix.xx > 0.0 && currentMatrix.yy > 0.0 &&
+      aCtx->UserToDevicePixelSnapped(fill, true)) {
+    didSnap = true;
+    if (fill.IsEmpty()) {
+      return SnappedImageDrawingParameters();
+    }
+  } else {
     didSnap = false;
     fill = devPixelFill;
   }
@@ -4342,10 +4385,10 @@ nsLayoutUtils::GetRectDifferenceStrips(const nsRect& aR1, const nsRect& aR2,
                                        nsRect* aHStrip, nsRect* aVStrip) {
   NS_ASSERTION(aR1.TopLeft() == aR2.TopLeft(),
                "expected rects at the same position");
-  nsRect unionRect(aR1.x, aR1.y, NS_MAX(aR1.width, aR2.width),
-                   NS_MAX(aR1.height, aR2.height));
-  nscoord VStripStart = NS_MIN(aR1.width, aR2.width);
-  nscoord HStripStart = NS_MIN(aR1.height, aR2.height);
+  nsRect unionRect(aR1.x, aR1.y, std::max(aR1.width, aR2.width),
+                   std::max(aR1.height, aR2.height));
+  nscoord VStripStart = std::min(aR1.width, aR2.width);
+  nscoord HStripStart = std::min(aR1.height, aR2.height);
   *aVStrip = unionRect;
   aVStrip->x += VStripStart;
   aVStrip->width -= VStripStart;
@@ -4512,7 +4555,7 @@ nsLayoutUtils::SurfaceFromElement(nsIImageLoadingContent* aElement,
 }
 
 nsLayoutUtils::SurfaceFromElementResult
-nsLayoutUtils::SurfaceFromElement(nsHTMLImageElement *aElement,
+nsLayoutUtils::SurfaceFromElement(HTMLImageElement *aElement,
                                   uint32_t aSurfaceFlags)
 {
   return SurfaceFromElement(static_cast<nsIImageLoadingContent*>(aElement),
@@ -4520,7 +4563,7 @@ nsLayoutUtils::SurfaceFromElement(nsHTMLImageElement *aElement,
 }
 
 nsLayoutUtils::SurfaceFromElementResult
-nsLayoutUtils::SurfaceFromElement(nsHTMLCanvasElement* aElement,
+nsLayoutUtils::SurfaceFromElement(HTMLCanvasElement* aElement,
                                   uint32_t aSurfaceFlags)
 {
   SurfaceFromElementResult result;
@@ -4559,7 +4602,7 @@ nsLayoutUtils::SurfaceFromElement(nsHTMLCanvasElement* aElement,
 
     nsRefPtr<gfxContext> ctx = new gfxContext(surf);
     // XXX shouldn't use the external interface, but maybe we can layerify this
-    uint32_t flags = premultAlpha ? nsHTMLCanvasElement::RenderFlagPremultAlpha : 0;
+    uint32_t flags = premultAlpha ? HTMLCanvasElement::RenderFlagPremultAlpha : 0;
     rv = aElement->RenderContextsExternal(ctx, gfxPattern::FILTER_NEAREST, flags);
     if (NS_FAILED(rv))
       return result;
@@ -4636,8 +4679,8 @@ nsLayoutUtils::SurfaceFromElement(dom::Element* aElement,
                                   uint32_t aSurfaceFlags)
 {
   // If it's a <canvas>, we may be able to just grab its internal surface
-  if (nsHTMLCanvasElement* canvas =
-        nsHTMLCanvasElement::FromContentOrNull(aElement)) {
+  if (HTMLCanvasElement* canvas =
+        HTMLCanvasElement::FromContentOrNull(aElement)) {
     return SurfaceFromElement(canvas, aSurfaceFlags);
   }
 
@@ -4801,8 +4844,8 @@ nsLayoutUtils::GetFontFacesForText(nsIFrame* aFrame,
 
   nsTextFrame* curr = static_cast<nsTextFrame*>(aFrame);
   do {
-    int32_t fstart = NS_MAX(curr->GetContentOffset(), aStartOffset);
-    int32_t fend = NS_MIN(curr->GetContentEnd(), aEndOffset);
+    int32_t fstart = std::max(curr->GetContentOffset(), aStartOffset);
+    int32_t fend = std::min(curr->GetContentEnd(), aEndOffset);
     if (fstart >= fend) {
       continue;
     }
@@ -5088,7 +5131,7 @@ MinimumFontSizeFor(nsPresContext* aPresContext, nscoord aContainerWidth)
 
   // Clamp the container width to the device dimensions
   nscoord iFrameWidth = aPresContext->GetVisibleArea().width;
-  nscoord effectiveContainerWidth = NS_MIN(iFrameWidth, aContainerWidth);
+  nscoord effectiveContainerWidth = std::min(iFrameWidth, aContainerWidth);
 
   nscoord byLine = 0, byInch = 0;
   if (emPerLine != 0) {
@@ -5103,7 +5146,7 @@ MinimumFontSizeFor(nsPresContext* aPresContext, nscoord aContainerWidth)
                             (deviceWidthInches * 1440 /
                              minTwips ));
   }
-  return NS_MAX(byLine, byInch);
+  return std::max(byLine, byInch);
 }
 
 /* static */ float

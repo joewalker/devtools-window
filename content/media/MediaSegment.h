@@ -7,6 +7,7 @@
 #define MOZILLA_MEDIASEGMENT_H_
 
 #include "nsTArray.h"
+#include <algorithm>
 
 namespace mozilla {
 
@@ -156,7 +157,7 @@ public:
       return;
     }
     if (mChunks[0].IsNull()) {
-      TrackTicks extraToForget = NS_MIN(aDuration, mDuration) - mChunks[0].GetDuration();
+      TrackTicks extraToForget = std::min(aDuration, mDuration) - mChunks[0].GetDuration();
       if (extraToForget > 0) {
         RemoveLeading(extraToForget, 1);
         mChunks[0].mDuration += extraToForget;
@@ -215,6 +216,7 @@ protected:
   void AppendFromInternal(MediaSegmentBase<C, Chunk>* aSource)
   {
     static_cast<C*>(this)->CheckCompatible(*static_cast<C*>(aSource));
+    MOZ_ASSERT(aSource->mDuration >= 0);
     mDuration += aSource->mDuration;
     aSource->mDuration = 0;
     if (!mChunks.IsEmpty() && !aSource->mChunks.IsEmpty() &&
@@ -236,9 +238,9 @@ protected:
     TrackTicks offset = 0;
     for (uint32_t i = 0; i < aSource.mChunks.Length() && offset < aEnd; ++i) {
       const Chunk& c = aSource.mChunks[i];
-      TrackTicks start = NS_MAX(aStart, offset);
+      TrackTicks start = std::max(aStart, offset);
       TrackTicks nextOffset = offset + c.GetDuration();
-      TrackTicks end = NS_MIN(aEnd, nextOffset);
+      TrackTicks end = std::min(aEnd, nextOffset);
       if (start < end) {
         mChunks.AppendElement(c)->SliceTo(start - offset, end - offset);
       }
@@ -248,6 +250,7 @@ protected:
 
   Chunk* AppendChunk(TrackTicks aDuration)
   {
+    MOZ_ASSERT(aDuration >= 0);
     Chunk* c = mChunks.AppendElement();
     c->mDuration = aDuration;
     mDuration += aDuration;

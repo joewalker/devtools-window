@@ -419,8 +419,6 @@ IDBDatabase::CreateObjectStoreInternal(IDBTransaction* aTransaction,
   return NS_OK;
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(IDBDatabase)
-
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(IDBDatabase, IDBWrapperCache)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFactory)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
@@ -443,9 +441,9 @@ NS_IMPL_RELEASE_INHERITED(IDBDatabase, IDBWrapperCache)
 
 DOMCI_DATA(IDBDatabase, IDBDatabase)
 
-NS_IMPL_EVENT_HANDLER(IDBDatabase, abort);
-NS_IMPL_EVENT_HANDLER(IDBDatabase, error);
-NS_IMPL_EVENT_HANDLER(IDBDatabase, versionchange);
+NS_IMPL_EVENT_HANDLER(IDBDatabase, abort)
+NS_IMPL_EVENT_HANDLER(IDBDatabase, error)
+NS_IMPL_EVENT_HANDLER(IDBDatabase, versionchange)
 
 NS_IMETHODIMP
 IDBDatabase::GetName(nsAString& aName)

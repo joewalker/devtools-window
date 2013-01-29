@@ -54,7 +54,7 @@
 #include "mozilla/css/StyleRule.h"
 #include "nsIStyleSheet.h"
 #include "nsIURL.h"
-#include "nsIViewManager.h"
+#include "nsViewManager.h"
 #include "nsIWidget.h"
 #include "nsIXULDocument.h"
 #include "nsIXULTemplateBuilder.h"
@@ -89,6 +89,7 @@
 #include "nsAttrValueOrString.h"
 #include "nsAttrValueInlines.h"
 #include "mozilla/Attributes.h"
+#include <algorithm>
 
 // The XUL doc interface
 #include "nsIDOMXULDocument.h"
@@ -136,10 +137,8 @@ public:
 
   NS_IMETHOD GetStyle(nsIDOMCSSStyleDeclaration** aStyle)
   {
-    nsresult rv;
-    *aStyle = static_cast<nsXULElement*>(mElement.get())->GetStyle(&rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-    NS_ADDREF(*aStyle);
+    nsXULElement* element = static_cast<nsXULElement*>(mElement.get());
+    NS_ADDREF(*aStyle = element->Style());
     return NS_OK;
   }
   NS_FORWARD_NSIFRAMELOADEROWNER(static_cast<nsXULElement*>(mElement.get())->)
@@ -301,7 +300,6 @@ NS_TrustedNewXULElement(nsIContent** aResult, already_AddRefed<nsINodeInfo> aNod
 //----------------------------------------------------------------------
 // nsISupports interface
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXULElement)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsXULElement,
                                                   nsStyledElement)
     {
@@ -823,7 +821,7 @@ nsXULElement::RemoveChildAt(uint32_t aIndex, bool aNotify)
         int32_t treeRows;
         listBox->GetRowCount(&treeRows);
         if (treeRows > 0) {
-            newCurrentIndex = NS_MIN((treeRows - 1), newCurrentIndex);
+            newCurrentIndex = std::min((treeRows - 1), newCurrentIndex);
             nsCOMPtr<nsIDOMElement> newCurrentItem;
             listBox->GetItemAtIndex(newCurrentIndex, getter_AddRefs(newCurrentItem));
             nsCOMPtr<nsIDOMXULSelectControlItemElement> xulCurItem = do_QueryInterface(newCurrentItem);
@@ -1126,6 +1124,7 @@ nsXULElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
             // Stop building the event target chain for the original event.
             // We don't want it to propagate to any DOM nodes.
             aVisitor.mCanHandle = false;
+            aVisitor.mAutomaticChromeDispatch = false;
 
             // XXX sXBL/XBL2 issue! Owner or current document?
             nsCOMPtr<nsIDOMDocument> domDoc(do_QueryInterface(GetCurrentDoc()));
@@ -1664,7 +1663,7 @@ nsXULElement::HideWindowChrome(bool aShouldHide)
         nsPresContext *presContext = shell->GetPresContext();
 
         if (frame && presContext && presContext->IsChrome()) {
-            nsIView* view = frame->GetClosestView();
+            nsView* view = frame->GetClosestView();
 
             if (view) {
                 nsIWidget* w = view->GetWidget();
@@ -1825,7 +1824,11 @@ nsXULElement::RecompileScriptEventListeners()
     }
 }
 
-NS_IMPL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(nsXULPrototypeNode)
+bool
+nsXULElement::IsEventAttributeName(nsIAtom *aName)
+{
+  return nsContentUtils::IsEventAttributeName(aName, EventNameType_XUL);
+}
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXULPrototypeNode)
     if (tmp->mType == nsXULPrototypeNode::eType_Element) {
@@ -1858,8 +1861,9 @@ NS_IMPL_CYCLE_COLLECTION_TRACE_BEGIN(nsXULPrototypeNode)
     if (tmp->mType == nsXULPrototypeNode::eType_Script) {
         nsXULPrototypeScript *script =
             static_cast<nsXULPrototypeScript*>(tmp);
-        NS_IMPL_CYCLE_COLLECTION_TRACE_JS_CALLBACK(script->mScriptObject.mObject,
-                                                   "mScriptObject.mObject")
+        NS_IMPL_CYCLE_COLLECTION_TRACE_JS_CALLBACK(script->GetScriptObject(),
+                                                   "mScriptObject")
+
     }
 NS_IMPL_CYCLE_COLLECTION_TRACE_END
 
@@ -1975,7 +1979,7 @@ nsXULPrototypeElement::Serialize(nsIObjectOutputStream* aStream,
                   rv = tmp;
                 }
 
-                if (script->mScriptObject.mObject) {
+                if (script->GetScriptObject()) {
                     // This may return NS_OK without muxing script->mSrcURI's
                     // data into the cache file, in the case where that
                     // muxed document is already there (written by a prior
@@ -2224,6 +2228,22 @@ nsXULPrototypeElement::Unlink()
     mAttributes = nullptr;
 }
 
+void
+nsXULPrototypeElement::TraceAllScripts(JSTracer* aTrc)
+{
+    for (uint32_t i = 0; i < mChildren.Length(); ++i) {
+        nsXULPrototypeNode* child = mChildren[i];
+        if (child->mType == nsXULPrototypeNode::eType_Element) {
+            static_cast<nsXULPrototypeElement*>(child)->TraceAllScripts(aTrc);
+        } else if (child->mType == nsXULPrototypeNode::eType_Script) {
+            JSScript* script = static_cast<nsXULPrototypeScript*>(child)->GetScriptObject();
+            if (script) {
+                JS_CALL_SCRIPT_TRACER(aTrc, script, "active window XUL prototype script");
+            }
+        }
+    }
+}
+
 //----------------------------------------------------------------------
 //
 // nsXULPrototypeScript
@@ -2236,7 +2256,7 @@ nsXULPrototypeScript::nsXULPrototypeScript(uint32_t aLineNo, uint32_t aVersion)
       mOutOfLine(true),
       mSrcLoadWaiters(nullptr),
       mLangVersion(aVersion),
-      mScriptObject()
+      mScriptObject(nullptr)
 {
 }
 
@@ -2253,9 +2273,9 @@ nsXULPrototypeScript::Serialize(nsIObjectOutputStream* aStream,
 {
     nsIScriptContext *context = aGlobal->GetScriptContext();
     NS_ASSERTION(!mSrcLoading || mSrcLoadWaiters != nullptr ||
-                 !mScriptObject.mObject,
+                 !mScriptObject,
                  "script source still loading when serializing?!");
-    if (!mScriptObject.mObject)
+    if (!mScriptObject)
         return NS_ERROR_FAILURE;
 
     // Write basic prototype data
@@ -2265,7 +2285,7 @@ nsXULPrototypeScript::Serialize(nsIObjectOutputStream* aStream,
     rv = aStream->Write32(mLangVersion);
     if (NS_FAILED(rv)) return rv;
     // And delegate the writing to the nsIScriptContext
-    rv = context->Serialize(aStream, mScriptObject.mObject);
+    rv = context->Serialize(aStream, mScriptObject);
     if (NS_FAILED(rv)) return rv;
 
     return NS_OK;
@@ -2328,7 +2348,7 @@ nsXULPrototypeScript::Deserialize(nsIObjectInputStream* aStream,
     nsresult rv;
 
     NS_ASSERTION(!mSrcLoading || mSrcLoadWaiters != nullptr ||
-                 !mScriptObject.mObject,
+                 !mScriptObject,
                  "prototype script not well-initialized when deserializing?!");
 
     // Read basic prototype data
@@ -2381,7 +2401,7 @@ nsXULPrototypeScript::DeserializeOutOfLine(nsIObjectInputStream* aInput,
             }
         }
 
-        if (! mScriptObject.mObject) {
+        if (!mScriptObject) {
             if (mSrcURI) {
                 rv = cache->GetInputStream(mSrcURI, getter_AddRefs(objectInput));
             } 
@@ -2402,7 +2422,7 @@ nsXULPrototypeScript::DeserializeOutOfLine(nsIObjectInputStream* aInput,
                     bool isChrome = false;
                     mSrcURI->SchemeIs("chrome", &isChrome);
                     if (isChrome)
-                        cache->PutScript(mSrcURI, mScriptObject.mObject);
+                        cache->PutScript(mSrcURI, mScriptObject);
                 }
                 cache->FinishInputStream(mSrcURI);
             } else {
@@ -2489,8 +2509,8 @@ nsXULPrototypeScript::Compile(const PRUnichar* aText,
 void
 nsXULPrototypeScript::UnlinkJSObjects()
 {
-    if (mScriptObject.mObject) {
-        mScriptObject.mObject = nullptr;
+    if (mScriptObject) {
+        mScriptObject = nullptr;
         nsContentUtils::DropJSObjects(this);
     }
 }
@@ -2498,15 +2518,15 @@ nsXULPrototypeScript::UnlinkJSObjects()
 void
 nsXULPrototypeScript::Set(JSScript* aObject)
 {
-    NS_ASSERTION(!mScriptObject.mObject, "Leaking script object.");
+    MOZ_ASSERT(!mScriptObject, "Leaking script object.");
     if (!aObject) {
-        mScriptObject.mObject = nullptr;
+        mScriptObject = nullptr;
         return;
     }
 
     nsContentUtils::HoldJSObjects(
         this, NS_CYCLE_COLLECTION_PARTICIPANT(nsXULPrototypeNode));
-    mScriptObject.mObject = aObject;
+    mScriptObject = aObject;
 }
 
 //----------------------------------------------------------------------

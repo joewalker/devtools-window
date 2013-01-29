@@ -59,6 +59,9 @@ public:
                       FromParser aFromParser = NOT_FROM_PARSER);
   virtual ~nsHTMLButtonElement();
 
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsHTMLButtonElement,
+                                           nsGenericHTMLFormElement)
+
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
 
@@ -82,6 +85,7 @@ public:
   NS_IMETHOD SubmitNamesValues(nsFormSubmission* aFormSubmission);
   NS_IMETHOD SaveState();
   bool RestoreState(nsPresState* aState);
+  virtual bool IsDisabledForEvents(uint32_t aMessage);
 
   nsEventStates IntrinsicState() const;
 
@@ -150,6 +154,15 @@ nsHTMLButtonElement::~nsHTMLButtonElement()
 }
 
 // nsISupports
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsHTMLButtonElement,
+                                                  nsGenericHTMLFormElement)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mValidity)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(nsHTMLButtonElement,
+                                                nsGenericHTMLFormElement)
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mValidity)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_ADDREF_INHERITED(nsHTMLButtonElement, Element)
 NS_IMPL_RELEASE_INHERITED(nsHTMLButtonElement, Element)
@@ -251,17 +264,22 @@ nsHTMLButtonElement::ParseAttribute(int32_t aNamespaceID,
                                               aResult);
 }
 
-nsresult
-nsHTMLButtonElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
+bool
+nsHTMLButtonElement::IsDisabledForEvents(uint32_t aMessage)
 {
   nsIFormControlFrame* formControlFrame = GetFormControlFrame(false);
   nsIFrame* formFrame = NULL;
   if (formControlFrame) {
     formFrame = do_QueryFrame(formControlFrame);
   }
+  return IsElementDisabledForEvents(aMessage, formFrame);
+}
 
+nsresult
+nsHTMLButtonElement::PreHandleEvent(nsEventChainPreVisitor& aVisitor)
+{
   aVisitor.mCanHandle = false;
-  if (IsElementDisabledForEvents(aVisitor.mEvent->message, formFrame)) {
+  if (IsDisabledForEvents(aVisitor.mEvent->message)) {
     return NS_OK;
   }
 

@@ -1,5 +1,5 @@
 /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=2 et sw=2 tw=80: */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -15,10 +15,8 @@
 #include <string.h>
 
 #ifdef XP_WIN
-#error "Windows not supported yet, sorry."
-// XXX: This will be needed when Windows is supported (bug 819839).
-//#include <process.h>
-//#define getpid _getpid
+#include <windows.h>
+#include <process.h>
 #else
 #include <unistd.h>
 #endif
@@ -42,7 +40,17 @@
 // PAGE_SIZE.  Nb: sysconf() is expensive, but it's only used for (the obsolete
 // and rarely used) valloc.
 #define MOZ_REPLACE_ONLY_MEMALIGN 1
+#ifdef XP_WIN
+#define PAGE_SIZE GetPageSize()
+static long GetPageSize()
+{
+  SYSTEM_INFO si;
+  GetSystemInfo(&si);
+  return si.dwPageSize;
+}
+#else
 #define PAGE_SIZE sysconf(_SC_PAGESIZE)
+#endif
 #include "replace_malloc.h"
 #undef MOZ_REPLACE_ONLY_MEMALIGN
 #undef PAGE_SIZE
@@ -64,13 +72,6 @@ static const malloc_table_t* gMallocTable = nullptr;
 
 // This enables/disables DMD.
 static bool gIsDMDRunning = false;
-
-enum Mode {
-  Normal,   // run normally
-  Test,     // do some basic correctness tests
-  Stress    // do some performance stress tests
-};
-static Mode gMode = Normal;
 
 // This provides infallible allocations (they abort on OOM).  We use it for all
 // of DMD's own allocations, which fall into the following three cases.
@@ -269,13 +270,64 @@ static char gBuf4[kBufLen];
 static const size_t kNoSize = size_t(-1);
 
 //---------------------------------------------------------------------------
+// Options (Part 1)
+//---------------------------------------------------------------------------
+
+class Options
+{
+  template <typename T>
+  struct NumOption
+  {
+    const T mDefault;
+    const T mMax;
+    T       mActual;
+    NumOption(T aDefault, T aMax)
+      : mDefault(aDefault), mMax(aMax), mActual(aDefault)
+    {}
+  };
+
+  enum Mode {
+    Normal,   // run normally
+    Test,     // do some basic correctness tests
+    Stress    // do some performance stress tests
+  };
+
+  char* mDMDEnvVar;   // a saved copy, for printing during Dump()
+
+  NumOption<size_t>   mSampleBelowSize;
+  NumOption<uint32_t> mMaxFrames;
+  NumOption<uint32_t> mMaxRecords;
+  Mode mMode;
+
+  void BadArg(const char* aArg);
+  static const char* ValueIfMatch(const char* aArg, const char* aOptionName);
+  static bool GetLong(const char* aArg, const char* aOptionName,
+                      long aMin, long aMax, long* aN);
+
+public:
+  Options(const char* aDMDEnvVar);
+
+  const char* DMDEnvVar() const { return mDMDEnvVar; }
+
+  size_t SampleBelowSize() const { return mSampleBelowSize.mActual; }
+  size_t MaxFrames()       const { return mMaxFrames.mActual; }
+  size_t MaxRecords()      const { return mMaxRecords.mActual; }
+
+  void SetSampleBelowSize(size_t aN) { mSampleBelowSize.mActual = aN; }
+
+  bool IsTestMode()   const { return mMode == Test; }
+  bool IsStressMode() const { return mMode == Stress; }
+};
+
+static Options *gOptions;
+
+//---------------------------------------------------------------------------
 // The global lock
 //---------------------------------------------------------------------------
 
 // MutexBase implements the platform-specific parts of a mutex.
-#ifdef XP_WIN
 
-#include <windows.h>
+#ifdef XP_WIN
 
 class MutexBase
 {
@@ -318,8 +370,9 @@ class MutexBase
 
 public:
   MutexBase()
-    : mMutex(PTHREAD_MUTEX_INITIALIZER)
-  {}
+  {
+    pthread_mutex_init(&mMutex, NULL);
+  }
 
   void Lock()
   {
@@ -406,9 +459,9 @@ public:
 #ifdef XP_WIN
 
 #define DMD_TLS_INDEX_TYPE              DWORD
-#define DMD_CREATE_TLS_INDEX(i_)        PR_BEGIN_MACRO                        \
+#define DMD_CREATE_TLS_INDEX(i_)        do {                                  \
                                           (i_) = TlsAlloc();                  \
-                                        PR_END_MACRO
+                                        } while (0)
 #define DMD_DESTROY_TLS_INDEX(i_)       TlsFree((i_))
 #define DMD_GET_TLS_DATA(i_)            TlsGetValue((i_))
 #define DMD_SET_TLS_DATA(i_, v_)        TlsSetValue((i_), (v_))
@@ -696,10 +749,14 @@ public:
 
 class StackTrace
 {
-  static const uint32_t MaxDepth = 24;
+public:
+  static const uint32_t MaxFrames = 24;
 
-  uint32_t mLength;             // The number of PCs.
-  void* mPcs[MaxDepth];         // The PCs themselves.
+private:
+  uint32_t mLength;         // The number of PCs.
+  void* mPcs[MaxFrames];    // The PCs themselves.  If --max-frames is less
+                            // than 24, this array is bigger than necessary,
+                            // but that case is unusual.
 
 public:
   StackTrace() : mLength(0) {}
@@ -740,13 +797,9 @@ private:
   static void StackWalkCallback(void* aPc, void* aSp, void* aClosure)
   {
     StackTrace* st = (StackTrace*) aClosure;
-
-    // Only fill to MaxDepth.
-    // XXX: bug 818793 will allow early bailouts.
-    if (st->mLength < MaxDepth) {
-      st->mPcs[st->mLength] = aPc;
-      st->mLength++;
-    }
+    MOZ_ASSERT(st->mLength < MaxFrames);
+    st->mPcs[st->mLength] = aPc;
+    st->mLength++;
   }
 
   static int QsortCmp(const void* aA, const void* aB)
@@ -763,17 +816,14 @@ typedef js::HashSet<StackTrace*, StackTrace, InfallibleAllocPolicy>
         StackTraceTable;
 static StackTraceTable* gStackTraceTable = nullptr;
 
+// We won't GC the stack trace table until it this many elements.
+static uint32_t gGCStackTraceTableWhenSizeExceeds = 4 * 1024;
+
 void
 StackTrace::Print(const Writer& aWriter, LocationService* aLocService) const
 {
   if (mLength == 0) {
-    W("   (empty)\n");
-    return;
-  }
-
-  if (gMode == Test) {
-    // Don't print anything because there's too much variation.
-    W("   (stack omitted due to test mode)\n");
+    W("   (empty)\n");  // StackTrace::Get() must have failed
     return;
   }
 
@@ -793,19 +843,35 @@ StackTrace::Get(Thread* aT)
   // loading a shared library).  So we can't be in gStateLock during the call
   // to NS_StackWalk.  For details, see
   // https://bugzilla.mozilla.org/show_bug.cgi?id=374829#c8
+  // On Linux, something similar can happen;  see bug 824340.
+  // So let's just release it on all platforms.
+  nsresult rv;
   StackTrace tmp;
   {
-#ifdef XP_WIN
     AutoUnlockState unlock;
-#endif
-    // In normal operation, skip=3 gets us past various malloc wrappers into
-    // more interesting stuff.  But in test mode we need to skip a bit less to
-    // sufficiently differentiate some similar stacks.
-    uint32_t skip = (gMode == Test) ? 2 : 3;
-    nsresult rv = NS_StackWalk(StackWalkCallback, skip, &tmp, 0, nullptr);
-    if (NS_FAILED(rv) || tmp.mLength == 0) {
-      tmp.mLength = 0;
-    }
+    uint32_t skipFrames = 2;
+    rv = NS_StackWalk(StackWalkCallback, skipFrames,
+                      gOptions->MaxFrames(), &tmp, 0, nullptr);
+  }
+
+  if (rv == NS_OK) {
+    // Handle the common case first.  All is ok.  Nothing to do.
+  } else if (rv == NS_ERROR_NOT_IMPLEMENTED || rv == NS_ERROR_FAILURE) {
+    tmp.mLength = 0;
+  } else if (rv == NS_ERROR_UNEXPECTED) {
+    // XXX: This |rv| only happens on Mac, and it indicates that we're handling
+    // a call to malloc that happened inside a mutex-handling function.  Any
+    // attempt to create a semaphore (which can happen in printf) could
+    // deadlock.
+    //
+    // However, the most complex thing DMD does after Get() returns is to put
+    // something in a hash table, which might call
+    // InfallibleAllocPolicy::malloc_.  I'm not yet sure if this needs special
+    // handling, hence the forced abort.  Sorry.  If you hit this, please file
+    // a bug and CC nnethercote.
+    MOZ_CRASH();
+  } else {
+    MOZ_CRASH();  // should be impossible
   }
 
   StackTraceTable::AddPtr p = gStackTraceTable->lookupForAdd(&tmp);
@@ -1000,11 +1066,65 @@ public:
 typedef js::HashSet<Block, Block, InfallibleAllocPolicy> BlockTable;
 static BlockTable* gBlockTable = nullptr;
 
+typedef js::HashSet<const StackTrace*, js::DefaultHasher<const StackTrace*>,
+                    InfallibleAllocPolicy>
+        StackTraceSet;
+
+// Add a pointer to each live stack trace into the given StackTraceSet.  (A
+// stack trace is live if it's used by one of the live blocks.)
+static void
+GatherUsedStackTraces(StackTraceSet& aStackTraces)
+{
+  MOZ_ASSERT(gStateLock->IsLocked());
+  MOZ_ASSERT(Thread::Fetch()->InterceptsAreBlocked());
+
+  aStackTraces.finish();
+  aStackTraces.init(1024);
+
+  for (BlockTable::Range r = gBlockTable->all(); !r.empty(); r.popFront()) {
+    const Block& b = r.front();
+    aStackTraces.put(b.AllocStackTrace());
+    aStackTraces.put(b.ReportStackTrace1());
+    aStackTraces.put(b.ReportStackTrace2());
+  }
+
+  // Any of the stack traces added above may have been null.  For the sake of
+  // cleanliness, don't leave the null pointer in the set.
+  aStackTraces.remove(nullptr);
+}
+
+// Delete stack traces that we aren't using, and compact our hashtable.
+static void
+GCStackTraces()
+{
+  MOZ_ASSERT(gStateLock->IsLocked());
+  MOZ_ASSERT(Thread::Fetch()->InterceptsAreBlocked());
+
+  StackTraceSet usedStackTraces;
+  GatherUsedStackTraces(usedStackTraces);
+
+  // Delete all unused stack traces from gStackTraceTable.  The Enum destructor
+  // will automatically rehash and compact the table.
+  for (StackTraceTable::Enum e(*gStackTraceTable);
+       !e.empty();
+       e.popFront()) {
+    StackTrace* const& st = e.front();
+
+    if (!usedStackTraces.has(st)) {
+      e.removeFront();
+      InfallibleAllocPolicy::delete_(st);
+    }
+  }
+
+  // Schedule a GC when we have twice as many stack traces as we had right after
+  // this GC finished.
+  gGCStackTraceTableWhenSizeExceeds = 2 * gStackTraceTable->count();
+}
+
 //---------------------------------------------------------------------------
 // malloc/free callbacks
 //---------------------------------------------------------------------------
 
-static size_t gSampleBelowSize = 0;
 static size_t gSmallBlockActualSizeCounter = 0;
 
 static void
@@ -1020,17 +1140,18 @@ AllocCallback(void* aPtr, size_t aReqSize, Thread* aT)
   AutoBlockIntercepts block(aT);
 
   size_t actualSize = gMallocTable->malloc_usable_size(aPtr);
+  size_t sampleBelowSize = gOptions->SampleBelowSize();
 
-  if (actualSize < gSampleBelowSize) {
+  if (actualSize < sampleBelowSize) {
     // If this allocation is smaller than the sample-below size, increment the
     // cumulative counter.  Then, if that counter now exceeds the sample size,
-    // blame this allocation for gSampleBelowSize bytes.  This precludes the
+    // blame this allocation for |sampleBelowSize| bytes.  This precludes the
     // measurement of slop.
     gSmallBlockActualSizeCounter += actualSize;
-    if (gSmallBlockActualSizeCounter >= gSampleBelowSize) {
-      gSmallBlockActualSizeCounter -= gSampleBelowSize;
+    if (gSmallBlockActualSizeCounter >= sampleBelowSize) {
+      gSmallBlockActualSizeCounter -= sampleBelowSize;
 
-      Block b(aPtr, gSampleBelowSize, StackTrace::Get(aT), /* sampled */ true);
+      Block b(aPtr, sampleBelowSize, StackTrace::Get(aT), /* sampled */ true);
       (void)gBlockTable->putNew(aPtr, b);
     }
   } else {
@@ -1053,6 +1174,10 @@ FreeCallback(void* aPtr, Thread* aT)
   AutoBlockIntercepts block(aT);
 
   gBlockTable->remove(aPtr);
+
+  if (gStackTraceTable->count() > gGCStackTraceTableWhenSizeExceeds) {
+    GCStackTraces();
+  }
 }
 
 //---------------------------------------------------------------------------
@@ -1480,19 +1605,14 @@ FrameRecord::Print(const Writer& aWriter, LocationService* aLocService,
 }
 
 //---------------------------------------------------------------------------
-// DMD start-up
+// Options (Part 2)
 //---------------------------------------------------------------------------
-
-static void RunTestMode(FILE* fp);
-static void RunStressMode(FILE* fp);
-
-static const char* gDMDEnvVar = nullptr;
 
 // Given an |aOptionName| like "foo", succeed if |aArg| has the form "foo=blah"
 // (where "blah" is non-empty) and return the pointer to "blah".  |aArg| can
 // have leading space chars (but not other whitespace).
-static const char*
-OptionValueIfMatch(const char* aArg, const char* aOptionName)
+const char*
+Options::ValueIfMatch(const char* aArg, const char* aOptionName)
 {
   MOZ_ASSERT(!isspace(*aArg));  // any leading whitespace should not remain
   size_t optionLen = strlen(aOptionName);
@@ -1505,11 +1625,11 @@ OptionValueIfMatch(const char* aArg, const char* aOptionName)
 
 // Extracts a |long| value for an option from an argument.  It must be within
 // the range |aMin..aMax| (inclusive).
-static bool
-OptionLong(const char* aArg, const char* aOptionName, long aMin, long aMax,
-           long* aN)
+bool
+Options::GetLong(const char* aArg, const char* aOptionName,
+                 long aMin, long aMax, long* aN)
 {
-  if (const char* optionValue = OptionValueIfMatch(aArg, aOptionName)) {
+  if (const char* optionValue = ValueIfMatch(aArg, aOptionName)) {
     char* endPtr;
     *aN = strtol(optionValue, &endPtr, /* base */ 10);
     if (!*endPtr && aMin <= *aN && *aN <= aMax &&
@@ -1520,95 +1640,22 @@ OptionLong(const char* aArg, const char* aOptionName, long aMin, long aMax,
   return false;
 }
 
-static const size_t gMaxSampleBelowSize = 100 * 1000 * 1000;    // bytes
-
-// Default to sampling with a sample-below size that's a prime number close to
-// 4096.
+// The sample-below default is a prime number close to 4096.
+// - Why that size?  Because it's *much* faster but only moderately less precise
+//   than a size of 1.
+// - Why prime?  Because it makes our sampling more random.  If we used a size
+//   of 4096, for example, then our alloc counter would only take on even
+//   values, because jemalloc always rounds up requests sizes.  In contrast, a
+//   prime size will explore all possible values of the alloc counter.
 //
-// Using a sample-below size ~= 4096 is much faster than using a sample-below
-// size of 1, and it's not much less accurate in practice, so it's a reasonable
-// default.
-//
-// Using a prime sample-below size makes our sampling more random.  If we used
-// instead a sample-below size of 4096, for example, then if all our allocation
-// sizes were even (which they likely are, due to how jemalloc rounds up), our
-// alloc counter would take on only even values.
-//
-// In contrast, using a prime sample-below size lets us explore all possible
-// values of the alloc counter.
-static const size_t gDefaultSampleBelowSize = 4093;
-
-static void
-BadArg(const char* aArg)
+Options::Options(const char* aDMDEnvVar)
+  : mDMDEnvVar(InfallibleAllocPolicy::strdup_(aDMDEnvVar)),
+    mSampleBelowSize(4093, 100 * 100 * 1000),
+    mMaxFrames(StackTrace::MaxFrames, StackTrace::MaxFrames),
+    mMaxRecords(1000, 1000000),
+    mMode(Normal)
 {
-  StatusMsg("\n");
-  StatusMsg("Bad entry in the $DMD environment variable: '%s'.\n", aArg);
-  StatusMsg("\n");
-  StatusMsg("Valid values of $DMD are:\n");
-  StatusMsg("- undefined or \"\" or \"0\", which disables DMD, or\n");
-  StatusMsg("- \"1\", which enables it with the default options, or\n");
-  StatusMsg("- a whitespace-separated list of |--option=val| entries, which\n");
-  StatusMsg("  enables it with non-default options.\n");
-  StatusMsg("\n");
-  StatusMsg("The following options are allowed;  defaults are shown in [].\n");
-  StatusMsg("  --sample-below=<1..%d> Sample blocks smaller than this [%d]\n"
-            "                         (prime numbers recommended).\n",
-            int(gMaxSampleBelowSize), int(gDefaultSampleBelowSize));
-  StatusMsg("  --mode=<normal|test|stress>   Which mode to run in? [normal]\n");
-  StatusMsg("\n");
-  exit(1);
-}
-
-#ifdef XP_MACOSX
-static void
-NopStackWalkCallback(void* aPc, void* aSp, void* aClosure)
-{
-}
-#endif
-
-// Note that fopen() can allocate.
-static FILE*
-OpenTestOrStressFile(const char* aFilename)
-{
-  FILE* fp = fopen(aFilename, "w");
-  if (!fp) {
-    StatusMsg("can't create %s file: %s\n", aFilename, strerror(errno));
-    exit(1);
-  }
-  return fp;
-}
-
-// WARNING: this function runs *very* early -- before all static initializers
-// have run.  For this reason, non-scalar globals such as gStateLock and
-// gStackTraceTable are allocated dynamically (so we can guarantee their
-// construction in this function) rather than statically.
-static void
-Init(const malloc_table_t* aMallocTable)
-{
-  MOZ_ASSERT(!gIsDMDRunning);
-
-  gMallocTable = aMallocTable;
-
-  // Set defaults of things that can be affected by the $DMD env var.
-  gMode = Normal;
-  gSampleBelowSize = gDefaultSampleBelowSize;
-
-  // DMD is controlled by the |DMD| environment variable.
-  // - If it's unset or empty or "0", DMD doesn't run.
-  // - Otherwise, the contents dictate DMD's behaviour.
-
-  char* e = getenv("DMD");
-
-  StatusMsg("$DMD = '%s'\n", e);
-
-  if (!e || strcmp(e, "") == 0 || strcmp(e, "0") == 0) {
-    StatusMsg("DMD is not enabled\n");
-    return;
-  }
-
-  // Save it so we can print it in Dump().
-  gDMDEnvVar = e = InfallibleAllocPolicy::strdup_(e);
-
+  char* e = mDMDEnvVar;
   if (strcmp(e, "1") != 0) {
     bool isEnd = false;
     while (!isEnd) {
@@ -1631,15 +1678,21 @@ Init(const malloc_table_t* aMallocTable)
 
       // Handle arg
       long myLong;
-      if (OptionLong(arg, "--sample-below", 1, gMaxSampleBelowSize, &myLong)) {
-        gSampleBelowSize = myLong;
+      if (GetLong(arg, "--sample-below", 1, mSampleBelowSize.mMax, &myLong)) {
+        mSampleBelowSize.mActual = myLong;
+
+      } else if (GetLong(arg, "--max-frames", 1, mMaxFrames.mMax, &myLong)) {
+        mMaxFrames.mActual = myLong;
+
+      } else if (GetLong(arg, "--max-records", 1, mMaxRecords.mMax, &myLong)) {
+        mMaxRecords.mActual = myLong;
 
       } else if (strcmp(arg, "--mode=normal") == 0) {
-        gMode = Normal;
+        mMode = Options::Normal;
       } else if (strcmp(arg, "--mode=test")   == 0) {
-        gMode = Test;
+        mMode = Options::Test;
       } else if (strcmp(arg, "--mode=stress") == 0) {
-        gMode = Stress;
+        mMode = Options::Stress;
 
       } else if (strcmp(arg, "") == 0) {
         // This can only happen if there is trailing whitespace.  Ignore.
@@ -1653,8 +1706,87 @@ Init(const malloc_table_t* aMallocTable)
       *e = replacedChar;
     }
   }
+}
 
-  // Finished parsing $DMD.
+void
+Options::BadArg(const char* aArg)
+{
+  StatusMsg("\n");
+  StatusMsg("Bad entry in the $DMD environment variable: '%s'.\n", aArg);
+  StatusMsg("\n");
+  StatusMsg("Valid values of $DMD are:\n");
+  StatusMsg("- undefined or \"\" or \"0\", which disables DMD, or\n");
+  StatusMsg("- \"1\", which enables it with the default options, or\n");
+  StatusMsg("- a whitespace-separated list of |--option=val| entries, which\n");
+  StatusMsg("  enables it with non-default options.\n");
+  StatusMsg("\n");
+  StatusMsg("The following options are allowed;  defaults are shown in [].\n");
+  StatusMsg("  --sample-below=<1..%d> Sample blocks smaller than this [%d]\n",
+            int(mSampleBelowSize.mMax),
+            int(mSampleBelowSize.mDefault));
+  StatusMsg("                               (prime numbers are recommended)\n");
+  StatusMsg("  --max-frames=<1..%d>         Max. depth of stack traces [%d]\n",
+            int(mMaxFrames.mMax),
+            int(mMaxFrames.mDefault));
+  StatusMsg("  --max-records=<1..%u>   Max. number of records printed [%u]\n",
+            mMaxRecords.mMax,
+            mMaxRecords.mDefault);
+  StatusMsg("  --mode=<normal|test|stress>  Mode of operation [normal]\n");
+  StatusMsg("\n");
+  exit(1);
+}
+
+//---------------------------------------------------------------------------
+// DMD start-up
+//---------------------------------------------------------------------------
+
+#ifdef XP_MACOSX
+static void
+NopStackWalkCallback(void* aPc, void* aSp, void* aClosure)
+{
+}
+#endif
+
+// Note that fopen() can allocate.
+static FILE*
+OpenOutputFile(const char* aFilename)
+{
+  FILE* fp = fopen(aFilename, "w");
+  if (!fp) {
+    StatusMsg("can't create %s file: %s\n", aFilename, strerror(errno));
+    exit(1);
+  }
+  return fp;
+}
+
+static void RunTestMode(FILE* fp);
+static void RunStressMode(FILE* fp);
+
+// WARNING: this function runs *very* early -- before all static initializers
+// have run.  For this reason, non-scalar globals such as gStateLock and
+// gStackTraceTable are allocated dynamically (so we can guarantee their
+// construction in this function) rather than statically.
+static void
+Init(const malloc_table_t* aMallocTable)
+{
+  MOZ_ASSERT(!gIsDMDRunning);
+
+  gMallocTable = aMallocTable;
+
+  // DMD is controlled by the |DMD| environment variable.
+  // - If it's unset or empty or "0", DMD doesn't run.
+  // - Otherwise, the contents dictate DMD's behaviour.
+
+  char* e = getenv("DMD");
+  StatusMsg("$DMD = '%s'\n", e);
+
+  if (!e || strcmp(e, "") == 0 || strcmp(e, "0") == 0) {
+    StatusMsg("DMD is not enabled\n");
+    return;
+  }
+
+  // Parse $DMD env var.
+  gOptions = InfallibleAllocPolicy::new_<Options>(e);
 
   StatusMsg("DMD is enabled\n");
 
@@ -1665,7 +1797,8 @@ Init(const malloc_table_t* aMallocTable)
   // StackWalkInitCriticalAddress() isn't exported from xpcom/, so instead we
   // just call NS_StackWalk, because that calls StackWalkInitCriticalAddress().
   // See the comment above StackWalkInitCriticalAddress() for more details.
-  (void)NS_StackWalk(NopStackWalkCallback, 0, nullptr, 0, nullptr);
+  (void)NS_StackWalk(NopStackWalkCallback, /* skipFrames */ 0,
+                     /* maxFrames */ 1, nullptr, 0, nullptr);
 #endif
 
   gStateLock = InfallibleAllocPolicy::new_<Mutex>();
@@ -1680,11 +1813,11 @@ Init(const malloc_table_t* aMallocTable)
   gBlockTable = InfallibleAllocPolicy::new_<BlockTable>();
   gBlockTable->init(8192);
 
-  if (gMode == Test) {
-    // OpenTestOrStressFile() can allocate.  So do this before setting
+  if (gOptions->IsTestMode()) {
+    // OpenOutputFile() can allocate.  So do this before setting
     // gIsDMDRunning so those allocations don't show up in our results.  Once
     // gIsDMDRunning is set we are intercepting malloc et al. in earnest.
-    FILE* fp = OpenTestOrStressFile("test.dmd");
+    FILE* fp = OpenOutputFile("test.dmd");
     gIsDMDRunning = true;
 
     StatusMsg("running test mode...\n");
@@ -1694,8 +1827,8 @@ Init(const malloc_table_t* aMallocTable)
     exit(0);
   }
 
-  if (gMode == Stress) {
-    FILE* fp = OpenTestOrStressFile("stress.dmd");
+  if (gOptions->IsStressMode()) {
+    FILE* fp = OpenOutputFile("stress.dmd");
     gIsDMDRunning = true;
 
     StatusMsg("running stress mode...\n");
@@ -1781,23 +1914,23 @@ PrintSortedRecords(const Writer& aWriter, LocationService* aLocService,
     return;
   }
 
+  StatusMsg("  printing %s stack %s record array...\n", astr, kind);
+  size_t cumulativeUsableSize = 0;
+
   // Limit the number of records printed, because fix-linux-stack.pl is too
   // damn slow.  Note that we don't break out of this loop because we need to
   // keep adding to |cumulativeUsableSize|.
-  static const uint32_t MaxRecords = 1000;
   uint32_t numRecords = recordArray.length();
-
-  StatusMsg("  printing %s stack %s record array...\n", astr, kind);
-  size_t cumulativeUsableSize = 0;
+  uint32_t maxRecords = gOptions->MaxRecords();
   for (uint32_t i = 0; i < numRecords; i++) {
     const Record* r = recordArray[i];
     cumulativeUsableSize += r->GetRecordSize().Usable();
-    if (i < MaxRecords) {
+    if (i < maxRecords) {
       r->Print(aWriter, aLocService, i+1, numRecords, aStr, astr,
                aCategoryUsableSize, cumulativeUsableSize, aTotalUsableSize);
-    } else if (i == MaxRecords) {
+    } else if (i == maxRecords) {
       W("%s: stopping after %s stack %s records\n\n", aStr,
-        Show(MaxRecords, gBuf1, kBufLen), kind);
+        Show(maxRecords, gBuf1, kBufLen), kind);
     }
   }
 
@@ -1815,12 +1948,6 @@ PrintSortedTraceAndFrameRecords(const Writer& aWriter,
 {
   PrintSortedRecords(aWriter, aLocService, aStr, astr, aTraceRecordTable,
                      aCategoryUsableSize, aTotalUsableSize);
-
-  // Frame records are totally dependent on vagaries of stack traces, so we
-  // can't show them in test mode.
-  if (gMode == Test) {
-    return;
-  }
 
   FrameRecordTable frameRecordTable;
   (void)frameRecordTable.init(2048);
@@ -1858,20 +1985,35 @@ PrintSortedTraceAndFrameRecords(const Writer& aWriter,
 // |nsMallocSizeOfFun| argument.  That's because those arguments are primarily
 // to aid DMD track heap blocks... but DMD deliberately doesn't track heap
 // blocks it allocated for itself!
-MOZ_EXPORT void
-SizeOf(Sizes* aSizes)
+//
+// SizeOfInternal should be called while you're holding the state lock and while
+// intercepts are blocked; SizeOf acquires the lock and blocks intercepts.
+
+static void
+SizeOfInternal(Sizes* aSizes)
 {
+  MOZ_ASSERT(gStateLock->IsLocked());
+  MOZ_ASSERT(Thread::Fetch()->InterceptsAreBlocked());
+
+  aSizes->Clear();
+
   if (!gIsDMDRunning) {
-    aSizes->Clear();
     return;
   }
 
-  aSizes->mStackTraces = 0;
+  StackTraceSet usedStackTraces;
+  GatherUsedStackTraces(usedStackTraces);
+
   for (StackTraceTable::Range r = gStackTraceTable->all();
        !r.empty();
        r.popFront()) {
     StackTrace* const& st = r.front();
-    aSizes->mStackTraces += MallocSizeOf(st);
+
+    if (usedStackTraces.has(st)) {
+      aSizes->mStackTracesUsed += MallocSizeOf(st);
+    } else {
+      aSizes->mStackTracesUnused += MallocSizeOf(st);
+    }
   }
 
   aSizes->mStackTraceTable =
@@ -1880,11 +2022,26 @@ SizeOf(Sizes* aSizes)
   aSizes->mBlockTable = gBlockTable->sizeOfIncludingThis(MallocSizeOf);
 }
 
-static void
-ClearGlobalState()
+MOZ_EXPORT void
+SizeOf(Sizes* aSizes)
 {
-  // Unreport all blocks, except those that were reported on allocation,
-  // because they need to keep their reported marking.
+  aSizes->Clear();
+
+  if (!gIsDMDRunning) {
+    return;
+  }
+
+  AutoBlockIntercepts block(Thread::Fetch());
+  AutoLockState lock;
+  SizeOfInternal(aSizes);
+}
+
+MOZ_EXPORT void
+ClearReports()
+{
+  // Unreport all blocks that were marked reported by a memory reporter.  This
+  // excludes those that were reported on allocation, because they need to keep
+  // their reported marking.
   for (BlockTable::Range r = gBlockTable->all(); !r.empty(); r.popFront()) {
     r.front().UnreportIfNotReportedOnAlloc();
   }
@@ -1960,8 +2117,9 @@ Dump(Writer aWriter)
     unreportedNumBlocks + onceReportedNumBlocks + twiceReportedNumBlocks;
 
   WriteTitle("Invocation\n");
-  W("$DMD = '%s'\n", gDMDEnvVar);
-  W("Sample-below size = %lld\n\n", (long long)(gSampleBelowSize));
+  W("$DMD = '%s'\n", gOptions->DMDEnvVar());
+  W("Sample-below size = %lld\n\n",
+    (long long)(gOptions->SampleBelowSize()));
 
   // Allocate this on the heap instead of the stack because it's fairly large.
   LocationService* locService = InfallibleAllocPolicy::new_<LocationService>();
@@ -2010,16 +2168,19 @@ Dump(Writer aWriter)
   W("\n");
 
   // Stats are non-deterministic, so don't show them in test mode.
-  if (gMode != Test) {
+  if (!gOptions->IsTestMode()) {
     Sizes sizes;
-    SizeOf(&sizes);
+    SizeOfInternal(&sizes);
 
     WriteTitle("Execution measurements\n");
 
     W("Data structures that persist after Dump() ends:\n");
 
-    W("  Stack traces:         %10s bytes\n",
-      Show(sizes.mStackTraces, gBuf1, kBufLen));
+    W("  Used stack traces:    %10s bytes\n",
+      Show(sizes.mStackTracesUsed, gBuf1, kBufLen));
+
+    W("  Unused stack traces:  %10s bytes\n",
+      Show(sizes.mStackTracesUnused, gBuf1, kBufLen));
 
     W("  Stack trace table:    %10s bytes (%s entries, %s used)\n",
       Show(sizes.mStackTraceTable,       gBuf1, kBufLen),
@@ -2075,7 +2236,7 @@ Dump(Writer aWriter)
 
   InfallibleAllocPolicy::delete_(locService);
 
-  ClearGlobalState();
+  ClearReports();
 
   StatusMsg("}\n");
 }
@@ -2118,7 +2279,7 @@ RunTestMode(FILE* fp)
   Writer writer(FpWrite, fp);
 
   // The first part of this test requires sampling to be disabled.
-  gSampleBelowSize = 1;
+  gOptions->SetSampleBelowSize(1);
 
   // 0th Dump.  Zero for everything.
   Dump(writer);
@@ -2224,12 +2385,13 @@ RunTestMode(FILE* fp)
   // XXX: no memalign on Mac
 //void* x = memalign(64, 65);           // rounds up to 128
 //UseItOrLoseIt(x);
-  // XXX: posix_memalign doesn't work on B2G, apparently
+  // XXX: posix_memalign doesn't work on B2G
 //void* y;
 //posix_memalign(&y, 128, 129);         // rounds up to 256
 //UseItOrLoseIt(y);
-  void* z = valloc(1);                  // rounds up to 4096
-  UseItOrLoseIt(z);
+  // XXX: valloc doesn't work on Windows.
+//void* z = valloc(1);                  // rounds up to 4096
+//UseItOrLoseIt(z);
 //aligned_alloc(64, 256);               // XXX: C11 only
 
   // 1st Dump.
@@ -2245,7 +2407,7 @@ RunTestMode(FILE* fp)
   free(e3);
 //free(x);
 //free(y);
-  free(z);
+//free(z);
 
   // 2nd Dump.
   Dump(writer);
@@ -2255,10 +2417,7 @@ RunTestMode(FILE* fp)
   // Clear all knowledge of existing blocks to give us a clean slate.
   gBlockTable->clear();
 
-  // Reset the counter just in case |sample-size| was specified in $DMD.
-  // Otherwise the assertions fail.
-  gSmallBlockActualSizeCounter = 0;
-  gSampleBelowSize = 128;
+  gOptions->SetSampleBelowSize(128);
 
   char* s;
 
@@ -2376,7 +2535,7 @@ RunStressMode(FILE* fp)
   Writer writer(FpWrite, fp);
 
   // Disable sampling for maximum stress.
-  gSampleBelowSize = 1;
+  gOptions->SetSampleBelowSize(1);
 
   stress1(); stress1(); stress1(); stress1(); stress1();
   stress1(); stress1(); stress1(); stress1(); stress1();

@@ -11,6 +11,7 @@
 #define jscntxt_h___
 
 #include "mozilla/Attributes.h"
+#include "mozilla/GuardObjects.h"
 #include "mozilla/LinkedList.h"
 
 #include <string.h>
@@ -55,24 +56,55 @@ js_ReportAllocationOverflow(JSContext *cx);
 
 namespace js {
 
+struct CallsiteCloneKey {
+    /* The original function that we are cloning. */
+    JSFunction *original;
+
+    /* The script of the call. */
+    JSScript *script;
+
+    /* The offset of the call. */
+    uint32_t offset;
+
+    CallsiteCloneKey() { PodZero(this); }
+
+    typedef CallsiteCloneKey Lookup;
+
+    static inline uint32_t hash(CallsiteCloneKey key) {
+        return uint32_t(size_t(key.script->code + key.offset) ^ size_t(key.original));
+    }
+
+    static inline bool match(const CallsiteCloneKey &a, const CallsiteCloneKey &b) {
+        return a.script == b.script && a.offset == b.offset && a.original == b.original;
+    }
+};
+
+typedef HashMap<CallsiteCloneKey,
+                ReadBarriered<JSFunction>,
+                CallsiteCloneKey,
+                SystemAllocPolicy> CallsiteCloneTable;
+
+RawFunction CloneFunctionAtCallsite(JSContext *cx, HandleFunction fun,
+                                    HandleScript script, jsbytecode *pc);
+
 typedef HashSet<JSObject *> ObjectSet;
 
 /* Detects cycles when traversing an object graph. */
 class AutoCycleDetector
 {
     JSContext *cx;
-    JSObject *obj;
+    RootedObject obj;
     bool cyclic;
     uint32_t hashsetGenerationAtInit;
     ObjectSet::AddPtr hashsetAddPointer;
-    JS_DECL_USE_GUARD_OBJECT_NOTIFIER
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 
   public:
-    AutoCycleDetector(JSContext *cx, JSObject *obj
-                      JS_GUARD_OBJECT_NOTIFIER_PARAM)
-      : cx(cx), obj(obj), cyclic(true)
+    AutoCycleDetector(JSContext *cx, HandleObject objArg
+                      MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+      : cx(cx), obj(cx, objArg), cyclic(true)
     {
-        JS_GUARD_OBJECT_NOTIFIER_INIT;
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     }
 
     ~AutoCycleDetector();
@@ -350,7 +382,7 @@ class FreeOp : public JSFreeOp {
         return shouldFreeLater_;
     }
 
-    inline void free_(void* p);
+    inline void free_(void *p);
 
     template <class T>
     inline void delete_(T *p) {
@@ -434,6 +466,19 @@ class PerThreadData : public js::PerThreadDataFriendFields
     bool                gcRelaxRootChecks;
     int                 gcAssertNoGCDepth;
 #endif
+
+    /*
+     * If Ion code is on the stack, and has called into C++, this will be
+     * aligned to an Ion exit frame.
+     */
+    uint8_t             *ionTop;
+    JSContext           *ionJSContext;
+    uintptr_t            ionStackLimit;
+
+    /*
+     * This points to the most recent Ion activation running on the thread.
+     */
+    js::ion::IonActivation  *ionActivation;
 
     /*
      * When this flag is non-zero, any attempt to GC will be skipped. It is used
@@ -715,20 +760,21 @@ struct JSRuntime : js::RuntimeFriendFields
     /* Whether any black->gray edges were found during marking. */
     bool                gcFoundBlackGrayEdges;
 
-    /* List head of compartments to be swept in the background. */
-    JSCompartment       *gcSweepingCompartments;
+    /* List head of zones to be swept in the background. */
+    JS::Zone            *gcSweepingZones;
 
-    /* Index of current compartment group (for stats). */
-    unsigned            gcCompartmentGroupIndex;
+    /* Index of current zone group (for stats). */
+    unsigned            gcZoneGroupIndex;
 
     /*
      * Incremental sweep state.
      */
-    JSCompartment       *gcCompartmentGroups;
-    JSCompartment       *gcCurrentCompartmentGroup;
+    JS::Zone            *gcZoneGroups;
+    JS::Zone            *gcCurrentZoneGroup;
     int                 gcSweepPhase;
-    JSCompartment       *gcSweepCompartment;
+    JS::Zone            *gcSweepZone;
     int                 gcSweepKindIndex;
+    bool                gcAbortSweepAfterCurrentGroup;
 
     /*
      * List head of arenas allocated during the sweep phase.
@@ -754,6 +800,11 @@ struct JSRuntime : js::RuntimeFriendFields
      * that does not implement write barriers.
      */
     bool                gcIncrementalEnabled;
+
+    /*
+     * GGC can be enabled from the command line while testing.
+     */
+    bool                gcGenerationalEnabled;
 
     /*
      * Whether exact stack scanning is enabled for this runtime. This is
@@ -1023,23 +1074,16 @@ struct JSRuntime : js::RuntimeFriendFields
 
     bool                jitHardening;
 
-    // If Ion code is on the stack, and has called into C++, this will be
-    // aligned to an Ion exit frame.
-    uint8_t             *ionTop;
-    JSContext           *ionJSContext;
-    uintptr_t            ionStackLimit;
-
     void resetIonStackLimit() {
-        ionStackLimit = nativeStackLimit;
+        mainThread.ionStackLimit = mainThread.nativeStackLimit;
     }
-
-    // This points to the most recent Ion activation running on the thread.
-    js::ion::IonActivation  *ionActivation;
 
     // Cache for ion::GetPcScript().
     js::ion::PcScriptCache *ionPcScriptCache;
 
     js::ThreadPool threadPool;
+
+    js::CTypesActivityCallback  ctypesActivityCallback;
 
   private:
     // In certain cases, we want to optimize certain opcodes to typed instructions,
@@ -1081,66 +1125,44 @@ struct JSRuntime : js::RuntimeFriendFields
      * Call the system malloc while checking for GC memory pressure and
      * reporting OOM error when cx is not null. We will not GC from here.
      */
-    void* malloc_(size_t bytes, JSContext *cx = NULL) {
-        updateMallocCounter(cx, bytes);
-        void *p = js_malloc(bytes);
-        return JS_LIKELY(!!p) ? p : onOutOfMemory(NULL, bytes, cx);
-    }
+    inline void *malloc_(size_t bytes, JSCompartment *comp = NULL, JSContext *cx = NULL);
 
     /*
      * Call the system calloc while checking for GC memory pressure and
      * reporting OOM error when cx is not null. We will not GC from here.
      */
-    void* calloc_(size_t bytes, JSContext *cx = NULL) {
-        updateMallocCounter(cx, bytes);
-        void *p = js_calloc(bytes);
-        return JS_LIKELY(!!p) ? p : onOutOfMemory(reinterpret_cast<void *>(1), bytes, cx);
-    }
+    inline void *calloc_(size_t bytes, JSCompartment *comp = NULL, JSContext *cx = NULL);
 
-    void* realloc_(void* p, size_t oldBytes, size_t newBytes, JSContext *cx = NULL) {
-        JS_ASSERT(oldBytes < newBytes);
-        updateMallocCounter(cx, newBytes - oldBytes);
-        void *p2 = js_realloc(p, newBytes);
-        return JS_LIKELY(!!p2) ? p2 : onOutOfMemory(p, newBytes, cx);
-    }
+    inline void *realloc_(void *p, size_t oldBytes, size_t newBytes, JSCompartment *comp = NULL, JSContext *cx = NULL);
 
-    void* realloc_(void* p, size_t bytes, JSContext *cx = NULL) {
-        /*
-         * For compatibility we do not account for realloc that increases
-         * previously allocated memory.
-         */
-        if (!p)
-            updateMallocCounter(cx, bytes);
-        void *p2 = js_realloc(p, bytes);
-        return JS_LIKELY(!!p2) ? p2 : onOutOfMemory(p, bytes, cx);
+    inline void *realloc_(void *p, size_t bytes, JSCompartment *comp = NULL, JSContext *cx = NULL);
+
+    template <class T>
+    T *pod_malloc(JSCompartment *comp = NULL, JSContext *cx = NULL) {
+        return (T *)malloc_(sizeof(T), comp, cx);
     }
 
     template <class T>
-    T *pod_malloc(JSContext *cx = NULL) {
-        return (T *)malloc_(sizeof(T), cx);
+    T *pod_calloc(JSCompartment *comp = NULL, JSContext *cx = NULL) {
+        return (T *)calloc_(sizeof(T), comp, cx);
     }
 
     template <class T>
-    T *pod_calloc(JSContext *cx = NULL) {
-        return (T *)calloc_(sizeof(T), cx);
-    }
-
-    template <class T>
-    T *pod_malloc(size_t numElems, JSContext *cx = NULL) {
+    T *pod_malloc(size_t numElems, JSCompartment *comp = NULL, JSContext *cx = NULL) {
         if (numElems & js::tl::MulOverflowMask<sizeof(T)>::result) {
             js_ReportAllocationOverflow(cx);
             return NULL;
         }
-        return (T *)malloc_(numElems * sizeof(T), cx);
+        return (T *)malloc_(numElems * sizeof(T), comp, cx);
     }
 
     template <class T>
-    T *pod_calloc(size_t numElems, JSContext *cx = NULL) {
+    T *pod_calloc(size_t numElems, JSCompartment *comp = NULL, JSContext *cx = NULL) {
         if (numElems & js::tl::MulOverflowMask<sizeof(T)>::result) {
             js_ReportAllocationOverflow(cx);
             return NULL;
         }
-        return (T *)calloc_(numElems * sizeof(T), cx);
+        return (T *)calloc_(numElems * sizeof(T), comp, cx);
     }
 
     JS_DECLARE_NEW_METHODS(new_, malloc_, JS_ALWAYS_INLINE)
@@ -1157,7 +1179,7 @@ struct JSRuntime : js::RuntimeFriendFields
      * The function must be called outside the GC lock and in case of OOM error
      * the caller must ensure that no deadlock possible during OOM reporting.
      */
-    void updateMallocCounter(JSContext *cx, size_t nbytes);
+    void updateMallocCounter(JSCompartment *comp, size_t nbytes);
 
     bool isTooMuchMalloc() const {
         return gcMallocBytes <= 0;
@@ -1217,6 +1239,16 @@ struct JSRuntime : js::RuntimeFriendFields
         return 0;
 #endif
     }
+
+  private:
+    /*
+     * Used to ensure that compartments created at the same time get different
+     * random number sequences. See js::InitRandom.
+     */
+    uint64_t rngNonce;
+
+  public:
+    uint64_t nextRNGNonce() { return rngNonce++; }
 };
 
 /* Common macros to access thread-local caches in JSRuntime. */
@@ -1332,7 +1364,8 @@ VersionIsKnown(JSVersion version)
 }
 
 inline void
-FreeOp::free_(void* p) {
+FreeOp::free_(void *p)
+{
     if (shouldFreeLater()) {
         runtime()->gcHelperThread.freeLater(p);
         return;
@@ -1349,6 +1382,9 @@ struct JSContext : js::ContextFriendFields,
     JSContext *thisDuringConstruction() { return this; }
     ~JSContext();
 
+    inline JS::Zone *zone();
+    js::PerThreadData &mainThread() { return runtime->mainThread; }
+
   private:
     /* See JSContext::findVersion. */
     JSVersion           defaultVersion;      /* script compilation version */
@@ -1362,8 +1398,26 @@ struct JSContext : js::ContextFriendFields,
     /* Per-context run options. */
     unsigned            runOptions;          /* see jsapi.h for JSOPTION_* */
 
+    /* Default locale for Internationalization API */
+    char                *defaultLocale;
+
   public:
     int32_t             reportGranularity;  /* see jsprobes.h */
+
+    /*
+     * Set the default locale for the ECMAScript Internationalization API
+     * (Intl.Collator, Intl.NumberFormat, Intl.DateTimeFormat).
+     * Note that the Internationalization API encourages clients to
+     * specify their own locales.
+     * The locale string remains owned by the caller.
+     */
+    bool setDefaultLocale(const char *locale);
+
+    /* Reset the default locale to OS defaults. */
+    void resetDefaultLocale();
+
+    /* Gets current default locale. String remains owned by context. */
+    const char *getDefaultLocale();
 
     /* Locale specific callbacks for string conversion. */
     JSLocaleCallbacks   *localeCallbacks;
@@ -1396,6 +1450,11 @@ struct JSContext : js::ContextFriendFields,
     bool hasEnteredCompartment() const {
         return enterCompartmentDepth_ > 0;
     }
+#ifdef DEBUG
+    unsigned getEnterCompartmentDepth() const {
+        return enterCompartmentDepth_;
+    }
+#endif
 
     inline void enterCompartment(JSCompartment *c);
     inline void leaveCompartment(JSCompartment *oldCompartment);
@@ -1562,9 +1621,6 @@ struct JSContext : js::ContextFriendFields,
     /* Stored here to avoid passing it around as a parameter. */
     unsigned               resolveFlags;
 
-    /* Random number generator state, used by jsmath.cpp. */
-    int64_t             rngSeed;
-
     /* Location to stash the iteration value between JSOP_MOREITER and JSOP_ITERNEXT. */
     js::Value           iterValue;
 
@@ -1591,9 +1647,6 @@ struct JSContext : js::ContextFriendFields,
     }
 #endif
 
-    /* List of currently active non-escaping enumerators (for-in). */
-    js::PropertyIteratorObject *enumerators;
-
   private:
     /* Innermost-executing generator or null if no generator are executing. */
     JSGenerator *innermostGenerator_;
@@ -1602,37 +1655,37 @@ struct JSContext : js::ContextFriendFields,
     void enterGenerator(JSGenerator *gen);
     void leaveGenerator(JSGenerator *gen);
 
-    inline void* malloc_(size_t bytes) {
-        return runtime->malloc_(bytes, this);
+    inline void *malloc_(size_t bytes) {
+        return runtime->malloc_(bytes, compartment, this);
     }
 
-    inline void* calloc_(size_t bytes) {
-        return runtime->calloc_(bytes, this);
+    inline void *calloc_(size_t bytes) {
+        return runtime->calloc_(bytes, compartment, this);
     }
 
-    inline void* realloc_(void* p, size_t bytes) {
-        return runtime->realloc_(p, bytes, this);
+    inline void *realloc_(void *p, size_t bytes) {
+        return runtime->realloc_(p, bytes, compartment, this);
     }
 
-    inline void* realloc_(void* p, size_t oldBytes, size_t newBytes) {
-        return runtime->realloc_(p, oldBytes, newBytes, this);
+    inline void *realloc_(void *p, size_t oldBytes, size_t newBytes) {
+        return runtime->realloc_(p, oldBytes, newBytes, compartment, this);
     }
 
     template <class T> T *pod_malloc() {
-        return runtime->pod_malloc<T>(this);
+        return runtime->pod_malloc<T>(compartment, this);
     }
 
     template <class T> T *pod_calloc() {
-        return runtime->pod_calloc<T>(this);
+        return runtime->pod_calloc<T>(compartment, this);
     }
 
     template <class T> T *pod_malloc(size_t numElems) {
-        return runtime->pod_malloc<T>(numElems, this);
+        return runtime->pod_malloc<T>(numElems, compartment, this);
     }
 
     template <class T>
     T *pod_calloc(size_t numElems) {
-        return runtime->pod_calloc<T>(numElems, this);
+        return runtime->pod_calloc<T>(numElems, compartment, this);
     }
 
     JS_DECLARE_NEW_METHODS(new_, malloc_, JS_ALWAYS_INLINE)
@@ -1702,10 +1755,10 @@ struct AutoResolving {
     };
 
     AutoResolving(JSContext *cx, HandleObject obj, HandleId id, Kind kind = LOOKUP
-                  JS_GUARD_OBJECT_NOTIFIER_PARAM)
+                  MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : context(cx), object(obj), id(id), kind(kind), link(cx->resolvingList)
     {
-        JS_GUARD_OBJECT_NOTIFIER_INIT;
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
         JS_ASSERT(obj);
         cx->resolvingList = this;
     }
@@ -1727,17 +1780,17 @@ struct AutoResolving {
     HandleId            id;
     Kind                const kind;
     AutoResolving       *const link;
-    JS_DECL_USE_GUARD_OBJECT_NOTIFIER
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
 #if JS_HAS_XML_SUPPORT
 class AutoXMLRooter : private AutoGCRooter {
   public:
     AutoXMLRooter(JSContext *cx, JSXML *xml
-                  JS_GUARD_OBJECT_NOTIFIER_PARAM)
+                  MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : AutoGCRooter(cx, XML), xml(xml)
     {
-        JS_GUARD_OBJECT_NOTIFIER_INIT;
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
         JS_ASSERT(xml);
     }
 
@@ -1745,7 +1798,7 @@ class AutoXMLRooter : private AutoGCRooter {
 
   private:
     JSXML * const xml;
-    JS_DECL_USE_GUARD_OBJECT_NOTIFIER
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 #endif /* JS_HAS_XML_SUPPORT */
 
@@ -1792,36 +1845,38 @@ class AutoLockGC
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
-class AutoUnlockGC {
+class AutoUnlockGC
+{
   private:
 #ifdef JS_THREADSAFE
     JSRuntime *rt;
 #endif
-    JS_DECL_USE_GUARD_OBJECT_NOTIFIER
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 
   public:
     explicit AutoUnlockGC(JSRuntime *rt
-                          JS_GUARD_OBJECT_NOTIFIER_PARAM)
+                          MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
 #ifdef JS_THREADSAFE
       : rt(rt)
 #endif
     {
-        JS_GUARD_OBJECT_NOTIFIER_INIT;
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
         JS_UNLOCK_GC(rt);
     }
     ~AutoUnlockGC() { JS_LOCK_GC(rt); }
 };
 
-class AutoKeepAtoms {
+class AutoKeepAtoms
+{
     JSRuntime *rt;
-    JS_DECL_USE_GUARD_OBJECT_NOTIFIER
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 
   public:
     explicit AutoKeepAtoms(JSRuntime *rt
-                           JS_GUARD_OBJECT_NOTIFIER_PARAM)
+                           MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : rt(rt)
     {
-        JS_GUARD_OBJECT_NOTIFIER_INIT;
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
         JS_KEEP_ATOMS(rt);
     }
     ~AutoKeepAtoms() { JS_UNKEEP_ATOMS(rt); }
@@ -1833,10 +1888,10 @@ class JSAutoResolveFlags
 {
   public:
     JSAutoResolveFlags(JSContext *cx, unsigned flags
-                       JS_GUARD_OBJECT_NOTIFIER_PARAM)
+                       MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : mContext(cx), mSaved(cx->resolveFlags)
     {
-        JS_GUARD_OBJECT_NOTIFIER_INIT;
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
         cx->resolveFlags = flags;
     }
 
@@ -1845,7 +1900,7 @@ class JSAutoResolveFlags
   private:
     JSContext *mContext;
     unsigned mSaved;
-    JS_DECL_USE_GUARD_OBJECT_NOTIFIER
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
 namespace js {
@@ -1987,7 +2042,7 @@ js_ReportValueErrorFlags(JSContext *cx, unsigned flags, const unsigned errorNumb
     ((void)js_ReportValueErrorFlags(cx, JSREPORT_ERROR, errorNumber,          \
                                     spindex, v, fallback, arg1, arg2))
 
-extern JSErrorFormatString js_ErrorFormatString[JSErr_Limit];
+extern const JSErrorFormatString js_ErrorFormatString[JSErr_Limit];
 
 #ifdef JS_THREADSAFE
 # define JS_ASSERT_REQUEST_DEPTH(cx)  JS_ASSERT((cx)->runtime->requestDepth >= 1)
@@ -2101,39 +2156,39 @@ class AutoObjectVector : public AutoVectorRooter<RawObject>
 {
   public:
     explicit AutoObjectVector(JSContext *cx
-                              JS_GUARD_OBJECT_NOTIFIER_PARAM)
+                              MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
         : AutoVectorRooter<RawObject>(cx, OBJVECTOR)
     {
-        JS_GUARD_OBJECT_NOTIFIER_INIT;
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     }
 
-    JS_DECL_USE_GUARD_OBJECT_NOTIFIER
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
 class AutoStringVector : public AutoVectorRooter<RawString>
 {
   public:
     explicit AutoStringVector(JSContext *cx
-                              JS_GUARD_OBJECT_NOTIFIER_PARAM)
+                              MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
         : AutoVectorRooter<RawString>(cx, STRINGVECTOR)
     {
-        JS_GUARD_OBJECT_NOTIFIER_INIT;
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     }
 
-    JS_DECL_USE_GUARD_OBJECT_NOTIFIER
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
 class AutoShapeVector : public AutoVectorRooter<RawShape>
 {
   public:
     explicit AutoShapeVector(JSContext *cx
-                             JS_GUARD_OBJECT_NOTIFIER_PARAM)
+                             MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
         : AutoVectorRooter<RawShape>(cx, SHAPEVECTOR)
     {
-        JS_GUARD_OBJECT_NOTIFIER_INIT;
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     }
 
-    JS_DECL_USE_GUARD_OBJECT_NOTIFIER
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
 class AutoValueArray : public AutoGCRooter
@@ -2144,29 +2199,62 @@ class AutoValueArray : public AutoGCRooter
 
   public:
     AutoValueArray(JSContext *cx, RawValue *start, unsigned length
-                   JS_GUARD_OBJECT_NOTIFIER_PARAM)
+                   MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : AutoGCRooter(cx, VALARRAY), start_(start), length_(length), skip(cx, start, length)
     {
-        JS_GUARD_OBJECT_NOTIFIER_INIT;
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     }
 
     RawValue *start() { return start_; }
     unsigned length() const { return length_; }
 
-    JS_DECL_USE_GUARD_OBJECT_NOTIFIER
+    MutableHandleValue handleAt(unsigned i)
+    {
+        JS_ASSERT(i < length_);
+        return MutableHandleValue::fromMarkedLocation(&start_[i]);
+    }
+    HandleValue handleAt(unsigned i) const
+    {
+        JS_ASSERT(i < length_);
+        return HandleValue::fromMarkedLocation(&start_[i]);
+    }
+
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
 class AutoObjectObjectHashMap : public AutoHashMapRooter<RawObject, RawObject>
 {
   public:
     explicit AutoObjectObjectHashMap(JSContext *cx
-                                     JS_GUARD_OBJECT_NOTIFIER_PARAM)
+                                     MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
       : AutoHashMapRooter<RawObject, RawObject>(cx, OBJOBJHASHMAP)
     {
-        JS_GUARD_OBJECT_NOTIFIER_INIT;
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
     }
 
-    JS_DECL_USE_GUARD_OBJECT_NOTIFIER
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
+
+class AutoAssertNoGCOrException : public AutoAssertNoGC
+{
+#ifdef DEBUG
+    JSContext *cx;
+    bool hadException;
+#endif
+
+  public:
+    AutoAssertNoGCOrException(JSContext *cx)
+#ifdef DEBUG
+      : cx(cx),
+        hadException(cx->isExceptionPending())
+#endif
+    {
+    }
+
+    ~AutoAssertNoGCOrException()
+    {
+        JS_ASSERT_IF(!hadException, !cx->isExceptionPending());
+    }
 };
 
 /*
@@ -2217,5 +2305,47 @@ class ContextAllocPolicy
 #pragma warning(pop)
 #pragma warning(pop)
 #endif
+
+void *
+JSRuntime::malloc_(size_t bytes, JSCompartment *comp, JSContext *cx)
+{
+    JS_ASSERT_IF(cx != NULL, cx->compartment == comp);
+    updateMallocCounter(comp, bytes);
+    void *p = js_malloc(bytes);
+    return JS_LIKELY(!!p) ? p : onOutOfMemory(NULL, bytes, cx);
+}
+
+void *
+JSRuntime::calloc_(size_t bytes, JSCompartment *comp, JSContext *cx)
+{
+    JS_ASSERT_IF(cx != NULL, cx->compartment == comp);
+    updateMallocCounter(comp, bytes);
+    void *p = js_calloc(bytes);
+    return JS_LIKELY(!!p) ? p : onOutOfMemory(reinterpret_cast<void *>(1), bytes, cx);
+}
+
+void *
+JSRuntime::realloc_(void *p, size_t oldBytes, size_t newBytes, JSCompartment *comp, JSContext *cx)
+{
+    JS_ASSERT_IF(cx != NULL, cx->compartment == comp);
+    JS_ASSERT(oldBytes < newBytes);
+    updateMallocCounter(comp, newBytes - oldBytes);
+    void *p2 = js_realloc(p, newBytes);
+    return JS_LIKELY(!!p2) ? p2 : onOutOfMemory(p, newBytes, cx);
+}
+
+void *
+JSRuntime::realloc_(void *p, size_t bytes, JSCompartment *comp, JSContext *cx)
+{
+    JS_ASSERT_IF(cx != NULL, cx->compartment == comp);
+    /*
+     * For compatibility we do not account for realloc that increases
+     * previously allocated memory.
+     */
+    if (!p)
+        updateMallocCounter(comp, bytes);
+    void *p2 = js_realloc(p, bytes);
+    return JS_LIKELY(!!p2) ? p2 : onOutOfMemory(p, bytes, cx);
+}
 
 #endif /* jscntxt_h___ */

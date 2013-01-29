@@ -14,12 +14,12 @@
 #include "nsGkAtoms.h"
 #include "nsRenderingContext.h"
 #include "nsSVGEffects.h"
-#include "nsSVGGraphicElement.h"
 #include "nsSVGIntegrationUtils.h"
 #include "nsSVGMarkerFrame.h"
 #include "nsSVGPathGeometryElement.h"
 #include "nsSVGUtils.h"
 #include "SVGAnimatedTransformList.h"
+#include "SVGGraphicsElement.h"
 
 using namespace mozilla;
 
@@ -40,6 +40,7 @@ NS_IMPL_FRAMEARENA_HELPERS(nsSVGPathGeometryFrame)
 
 NS_QUERYFRAME_HEAD(nsSVGPathGeometryFrame)
   NS_QUERYFRAME_ENTRY(nsISVGChildFrame)
+  NS_QUERYFRAME_ENTRY(nsSVGPathGeometryFrame)
 NS_QUERYFRAME_TAIL_INHERITING(nsSVGPathGeometryFrameBase)
 
 //----------------------------------------------------------------------
@@ -184,39 +185,26 @@ nsSVGPathGeometryFrame::PaintSVG(nsRenderingContext *aContext,
   if (!GetStyleVisibility()->IsVisible())
     return NS_OK;
 
-  /* render */
-  Render(aContext);
-
-  gfxTextObjectPaint *objectPaint =
-    (gfxTextObjectPaint*)aContext->GetUserData(&gfxTextObjectPaint::sUserDataKey);
-
-  if (static_cast<nsSVGPathGeometryElement*>(mContent)->IsMarkable()) {
-    MarkerProperties properties = GetMarkerProperties(this);
-      
-    if (properties.MarkersExist()) {
-      float strokeWidth = nsSVGUtils::GetStrokeWidth(this, objectPaint);
-        
-      nsTArray<nsSVGMark> marks;
-      static_cast<nsSVGPathGeometryElement*>
-                 (mContent)->GetMarkPoints(&marks);
-        
-      uint32_t num = marks.Length();
-
-      if (num) {
-        nsSVGMarkerFrame *frame = properties.GetMarkerStartFrame();
-        if (frame)
-          frame->PaintMark(aContext, this, &marks[0], strokeWidth);
-
-        frame = properties.GetMarkerMidFrame();
-        if (frame) {
-          for (uint32_t i = 1; i < num - 1; i++)
-            frame->PaintMark(aContext, this, &marks[i], strokeWidth);
-        }
-
-        frame = properties.GetMarkerEndFrame();
-        if (frame)
-          frame->PaintMark(aContext, this, &marks[num-1], strokeWidth);
+  uint32_t paintOrder = GetStyleSVG()->mPaintOrder;
+  if (paintOrder == NS_STYLE_PAINT_ORDER_NORMAL) {
+    Render(aContext, eRenderFill | eRenderStroke);
+    PaintMarkers(aContext);
+  } else {
+    while (paintOrder) {
+      uint32_t component =
+        paintOrder & ((1 << NS_STYLE_PAINT_ORDER_BITWIDTH) - 1);
+      switch (component) {
+        case NS_STYLE_PAINT_ORDER_FILL:
+          Render(aContext, eRenderFill);
+          break;
+        case NS_STYLE_PAINT_ORDER_STROKE:
+          Render(aContext, eRenderStroke);
+          break;
+        case NS_STYLE_PAINT_ORDER_MARKERS:
+          PaintMarkers(aContext);
+          break;
       }
+      paintOrder >>= NS_STYLE_PAINT_ORDER_BITWIDTH;
     }
   }
 
@@ -491,7 +479,7 @@ nsSVGPathGeometryFrame::GetCanvasTM(uint32_t aFor)
   NS_ASSERTION(mParent, "null parent");
 
   nsSVGContainerFrame *parent = static_cast<nsSVGContainerFrame*>(mParent);
-  nsSVGGraphicElement *content = static_cast<nsSVGGraphicElement*>(mContent);
+  dom::SVGGraphicsElement *content = static_cast<dom::SVGGraphicsElement*>(mContent);
 
   return content->PrependLocalTransformsTo(parent->GetCanvasTM(aFor));
 }
@@ -546,7 +534,8 @@ nsSVGPathGeometryFrame::MarkerProperties::GetMarkerEndFrame()
 }
 
 void
-nsSVGPathGeometryFrame::Render(nsRenderingContext *aContext)
+nsSVGPathGeometryFrame::Render(nsRenderingContext *aContext,
+                               uint32_t aRenderComponents)
 {
   gfxContext *gfx = aContext->ThebesContext();
 
@@ -590,15 +579,14 @@ nsSVGPathGeometryFrame::Render(nsRenderingContext *aContext)
   gfxTextObjectPaint *objectPaint =
     (gfxTextObjectPaint*)aContext->GetUserData(&gfxTextObjectPaint::sUserDataKey);
 
-  if (nsSVGUtils::SetupCairoFillPaint(this, gfx, objectPaint)) {
+  if ((aRenderComponents & eRenderFill) &&
+      nsSVGUtils::SetupCairoFillPaint(this, gfx, objectPaint)) {
     gfx->Fill();
   }
 
-  if (nsSVGUtils::HasStroke(this, objectPaint)) {
-    nsSVGUtils::SetupCairoStrokeHitGeometry(this, gfx, objectPaint);
-    if (nsSVGUtils::SetupCairoStrokePaint(this, gfx, objectPaint)) {
-      gfx->Stroke();
-    }
+  if ((aRenderComponents & eRenderStroke) &&
+       nsSVGUtils::SetupCairoStroke(this, gfx, objectPaint)) {
+    gfx->Stroke();
   }
 
   gfx->NewPath();
@@ -626,4 +614,41 @@ nsSVGPathGeometryFrame::GeneratePath(gfxContext* aContext,
 
   aContext->NewPath();
   static_cast<nsSVGPathGeometryElement*>(mContent)->ConstructPath(aContext);
+}
+
+void
+nsSVGPathGeometryFrame::PaintMarkers(nsRenderingContext* aContext)
+{
+  gfxTextObjectPaint *objectPaint =
+    (gfxTextObjectPaint*)aContext->GetUserData(&gfxTextObjectPaint::sUserDataKey);
+
+  if (static_cast<nsSVGPathGeometryElement*>(mContent)->IsMarkable()) {
+    MarkerProperties properties = GetMarkerProperties(this);
+
+    if (properties.MarkersExist()) {
+      float strokeWidth = nsSVGUtils::GetStrokeWidth(this, objectPaint);
+
+      nsTArray<nsSVGMark> marks;
+      static_cast<nsSVGPathGeometryElement*>
+                 (mContent)->GetMarkPoints(&marks);
+
+      uint32_t num = marks.Length();
+
+      if (num) {
+        nsSVGMarkerFrame *frame = properties.GetMarkerStartFrame();
+        if (frame)
+          frame->PaintMark(aContext, this, &marks[0], strokeWidth);
+
+        frame = properties.GetMarkerMidFrame();
+        if (frame) {
+          for (uint32_t i = 1; i < num - 1; i++)
+            frame->PaintMark(aContext, this, &marks[i], strokeWidth);
+        }
+
+        frame = properties.GetMarkerEndFrame();
+        if (frame)
+          frame->PaintMark(aContext, this, &marks[num-1], strokeWidth);
+      }
+    }
+  }
 }

@@ -8,8 +8,6 @@ package org.mozilla.gecko;
 import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.gfx.GeckoLayerClient;
 import org.mozilla.gecko.gfx.GfxInfoThread;
-import org.mozilla.gecko.gfx.ImmutableViewportMetrics;
-import org.mozilla.gecko.gfx.InputConnectionHandler;
 import org.mozilla.gecko.gfx.LayerView;
 import org.mozilla.gecko.gfx.TouchEventHandler;
 import org.mozilla.gecko.util.EventDispatcher;
@@ -57,6 +55,7 @@ import android.os.Looper;
 import android.os.Message;
 import android.os.MessageQueue;
 import android.os.StatFs;
+import android.os.SystemClock;
 import android.os.Vibrator;
 import android.provider.Settings;
 import android.util.Base64;
@@ -87,7 +86,6 @@ import java.nio.ByteBuffer;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.text.NumberFormat;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedList;
@@ -249,25 +247,34 @@ public class GeckoAppShell
     public static native void notifyReadingMessageListFailed(int aError, int aRequestId);
 
     public static native void scheduleComposite();
+
+    // Pausing and resuming the compositor is a synchronous request, so be
+    // careful of possible deadlock. Resuming the compositor will also cause
+    // a composition, so there is no need to schedule a composition after
+    // resuming.
     public static native void schedulePauseComposition();
     public static native void scheduleResumeComposition(int width, int height);
+
     public static native float computeRenderIntegrity();
 
     public static native SurfaceBits getSurfaceBits(Surface surface);
 
     public static native void onFullScreenPluginHidden(View view);
 
-    private static class GeckoMediaScannerClient implements MediaScannerConnectionClient {
-        private String mFile = "";
-        private String mMimeType = "";
-        private MediaScannerConnection mScanner = null;
+    private static final class GeckoMediaScannerClient implements MediaScannerConnectionClient {
+        private final String mFile;
+        private final String mMimeType;
+        private MediaScannerConnection mScanner;
 
-        public GeckoMediaScannerClient(Context aContext, String aFile, String aMimeType) {
-            mFile = aFile;
-            mMimeType = aMimeType;
-            mScanner = new MediaScannerConnection(aContext, this);
-            if (mScanner != null)
-                mScanner.connect();
+        public static void startScan(Context context, String file, String mimeType) {
+            new GeckoMediaScannerClient(context, file, mimeType);
+        }
+
+        private GeckoMediaScannerClient(Context context, String file, String mimeType) {
+            mFile = file;
+            mMimeType = mimeType;
+            mScanner = new MediaScannerConnection(context, this);
+            mScanner.connect();
         }
 
         public void onMediaScannerConnected() {
@@ -333,7 +340,6 @@ public class GeckoAppShell
         // The package data lib directory isn't placed in ld.so's
         // search path, so we have to manually load libraries that
         // libxul will depend on.  Not ideal.
-        GeckoProfile profile = GeckoProfile.get(context);
 
         File cacheFile = getCacheDir(context);
         putenv("GRE_HOME=" + getGREDir(context).getPath());
@@ -427,9 +433,6 @@ public class GeckoAppShell
         // setup the downloads path
         f = Environment.getDownloadCacheDirectory();
         GeckoAppShell.putenv("EXTERNAL_STORAGE=" + f.getPath());
-
-        // Enable fixed position layers
-        GeckoAppShell.putenv("MOZ_ENABLE_FIXED_POSITION_LAYERS=1");
 
         // setup the app-specific cache path
         f = context.getCacheDir();
@@ -533,8 +536,6 @@ public class GeckoAppShell
     }
 
     public static void runGecko(String apkPath, String args, String url, String type) {
-        WebAppAllocator.getInstance();
-
         Looper.prepare();
         sGeckoHandler = new Handler();
 
@@ -584,7 +585,7 @@ public class GeckoAppShell
 
     /* This method is referenced by Robocop via reflection. */
     public static void sendEventToGecko(GeckoEvent e) {
-        if (GeckoApp.checkLaunchState(GeckoApp.LaunchState.GeckoRunning)) {
+        if (GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoRunning)) {
             notifyGeckoOfEvent(e);
         } else {
             gPendingEvents.addLast(e);
@@ -633,6 +634,8 @@ public class GeckoAppShell
 
     // Block the current thread until the Gecko event loop is caught up
     synchronized public static void geckoEventSync() {
+        long time = SystemClock.uptimeMillis();
+
         sGeckoPendingAcks = new CountDownLatch(1);
         GeckoAppShell.sendEventToGecko(GeckoEvent.createSyncEvent());
         while (sGeckoPendingAcks.getCount() != 0) {
@@ -641,6 +644,13 @@ public class GeckoAppShell
             } catch(InterruptedException e) {}
         }
         sGeckoPendingAcks = null;
+
+        time = SystemClock.uptimeMillis() - time;
+        if (time > 500) {
+            Log.w(LOGTAG, "Gecko event sync took too long! (" + time + " ms)", new Exception());
+        } else {
+            Log.d(LOGTAG, "Gecko event sync took " + time + " ms");
+        }
     }
 
     // Signal the Java thread that it's time to wake up
@@ -792,8 +802,8 @@ public class GeckoAppShell
     }
 
     static void onXreExit() {
-        // mLaunchState can only be Launched or GeckoRunning at this point
-        GeckoApp.setLaunchState(GeckoApp.LaunchState.GeckoExiting);
+        // The launch state can only be Launched or GeckoRunning at this point
+        GeckoThread.setLaunchState(GeckoThread.LaunchState.GeckoExiting);
         if (gRestartScheduled) {
             GeckoApp.mAppContext.doRestart();
         } else {
@@ -1702,7 +1712,7 @@ public class GeckoAppShell
 
     public static void scanMedia(String aFile, String aMimeType) {
         Context context = GeckoApp.mAppContext;
-        GeckoMediaScannerClient client = new GeckoMediaScannerClient(context, aFile, aMimeType);
+        GeckoMediaScannerClient.startScan(context, aFile, aMimeType);
     }
 
     public static byte[] getIconForExtension(String aExt, int iconSize) {
@@ -1979,14 +1989,6 @@ public class GeckoAppShell
     /*
      * WebSMS related methods.
      */
-    public static int getNumberOfMessagesForText(String aText) {
-        if (SmsManager.getInstance() == null) {
-            return 0;
-        }
-
-        return SmsManager.getInstance().getNumberOfMessagesForText(aText);
-    }
-
     public static void sendMessage(String aNumber, String aMessage, int aRequestId) {
         if (SmsManager.getInstance() == null) {
             return;
@@ -2249,7 +2251,7 @@ public class GeckoAppShell
         if (GeckoApp.mAppContext != null)
             GeckoApp.mAppContext.notifyCheckUpdateResult(result);
     }
-    
+
     public static boolean unlockProfile() {
         // Try to kill any zombie Fennec's that might be running
         GeckoAppShell.killAnyZombies();
@@ -2257,11 +2259,7 @@ public class GeckoAppShell
         // Then force unlock this profile
         GeckoProfile profile = GeckoApp.mAppContext.getProfile();
         File lock = profile.getFile(".parentlock");
-        if (lock.exists()) {
-            lock.delete();
-            return true;
-        }
-        return false;
+        return lock.exists() && lock.delete();
     }
 
     public static String getProxyForURI(String spec, String scheme, String host, int port) {

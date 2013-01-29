@@ -92,6 +92,7 @@ public class TabsTray extends ListView
 
     @Override
     public void show() {
+        setVisibility(View.VISIBLE);
         Tabs.getInstance().refreshThumbnails();
         Tabs.registerOnTabsChangedListener(mTabsAdapter);
         mTabsAdapter.refreshTabsData();
@@ -99,6 +100,7 @@ public class TabsTray extends ListView
 
     @Override
     public void hide() {
+        setVisibility(View.GONE);
         Tabs.unregisterOnTabsChangedListener(mTabsAdapter);
         GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("Tab:Screenshot:Cancel",""));
         mTabsAdapter.clear();
@@ -222,7 +224,7 @@ public class TabsTray extends ListView
         }
 
         private void removeTab(Tab tab) {
-            if (tab.isPrivate() == mIsPrivate) {
+            if (tab.isPrivate() == mIsPrivate && mTabs != null) {
                 mTabs.remove(tab);
                 notifyDataSetChanged(); // Be sure to call this whenever mTabs changes.
             }

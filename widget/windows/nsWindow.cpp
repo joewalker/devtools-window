@@ -55,6 +55,7 @@
  **************************************************************/
 
 #include "mozilla/ipc/RPCChannel.h"
+#include <algorithm>
 
 /* This must occur *after* ipc/RPCChannel.h to avoid typedefs conflicts. */
 #include "mozilla/Util.h"
@@ -302,7 +303,7 @@ static const int32_t kResizableBorderMinSize = 3;
  *
  **************************************************************/
 
-nsWindow::nsWindow() : nsBaseWidget()
+nsWindow::nsWindow() : nsWindowBase()
 {
 #ifdef PR_LOGGING
   if (!gWindowsLog) {
@@ -1314,8 +1315,8 @@ nsWindow::SetSizeConstraints(const SizeConstraints& aConstraints)
 {
   SizeConstraints c = aConstraints;
   if (mWindowType != eWindowType_popup) {
-    c.mMinSize.width = NS_MAX(int32_t(::GetSystemMetrics(SM_CXMINTRACK)), c.mMinSize.width);
-    c.mMinSize.height = NS_MAX(int32_t(::GetSystemMetrics(SM_CYMINTRACK)), c.mMinSize.height);
+    c.mMinSize.width = std::max(int32_t(::GetSystemMetrics(SM_CXMINTRACK)), c.mMinSize.width);
+    c.mMinSize.height = std::max(int32_t(::GetSystemMetrics(SM_CYMINTRACK)), c.mMinSize.height);
   }
 
   nsBaseWidget::SetSizeConstraints(c);
@@ -2178,7 +2179,7 @@ nsWindow::UpdateNonClientMargins(int32_t aSizeMode, bool aReflowWindow)
     // size by that amount.
 
     if (mNonClientMargins.top > 0 && glass) {
-      mNonClientOffset.top = NS_MIN(mCaptionHeight, mNonClientMargins.top);
+      mNonClientOffset.top = std::min(mCaptionHeight, mNonClientMargins.top);
     } else if (mNonClientMargins.top == 0) {
       mNonClientOffset.top = mCaptionHeight;
     } else {
@@ -2186,7 +2187,7 @@ nsWindow::UpdateNonClientMargins(int32_t aSizeMode, bool aReflowWindow)
     }
 
     if (mNonClientMargins.bottom > 0 && glass) {
-      mNonClientOffset.bottom = NS_MIN(mVertResizeMargin, mNonClientMargins.bottom);
+      mNonClientOffset.bottom = std::min(mVertResizeMargin, mNonClientMargins.bottom);
     } else if (mNonClientMargins.bottom == 0) {
       mNonClientOffset.bottom = mVertResizeMargin;
     } else {
@@ -2194,7 +2195,7 @@ nsWindow::UpdateNonClientMargins(int32_t aSizeMode, bool aReflowWindow)
     }
 
     if (mNonClientMargins.left > 0 && glass) {
-      mNonClientOffset.left = NS_MIN(mHorResizeMargin, mNonClientMargins.left);
+      mNonClientOffset.left = std::min(mHorResizeMargin, mNonClientMargins.left);
     } else if (mNonClientMargins.left == 0) {
       mNonClientOffset.left = mHorResizeMargin;
     } else {
@@ -2202,7 +2203,7 @@ nsWindow::UpdateNonClientMargins(int32_t aSizeMode, bool aReflowWindow)
     }
 
     if (mNonClientMargins.right > 0 && glass) {
-      mNonClientOffset.right = NS_MIN(mHorResizeMargin, mNonClientMargins.right);
+      mNonClientOffset.right = std::min(mHorResizeMargin, mNonClientMargins.right);
     } else if (mNonClientMargins.right == 0) {
       mNonClientOffset.right = mHorResizeMargin;
     } else {
@@ -2608,7 +2609,7 @@ void nsWindow::UpdateOpaqueRegion(const nsIntRegion &aOpaqueRegion)
     if (mCustomNonClient) {
       // The minimum glass height must be the caption buttons height,
       // otherwise the buttons are drawn incorrectly.
-      largest.y = NS_MAX<uint32_t>(largest.y,
+      largest.y = std::max<uint32_t>(largest.y,
                          nsUXThemeData::sCommandButtons[CMDBUTTONIDX_BUTTONBOX].cy);
     }
     margins.cyTopHeight = largest.y;
@@ -3518,7 +3519,7 @@ nsWindow::OverrideSystemMouseScrollSpeed(int32_t aOriginalDelta,
   }
 
   absComputedOverriddenDelta =
-    NS_MIN(absComputedOverriddenDelta, absDeltaLimit);
+    std::min(absComputedOverriddenDelta, absDeltaLimit);
 
   aOverriddenDelta = (aOriginalDelta > 0) ? absComputedOverriddenDelta :
                                             -absComputedOverriddenDelta;
@@ -3687,15 +3688,43 @@ bool nsWindow::DispatchCommandEvent(uint32_t aEventCommand)
     case APPCOMMAND_BROWSER_HOME:
       command = nsGkAtoms::Home;
       break;
+    case APPCOMMAND_CLOSE:
+      command = nsGkAtoms::Close;
+      break;
+    case APPCOMMAND_FIND:
+      command = nsGkAtoms::Find;
+      break;
+    case APPCOMMAND_HELP:
+      command = nsGkAtoms::Help;
+      break;
+    case APPCOMMAND_NEW:
+      command = nsGkAtoms::New;
+      break;
+    case APPCOMMAND_OPEN:
+      command = nsGkAtoms::Open;
+      break;
+    case APPCOMMAND_PRINT:
+      command = nsGkAtoms::Print;
+      break;
+    case APPCOMMAND_SAVE:
+      command = nsGkAtoms::Save;
+      break;
+    case APPCOMMAND_FORWARD_MAIL:
+      command = nsGkAtoms::ForwardMail;
+      break;
+    case APPCOMMAND_REPLY_TO_MAIL:
+      command = nsGkAtoms::ReplyToMail;
+      break;
+    case APPCOMMAND_SEND_MAIL:
+      command = nsGkAtoms::SendMail;
+      break;
     default:
       return false;
   }
   nsCommandEvent event(true, nsGkAtoms::onAppCommand, command, this);
 
   InitEvent(event);
-  DispatchWindowEvent(&event);
-
-  return true;
+  return DispatchWindowEvent(&event);
 }
 
 // Recursively dispatch synchronous paints for nsIWidget
@@ -5018,7 +5047,9 @@ bool nsWindow::ProcessMessage(UINT msg, WPARAM &wParam, LPARAM &lParam,
     case WM_APPCOMMAND:
     {
       uint32_t appCommand = GET_APPCOMMAND_LPARAM(lParam);
-
+      uint32_t contentCommandMessage = NS_EVENT_NULL;
+      // XXX After we implement KeyboardEvent.key, we should dispatch the
+      //     key event if (GET_DEVICE_LPARAM(lParam) == FAPPCOMMAND_KEY) is.
       switch (appCommand)
       {
         case APPCOMMAND_BROWSER_BACKWARD:
@@ -5028,11 +5059,50 @@ bool nsWindow::ProcessMessage(UINT msg, WPARAM &wParam, LPARAM &lParam,
         case APPCOMMAND_BROWSER_SEARCH:
         case APPCOMMAND_BROWSER_FAVORITES:
         case APPCOMMAND_BROWSER_HOME:
-          DispatchCommandEvent(appCommand);
-          // tell the driver that we handled the event
-          *aRetValue = 1;
-          result = true;
+        case APPCOMMAND_CLOSE:
+        case APPCOMMAND_FIND:
+        case APPCOMMAND_HELP:
+        case APPCOMMAND_NEW:
+        case APPCOMMAND_OPEN:
+        case APPCOMMAND_PRINT:
+        case APPCOMMAND_SAVE:
+        case APPCOMMAND_FORWARD_MAIL:
+        case APPCOMMAND_REPLY_TO_MAIL:
+        case APPCOMMAND_SEND_MAIL:
+          // We shouldn't consume the message always because if we don't handle
+          // the message, the sender (typically, utility of keyboard or mouse)
+          // may send other key messages which indicate well known shortcut key.
+          if (DispatchCommandEvent(appCommand)) {
+            // tell the driver that we handled the event
+            *aRetValue = 1;
+            result = true;
+          }
           break;
+
+        // Use content command for following commands:
+        case APPCOMMAND_COPY:
+          contentCommandMessage = NS_CONTENT_COMMAND_COPY;
+          break;
+        case APPCOMMAND_CUT:
+          contentCommandMessage = NS_CONTENT_COMMAND_CUT;
+          break;
+        case APPCOMMAND_PASTE:
+          contentCommandMessage = NS_CONTENT_COMMAND_PASTE;
+          break;
+        case APPCOMMAND_REDO:
+          contentCommandMessage = NS_CONTENT_COMMAND_REDO;
+          break;
+        case APPCOMMAND_UNDO:
+          contentCommandMessage = NS_CONTENT_COMMAND_UNDO;
+          break;
+      }
+
+      if (contentCommandMessage) {
+        nsContentCommandEvent contentCommand(true, contentCommandMessage, this);
+        DispatchWindowEvent(&contentCommand);
+        // tell the driver that we handled the event
+        *aRetValue = 1;
+        result = true;
       }
       // default = false - tell the driver that the event was not handled
     }
@@ -5102,13 +5172,13 @@ bool nsWindow::ProcessMessage(UINT msg, WPARAM &wParam, LPARAM &lParam,
       // Set the constraints. The minimum size should also be constrained to the
       // default window maximum size so that it fits on screen.
       mmi->ptMinTrackSize.x =
-        NS_MIN((int32_t)mmi->ptMaxTrackSize.x,
-               NS_MAX((int32_t)mmi->ptMinTrackSize.x, mSizeConstraints.mMinSize.width));
+        std::min((int32_t)mmi->ptMaxTrackSize.x,
+               std::max((int32_t)mmi->ptMinTrackSize.x, mSizeConstraints.mMinSize.width));
       mmi->ptMinTrackSize.y =
-        NS_MIN((int32_t)mmi->ptMaxTrackSize.y,
-        NS_MAX((int32_t)mmi->ptMinTrackSize.y, mSizeConstraints.mMinSize.height));
-      mmi->ptMaxTrackSize.x = NS_MIN((int32_t)mmi->ptMaxTrackSize.x, mSizeConstraints.mMaxSize.width);
-      mmi->ptMaxTrackSize.y = NS_MIN((int32_t)mmi->ptMaxTrackSize.y, mSizeConstraints.mMaxSize.height);
+        std::min((int32_t)mmi->ptMaxTrackSize.y,
+        std::max((int32_t)mmi->ptMinTrackSize.y, mSizeConstraints.mMinSize.height));
+      mmi->ptMaxTrackSize.x = std::min((int32_t)mmi->ptMaxTrackSize.x, mSizeConstraints.mMaxSize.width);
+      mmi->ptMaxTrackSize.y = std::min((int32_t)mmi->ptMaxTrackSize.y, mSizeConstraints.mMaxSize.height);
     }
     break;
 
@@ -5471,13 +5541,13 @@ nsWindow::ClientMarginHitTestPoint(int32_t mx, int32_t my)
 
   // Ensure being accessible to borders of window.  Even if contents are in
   // this area, the area must behave as border.
-  nsIntMargin nonClientSize(NS_MAX(mHorResizeMargin - mNonClientOffset.left,
+  nsIntMargin nonClientSize(std::max(mHorResizeMargin - mNonClientOffset.left,
                                    kResizableBorderMinSize),
-                            NS_MAX(mCaptionHeight - mNonClientOffset.top,
+                            std::max(mCaptionHeight - mNonClientOffset.top,
                                    kResizableBorderMinSize),
-                            NS_MAX(mHorResizeMargin - mNonClientOffset.right,
+                            std::max(mHorResizeMargin - mNonClientOffset.right,
                                    kResizableBorderMinSize),
-                            NS_MAX(mVertResizeMargin - mNonClientOffset.bottom,
+                            std::max(mVertResizeMargin - mNonClientOffset.bottom,
                                    kResizableBorderMinSize));
 
   bool allowContentOverride = mSizeMode == nsSizeMode_Maximized ||
@@ -5491,10 +5561,10 @@ nsWindow::ClientMarginHitTestPoint(int32_t mx, int32_t my)
   // contents under the mouse cursor should be able to override the behavior.
   // E.g., user must expect that Firefox button always opens the popup menu
   // even when the user clicks on the above edge of it.
-  nsIntMargin borderSize(NS_MAX(nonClientSize.left, mHorResizeMargin),
-                         NS_MAX(nonClientSize.top, mVertResizeMargin),
-                         NS_MAX(nonClientSize.right, mHorResizeMargin),
-                         NS_MAX(nonClientSize.bottom, mVertResizeMargin));
+  nsIntMargin borderSize(std::max(nonClientSize.left, mHorResizeMargin),
+                         std::max(nonClientSize.top, mVertResizeMargin),
+                         std::max(nonClientSize.right, mHorResizeMargin),
+                         std::max(nonClientSize.bottom, mVertResizeMargin));
 
   bool top    = false;
   bool bottom = false;
@@ -6697,8 +6767,8 @@ LRESULT nsWindow::OnKeyDown(const MSG &aMsg,
 
   if (inputtingChars.mLength ||
       shiftedChars.mLength || unshiftedChars.mLength) {
-    uint32_t num = NS_MAX(inputtingChars.mLength,
-                          NS_MAX(shiftedChars.mLength, unshiftedChars.mLength));
+    uint32_t num = std::max(inputtingChars.mLength,
+                          std::max(shiftedChars.mLength, unshiftedChars.mLength));
     uint32_t skipUniChars = num - inputtingChars.mLength;
     uint32_t skipShiftedChars = num - shiftedChars.mLength;
     uint32_t skipUnshiftedChars = num - unshiftedChars.mLength;
@@ -6761,7 +6831,7 @@ LRESULT nsWindow::OnKeyDown(const MSG &aMsg,
       }
 
       nsKeyEvent keypressEvent(true, NS_KEY_PRESS, this);
-      keypressEvent.mFlags |= extraFlags;
+      keypressEvent.mFlags.Union(extraFlags);
       keypressEvent.charCode = uniChar;
       keypressEvent.alternativeCharCodes.AppendElements(altArray);
       InitKeyEvent(keypressEvent, nativeKey, modKeyState);
@@ -6769,7 +6839,7 @@ LRESULT nsWindow::OnKeyDown(const MSG &aMsg,
     }
   } else {
     nsKeyEvent keypressEvent(true, NS_KEY_PRESS, this);
-    keypressEvent.mFlags |= extraFlags;
+    keypressEvent.mFlags.Union(extraFlags);
     keypressEvent.keyCode = DOMKeyCode;
     InitKeyEvent(keypressEvent, nativeKey, aModKeyState);
     DispatchKeyEvent(keypressEvent, nullptr);
@@ -6874,7 +6944,7 @@ LRESULT nsWindow::OnChar(const MSG &aMsg,
 
   nsKeyEvent keypressEvent(true, NS_KEY_PRESS, this);
   if (aExtraFlags) {
-    keypressEvent.mFlags |= *aExtraFlags;
+    keypressEvent.mFlags.Union(*aExtraFlags);
   }
   keypressEvent.charCode = uniChar;
   if (!keypressEvent.charCode) {
@@ -7132,8 +7202,11 @@ void nsWindow::OnDestroy()
   // If we're going away and for some reason we're still the rollup widget, rollup and
   // turn off capture.
   nsIRollupListener* rollupListener = nsBaseWidget::GetActiveRollupListener();
-  nsCOMPtr<nsIWidget> rollupWidget = rollupListener->GetRollupWidget();
-  if ( this == rollupWidget ) {
+  nsCOMPtr<nsIWidget> rollupWidget;
+  if (rollupListener) {
+    rollupWidget = rollupListener->GetRollupWidget();
+  }
+  if (this == rollupWidget) {
     if ( rollupListener )
       rollupListener->Rollup(0, nullptr);
     CaptureRollupEvents(nullptr, false);
@@ -7975,129 +8048,127 @@ nsWindow::EventIsInsideWindow(UINT Msg, nsWindow* aWindow)
 }
 
 // Handle events that may cause a popup (combobox, XPMenu, etc) to need to rollup.
-BOOL
+bool
 nsWindow::DealWithPopups(HWND inWnd, UINT inMsg, WPARAM inWParam, LPARAM inLParam, LRESULT* outResult)
 {
+  NS_ASSERTION(outResult, "Bad outResult");
+
+  *outResult = MA_NOACTIVATE;
+
+  if (!::IsWindowVisible(inWnd))
+    return false;
   nsIRollupListener* rollupListener = nsBaseWidget::GetActiveRollupListener();
+  NS_ENSURE_TRUE(rollupListener, false);
   nsCOMPtr<nsIWidget> rollupWidget = rollupListener->GetRollupWidget();
-  if (rollupWidget && ::IsWindowVisible(inWnd)) {
+  if (!rollupWidget)
+    return false;
 
-    inMsg = WinUtils::GetNativeMessage(inMsg);
-    if (inMsg == WM_LBUTTONDOWN || inMsg == WM_RBUTTONDOWN || inMsg == WM_MBUTTONDOWN ||
-        inMsg == WM_MOUSEWHEEL || inMsg == WM_MOUSEHWHEEL || inMsg == WM_ACTIVATE ||
-        (inMsg == WM_KILLFOCUS && IsDifferentThreadWindow((HWND)inWParam)) ||
-        inMsg == WM_NCRBUTTONDOWN ||
-        inMsg == WM_MOVING ||
-        inMsg == WM_SIZING ||
-        inMsg == WM_NCLBUTTONDOWN ||
-        inMsg == WM_NCMBUTTONDOWN ||
-        inMsg == WM_MOUSEACTIVATE ||
-        inMsg == WM_ACTIVATEAPP ||
-        inMsg == WM_MENUSELECT)
-    {
-      // Rollup if the event is outside the popup.
-      bool rollup = !nsWindow::EventIsInsideWindow(inMsg, (nsWindow*)(rollupWidget.get()));
+  inMsg = WinUtils::GetNativeMessage(inMsg);
+  if (inMsg == WM_LBUTTONDOWN || inMsg == WM_RBUTTONDOWN || inMsg == WM_MBUTTONDOWN ||
+      inMsg == WM_MOUSEWHEEL || inMsg == WM_MOUSEHWHEEL || inMsg == WM_ACTIVATE ||
+      (inMsg == WM_KILLFOCUS && IsDifferentThreadWindow((HWND)inWParam)) ||
+      inMsg == WM_NCRBUTTONDOWN ||
+      inMsg == WM_MOVING ||
+      inMsg == WM_SIZING ||
+      inMsg == WM_NCLBUTTONDOWN ||
+      inMsg == WM_NCMBUTTONDOWN ||
+      inMsg == WM_MOUSEACTIVATE ||
+      inMsg == WM_ACTIVATEAPP ||
+      inMsg == WM_MENUSELECT) {
+    // Rollup if the event is outside the popup.
+    bool rollup = !nsWindow::EventIsInsideWindow(inMsg, (nsWindow*)(rollupWidget.get()));
 
-      if (rollup && (inMsg == WM_MOUSEWHEEL || inMsg == WM_MOUSEHWHEEL))
-      {
-        rollup = rollupListener->ShouldRollupOnMouseWheelEvent();
-        *outResult = true;
-      }
+    if (rollup && (inMsg == WM_MOUSEWHEEL || inMsg == WM_MOUSEHWHEEL)) {
+      rollup = rollupListener->ShouldRollupOnMouseWheelEvent();
+      *outResult = MA_ACTIVATE;
+    }
 
-      // If we're dealing with menus, we probably have submenus and we don't
-      // want to rollup if the click is in a parent menu of the current submenu.
-      uint32_t popupsToRollup = UINT32_MAX;
-      if (rollup) {
-        nsAutoTArray<nsIWidget*, 5> widgetChain;
-        uint32_t sameTypeCount = rollupListener->GetSubmenuWidgetChain(&widgetChain);
-        for ( uint32_t i = 0; i < widgetChain.Length(); ++i ) {
-          nsIWidget* widget = widgetChain[i];
-          if ( nsWindow::EventIsInsideWindow(inMsg, (nsWindow*)widget) ) {
-            // don't roll up if the mouse event occurred within a menu of the
-            // same type. If the mouse event occurred in a menu higher than
-            // that, roll up, but pass the number of popups to Rollup so
-            // that only those of the same type close up.
-            if (i < sameTypeCount) {
-              rollup = false;
-            }
-            else {
-              popupsToRollup = sameTypeCount;
-            }
-            break;
+    // If we're dealing with menus, we probably have submenus and we don't
+    // want to rollup if the click is in a parent menu of the current submenu.
+    uint32_t popupsToRollup = UINT32_MAX;
+    if (rollup) {
+      nsAutoTArray<nsIWidget*, 5> widgetChain;
+      uint32_t sameTypeCount = rollupListener->GetSubmenuWidgetChain(&widgetChain);
+      for ( uint32_t i = 0; i < widgetChain.Length(); ++i ) {
+        nsIWidget* widget = widgetChain[i];
+        if ( nsWindow::EventIsInsideWindow(inMsg, (nsWindow*)widget) ) {
+          // don't roll up if the mouse event occurred within a menu of the
+          // same type. If the mouse event occurred in a menu higher than
+          // that, roll up, but pass the number of popups to Rollup so
+          // that only those of the same type close up.
+          if (i < sameTypeCount) {
+            rollup = false;
+          } else {
+            popupsToRollup = sameTypeCount;
           }
-        } // foreach parent menu widget
-      }
-
-      if (inMsg == WM_MOUSEACTIVATE) {
-        // Prevent the click inside the popup from causing a change in window
-        // activation. Since the popup is shown non-activated, we need to eat
-        // any requests to activate the window while it is displayed. Windows
-        // will automatically activate the popup on the mousedown otherwise.
-        if (!rollup) {
-          *outResult = MA_NOACTIVATE;
-          return TRUE;
+          break;
         }
-        else
-        {
-          UINT uMsg = HIWORD(inLParam);
-          if (uMsg == WM_MOUSEMOVE)
-          {
-            // WM_MOUSEACTIVATE cause by moving the mouse - X-mouse (eg. TweakUI)
-            // must be enabled in Windows.
-            rollup = rollupListener->ShouldRollupOnMouseActivate();
-            if (!rollup)
-            {
-              *outResult = MA_NOACTIVATE;
-              return true;
-            }
+      } // foreach parent menu widget
+    }
+
+    if (inMsg == WM_MOUSEACTIVATE) {
+      // Prevent the click inside the popup from causing a change in window
+      // activation. Since the popup is shown non-activated, we need to eat
+      // any requests to activate the window while it is displayed. Windows
+      // will automatically activate the popup on the mousedown otherwise.
+      if (!rollup) {
+        return true;
+      } else {
+        UINT uMsg = HIWORD(inLParam);
+        if (uMsg == WM_MOUSEMOVE) {
+          // WM_MOUSEACTIVATE cause by moving the mouse - X-mouse (eg. TweakUI)
+          // must be enabled in Windows.
+          rollup = rollupListener->ShouldRollupOnMouseActivate();
+          if (!rollup) {
+            return true;
           }
         }
       }
-      // if we've still determined that we should still rollup everything, do it.
-      else if (rollup) {
-        // only need to deal with the last rollup for left mouse down events.
-        NS_ASSERTION(!mLastRollup, "mLastRollup is null");
-        bool consumeRollupEvent =
-          rollupListener->Rollup(popupsToRollup, inMsg == WM_LBUTTONDOWN ? &mLastRollup : nullptr);
-        NS_IF_ADDREF(mLastRollup);
+    }
+    // if we've still determined that we should still rollup everything, do it.
+    else if (rollup) {
+      // only need to deal with the last rollup for left mouse down events.
+      NS_ASSERTION(!mLastRollup, "mLastRollup is null");
+      bool consumeRollupEvent =
+        rollupListener->Rollup(popupsToRollup, inMsg == WM_LBUTTONDOWN ? &mLastRollup : nullptr);
+      NS_IF_ADDREF(mLastRollup);
 
-        // Tell hook to stop processing messages
-        sProcessHook = false;
-        sRollupMsgId = 0;
-        sRollupMsgWnd = NULL;
+      // Tell hook to stop processing messages
+      sProcessHook = false;
+      sRollupMsgId = 0;
+      sRollupMsgWnd = NULL;
 
-        // return TRUE tells Windows that the event is consumed,
-        // false allows the event to be dispatched
-        //
-        // So if we are NOT supposed to be consuming events, let it go through
-        if (consumeRollupEvent && inMsg != WM_RBUTTONDOWN) {
-          *outResult = MA_ACTIVATE;
+      // return TRUE tells Windows that the event is consumed,
+      // false allows the event to be dispatched
+      //
+      // So if we are NOT supposed to be consuming events, let it go through
+      if (consumeRollupEvent && inMsg != WM_RBUTTONDOWN) {
+        *outResult = MA_ACTIVATE;
 
-          // However, don't activate panels
-          if (inMsg == WM_MOUSEACTIVATE) {
-            nsWindow* activateWindow = WinUtils::GetNSWindowPtr(inWnd);
-            if (activateWindow) {
-              nsWindowType wintype;
-              activateWindow->GetWindowType(wintype);
-              if (wintype == eWindowType_popup && activateWindow->PopupType() == ePopupTypePanel) {
-                *outResult = popupsToRollup != UINT32_MAX ? MA_NOACTIVATEANDEAT : MA_NOACTIVATE;
-              }
+        // However, don't activate panels
+        if (inMsg == WM_MOUSEACTIVATE) {
+          nsWindow* activateWindow = WinUtils::GetNSWindowPtr(inWnd);
+          if (activateWindow) {
+            nsWindowType wintype;
+            activateWindow->GetWindowType(wintype);
+            if (wintype == eWindowType_popup && activateWindow->PopupType() == ePopupTypePanel) {
+              *outResult = popupsToRollup != UINT32_MAX ? MA_NOACTIVATEANDEAT : MA_NOACTIVATE;
             }
           }
-          return TRUE;
         }
-        // if we are only rolling up some popups, don't activate and don't let
-        // the event go through. This prevents clicks menus higher in the
-        // chain from opening when a context menu is open
-        if (popupsToRollup != UINT32_MAX && inMsg == WM_MOUSEACTIVATE) {
-          *outResult = MA_NOACTIVATEANDEAT;
-          return TRUE;
-        }
+        return true;
       }
-    } // if event that might trigger a popup to rollup
-  } // if rollup listeners registered
+      // if we are only rolling up some popups, don't activate and don't let
+      // the event go through. This prevents clicks menus higher in the
+      // chain from opening when a context menu is open
+      if (popupsToRollup != UINT32_MAX && inMsg == WM_MOUSEACTIVATE) {
+        *outResult = MA_NOACTIVATEANDEAT;
+        return true;
+      }
+    }
+  } // if event that might trigger a popup to rollup
 
-  return FALSE;
+  return false;
 }
 
 /**************************************************************

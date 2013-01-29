@@ -19,6 +19,7 @@
 #include "IDBEvents.h"
 #include "IDBFactory.h"
 #include "IndexedDatabaseManager.h"
+#include <algorithm>
 
 using namespace mozilla;
 USING_INDEXEDDB_NAMESPACE
@@ -1568,7 +1569,7 @@ private:
 
 } // anonymous namespace
 
-NS_IMPL_THREADSAFE_ISUPPORTS1(OpenDatabaseHelper, nsIRunnable);
+NS_IMPL_THREADSAFE_ISUPPORTS1(OpenDatabaseHelper, nsIRunnable)
 
 nsresult
 OpenDatabaseHelper::Init()
@@ -1679,9 +1680,9 @@ OpenDatabaseHelper::DoDatabaseWork()
     nsRefPtr<ObjectStoreInfo>& objectStoreInfo = mObjectStores[i];
     for (uint32_t j = 0; j < objectStoreInfo->indexes.Length(); j++) {
       IndexInfo& indexInfo = objectStoreInfo->indexes[j];
-      mLastIndexId = NS_MAX(indexInfo.id, mLastIndexId);
+      mLastIndexId = std::max(indexInfo.id, mLastIndexId);
     }
-    mLastObjectStoreId = NS_MAX(objectStoreInfo->id, mLastObjectStoreId);
+    mLastObjectStoreId = std::max(objectStoreInfo->id, mLastObjectStoreId);
   }
 
   // See if we need to do a VERSION_CHANGE transaction
@@ -2246,7 +2247,7 @@ OpenDatabaseHelper::ReleaseMainThreadObjects()
   HelperBase::ReleaseMainThreadObjects();
 }
 
-NS_IMPL_ISUPPORTS_INHERITED0(SetVersionHelper, AsyncConnectionHelper);
+NS_IMPL_ISUPPORTS_INHERITED0(SetVersionHelper, AsyncConnectionHelper)
 
 nsresult
 SetVersionHelper::Init()

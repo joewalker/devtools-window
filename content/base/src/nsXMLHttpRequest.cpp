@@ -1,5 +1,5 @@
-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set ts=2 sw=2 et tw=80: */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* vim: set ts=8 sts=2 et sw=2 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -338,8 +338,6 @@ XMLHttpRequestAuthPrompt::PromptPassword(const PRUnichar* aDialogTitle,
 
 /////////////////////////////////////////////
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXHREventTarget)
-
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsXHREventTarget,
                                                   nsDOMEventTargetHelper)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
@@ -566,8 +564,6 @@ nsXMLHttpRequest::SetRequestObserver(nsIRequestObserver* aObserver)
   mRequestObserver = aObserver;
 }
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXMLHttpRequest)
-
 NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_BEGIN(nsXMLHttpRequest)
   bool isBlack = tmp->IsBlack();
   if (isBlack || tmp->mWaitingForOnStopRequest) {
@@ -642,6 +638,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(nsXMLHttpRequest)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
   NS_INTERFACE_MAP_ENTRY(nsIJSNativeInitializer)
   NS_INTERFACE_MAP_ENTRY(nsITimerCallback)
+  NS_INTERFACE_MAP_ENTRY(nsISizeOfEventTarget)
 NS_INTERFACE_MAP_END_INHERITING(nsXHREventTarget)
 
 NS_IMPL_ADDREF_INHERITED(nsXMLHttpRequest, nsXHREventTarget)
@@ -654,6 +651,33 @@ nsXMLHttpRequest::DisconnectFromOwner()
 {
   nsXHREventTarget::DisconnectFromOwner();
   Abort();
+}
+
+size_t
+nsXMLHttpRequest::SizeOfEventTargetIncludingThis(
+  nsMallocSizeOfFun aMallocSizeOf) const
+{
+  size_t n = aMallocSizeOf(this);
+  n += mResponseBody.SizeOfExcludingThisIfUnshared(aMallocSizeOf);
+
+  // Why is this safe?  Because no-one else will report this string.  The
+  // other possible sharers of this string are as follows.
+  //
+  // - The JS engine could hold copies if the JS code holds references, e.g.
+  //   |var text = XHR.responseText|.  However, those references will be via JS
+  //   external strings, for which the JS memory reporter does *not* report the
+  //   chars.
+  //
+  // - Binary extensions, but they're *extremely* unlikely to do any memory
+  //   reporting.
+  //
+  n += mResponseText.SizeOfExcludingThisEvenIfShared(aMallocSizeOf);
+
+  return n;
+
+  // Measurement of the following members may be added later if DMD finds it is
+  // worthwhile:
+  // - lots
 }
 
 /* readonly attribute nsIChannel channel; */
@@ -1336,6 +1360,64 @@ nsXMLHttpRequest::SlowAbort()
   return NS_OK;
 }
 
+/*Method that checks if it is safe to expose a header value to the client.
+It is used to check what headers are exposed for CORS requests.*/
+bool
+nsXMLHttpRequest::IsSafeHeader(const nsACString& header, nsIHttpChannel* httpChannel)
+{
+  // See bug #380418. Hide "Set-Cookie" headers from non-chrome scripts.
+  if (!nsContentUtils::IsCallerChrome() &&
+       (header.LowerCaseEqualsASCII("set-cookie") ||
+        header.LowerCaseEqualsASCII("set-cookie2"))) {
+    NS_WARNING("blocked access to response header");
+    return false;
+  }
+  // if this is not a CORS call all headers are safe
+  if (!(mState & XML_HTTP_REQUEST_USE_XSITE_AC)){
+    return true;
+  }
+  // Check for dangerous headers
+  // Make sure we don't leak header information from denied cross-site
+  // requests.
+  if (mChannel) {
+    nsresult status;
+    mChannel->GetStatus(&status);
+    if (NS_FAILED(status)) {
+      return false;
+    }
+  }  
+  const char* kCrossOriginSafeHeaders[] = {
+    "cache-control", "content-language", "content-type", "expires",
+    "last-modified", "pragma"
+  };
+  for (uint32_t i = 0; i < ArrayLength(kCrossOriginSafeHeaders); ++i) {
+    if (header.LowerCaseEqualsASCII(kCrossOriginSafeHeaders[i])) {
+      return true;
+    }
+  }
+  nsAutoCString headerVal;
+  // The "Access-Control-Expose-Headers" header contains a comma separated
+  // list of method names.
+  httpChannel->
+      GetResponseHeader(NS_LITERAL_CSTRING("Access-Control-Expose-Headers"),
+                        headerVal);
+  nsCCharSeparatedTokenizer exposeTokens(headerVal, ',');
+  bool isSafe = false;
+  while (exposeTokens.hasMoreTokens()) {
+    const nsDependentCSubstring& token = exposeTokens.nextToken();
+    if (token.IsEmpty()) {
+      continue;
+    }
+    if (!IsValidHTTPToken(token)) {
+      return false;
+    }
+    if (header.Equals(token, nsCaseInsensitiveCStringComparator())) {
+      isSafe = true;
+    }
+  }
+  return isSafe;
+}
+
 /* DOMString getAllResponseHeaders(); */
 IMPL_STRING_GETTER(GetAllResponseHeaders)
 void
@@ -1350,12 +1432,8 @@ nsXMLHttpRequest::GetAllResponseHeaders(nsString& aResponseHeaders)
     return;
   }
 
-  if (mState & XML_HTTP_REQUEST_USE_XSITE_AC) {
-    return;
-  }
-
   if (nsCOMPtr<nsIHttpChannel> httpChannel = GetCurrentHttpChannel()) {
-    nsRefPtr<nsHeaderVisitor> visitor = new nsHeaderVisitor();
+    nsRefPtr<nsHeaderVisitor> visitor = new nsHeaderVisitor(this, httpChannel);
     if (NS_SUCCEEDED(httpChannel->VisitResponseHeaders(visitor))) {
       CopyASCIItoUTF16(visitor->Headers(), aResponseHeaders);
     }
@@ -1448,64 +1526,9 @@ nsXMLHttpRequest::GetResponseHeader(const nsACString& header,
     return;
   }
 
-  // See bug #380418. Hide "Set-Cookie" headers from non-chrome scripts.
-  if (!nsContentUtils::IsCallerChrome() &&
-       (header.LowerCaseEqualsASCII("set-cookie") ||
-        header.LowerCaseEqualsASCII("set-cookie2"))) {
-    NS_WARNING("blocked access to response header");
-    return;
-  }
-
   // Check for dangerous headers
-  if (mState & XML_HTTP_REQUEST_USE_XSITE_AC) {
-    // Make sure we don't leak header information from denied cross-site
-    // requests.
-    if (mChannel) {
-      nsresult status;
-      mChannel->GetStatus(&status);
-      if (NS_FAILED(status)) {
-        return;
-      }
-    }
-
-    const char *kCrossOriginSafeHeaders[] = {
-      "cache-control", "content-language", "content-type", "expires",
-      "last-modified", "pragma"
-    };
-    bool safeHeader = false;
-    uint32_t i;
-    for (i = 0; i < ArrayLength(kCrossOriginSafeHeaders); ++i) {
-      if (header.LowerCaseEqualsASCII(kCrossOriginSafeHeaders[i])) {
-        safeHeader = true;
-        break;
-      }
-    }
-
-    if (!safeHeader) {
-      nsAutoCString headerVal;
-      // The "Access-Control-Expose-Headers" header contains a comma separated
-      // list of method names.
-      httpChannel->
-        GetResponseHeader(NS_LITERAL_CSTRING("Access-Control-Expose-Headers"),
-                          headerVal);
-      nsCCharSeparatedTokenizer exposeTokens(headerVal, ',');
-      while(exposeTokens.hasMoreTokens()) {
-        const nsDependentCSubstring& token = exposeTokens.nextToken();
-        if (token.IsEmpty()) {
-          continue;
-        }
-        if (!IsValidHTTPToken(token)) {
-          return;
-        }
-        if (header.Equals(token, nsCaseInsensitiveCStringComparator())) {
-          safeHeader = true;
-        }
-      }
-    }
-
-    if (!safeHeader) {
-      return;
-    }
+  if (!IsSafeHeader(header, httpChannel)) {
+    return;
   }
 
   aRv = httpChannel->GetResponseHeader(header, _retval);
@@ -1636,8 +1659,17 @@ nsXMLHttpRequest::IsSystemXHR()
 nsresult
 nsXMLHttpRequest::CheckChannelForCrossSiteRequest(nsIChannel* aChannel)
 {
-  // First check if cross-site requests are enabled...
+  // A system XHR (chrome code or a web app with the right permission) can
+  // always perform cross-site requests. In the web app case, however, we
+  // must still check for protected URIs like file:///.
   if (IsSystemXHR()) {
+    if (!nsContentUtils::IsSystemPrincipal(mPrincipal)) {
+      nsIScriptSecurityManager *secMan = nsContentUtils::GetSecurityManager();
+      nsCOMPtr<nsIURI> uri;
+      aChannel->GetOriginalURI(getter_AddRefs(uri));
+      return secMan->CheckLoadURIWithPrincipal(
+        mPrincipal, uri, nsIScriptSecurityManager::STANDARD);
+    }
     return NS_OK;
   }
 
@@ -3503,15 +3535,7 @@ private:
   nsRefPtr<nsXMLHttpRequest> mXHR;
 };
 
-NS_IMPL_CYCLE_COLLECTION_CLASS(AsyncVerifyRedirectCallbackForwarder)
-
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(AsyncVerifyRedirectCallbackForwarder)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mXHR)
-NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
-
-NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(AsyncVerifyRedirectCallbackForwarder)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mXHR)
-NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+NS_IMPL_CYCLE_COLLECTION_1(AsyncVerifyRedirectCallbackForwarder, mXHR)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(AsyncVerifyRedirectCallbackForwarder)
   NS_INTERFACE_MAP_ENTRY(nsISupports)
@@ -3862,7 +3886,9 @@ nsXMLHttpRequest::GetInterface(JSContext* aCx, nsIJSID* aIID, ErrorResult& aRv)
   aRv = GetInterface(*iid, getter_AddRefs(result));
   NS_ENSURE_FALSE(aRv.Failed(), JSVAL_NULL);
 
-  JSObject* global = JS_GetGlobalForObject(aCx, GetWrapper());
+  JSObject* wrapper = GetWrapper();
+  JSAutoCompartment ac(aCx, wrapper);
+  JSObject* global = JS_GetGlobalForObject(aCx, wrapper);
   aRv = nsContentUtils::WrapNative(aCx, global, result, iid, &v);
   return aRv.Failed() ? JSVAL_NULL : v;
 }
@@ -3980,18 +4006,13 @@ NS_IMPL_ISUPPORTS1(nsXMLHttpRequest::nsHeaderVisitor, nsIHttpHeaderVisitor)
 NS_IMETHODIMP nsXMLHttpRequest::
 nsHeaderVisitor::VisitHeader(const nsACString &header, const nsACString &value)
 {
-    // See bug #380418. Hide "Set-Cookie" headers from non-chrome scripts.
-    if (!nsContentUtils::IsCallerChrome() &&
-         (header.LowerCaseEqualsASCII("set-cookie") ||
-          header.LowerCaseEqualsASCII("set-cookie2"))) {
-        NS_WARNING("blocked access to response header");
-    } else {
-        mHeaders.Append(header);
-        mHeaders.Append(": ");
-        mHeaders.Append(value);
-        mHeaders.Append("\r\n");
-    }
-    return NS_OK;
+  if (mXHR->IsSafeHeader(header, mHttpChannel)) {
+    mHeaders.Append(header);
+    mHeaders.Append(": ");
+    mHeaders.Append(value);
+    mHeaders.Append("\r\n");
+  }
+  return NS_OK;
 }
 
 // DOM event class to handle progress notifications
@@ -4008,8 +4029,6 @@ nsXMLHttpProgressEvent::nsXMLHttpProgressEvent(nsIDOMProgressEvent* aInner,
 
 nsXMLHttpProgressEvent::~nsXMLHttpProgressEvent()
 {}
-
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXMLHttpProgressEvent)
 
 DOMCI_DATA(XMLHttpProgressEvent, nsXMLHttpProgressEvent)
 
@@ -4087,8 +4106,6 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsXMLHttpRequestXPCOMifier)
 
 // Can't NS_IMPL_CYCLE_COLLECTION_1 because mXHR has ambiguous
 // inheritance from nsISupports.
-NS_IMPL_CYCLE_COLLECTION_CLASS(nsXMLHttpRequestXPCOMifier)
-
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsXMLHttpRequestXPCOMifier)
 if (tmp->mXHR) {
   tmp->mXHR->mXPCOMifier = nullptr;

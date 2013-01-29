@@ -35,7 +35,6 @@ function testVariablesFiltering()
   function test1()
   {
     write("*one");
-    ignoreExtraMatchedProperties();
 
     is(innerScope.querySelectorAll(".variable:not([non-match])").length, 1,
       "There should be 1 variable displayed in the inner scope");
@@ -45,8 +44,6 @@ function testVariablesFiltering()
       "There should be 0 variables displayed in the test scope");
     is(loadScope.querySelectorAll(".variable:not([non-match])").length, 1,
       "There should be 1 variable displayed in the load scope");
-    is(globalScope.querySelectorAll(".variable:not([non-match])").length, 3,
-      "There should be 3 variables displayed in the global scope");
 
     is(innerScope.querySelectorAll(".property:not([non-match])").length, 0,
       "There should be 0 properties displayed in the inner scope");
@@ -56,8 +53,6 @@ function testVariablesFiltering()
       "There should be 0 properties displayed in the test scope");
     is(loadScope.querySelectorAll(".property:not([non-match])").length, 0,
       "There should be 0 properties displayed in the load scope");
-    is(globalScope.querySelectorAll(".property:not([non-match])").length, 0,
-      "There should be 0 properties displayed in the global scope");
 
     is(innerScope.querySelectorAll(".variable:not([non-match]) > .title > .name")[0].getAttribute("value"),
       "one", "The only inner variable displayed should be 'one'");
@@ -69,7 +64,7 @@ function testVariablesFiltering()
     is(oneItem.expanded, false,
       "The one item in the inner scope should not be expanded");
 
-    EventUtils.sendKey("RETURN");
+    EventUtils.sendKey("RETURN", gDebugger);
     is(oneItem.expanded, true,
       "The one item in the inner scope should now be expanded");
   }
@@ -77,7 +72,6 @@ function testVariablesFiltering()
   function test2()
   {
     write("*two");
-    ignoreExtraMatchedProperties();
 
     is(innerScope.querySelectorAll(".variable:not([non-match])").length, 1,
       "There should be 1 variable displayed in the inner scope");
@@ -87,8 +81,6 @@ function testVariablesFiltering()
       "There should be 0 variables displayed in the test scope");
     is(loadScope.querySelectorAll(".variable:not([non-match])").length, 0,
       "There should be 0 variables displayed in the load scope");
-    is(globalScope.querySelectorAll(".variable:not([non-match])").length, 0,
-      "There should be 0 variables displayed in the global scope");
 
     is(innerScope.querySelectorAll(".property:not([non-match])").length, 0,
       "There should be 0 properties displayed in the inner scope");
@@ -98,8 +90,6 @@ function testVariablesFiltering()
       "There should be 0 properties displayed in the test scope");
     is(loadScope.querySelectorAll(".property:not([non-match])").length, 0,
       "There should be 0 properties displayed in the load scope");
-    is(globalScope.querySelectorAll(".property:not([non-match])").length, 0,
-      "There should be 0 properties displayed in the global scope");
 
     is(innerScope.querySelectorAll(".variable:not([non-match]) > .title > .name")[0].getAttribute("value"),
       "two", "The only inner variable displayed should be 'two'");
@@ -108,7 +98,7 @@ function testVariablesFiltering()
     is(twoItem.expanded, false,
       "The two item in the inner scope should not be expanded");
 
-    EventUtils.sendKey("RETURN");
+    EventUtils.sendKey("RETURN", gDebugger);
     is(twoItem.expanded, true,
       "The two item in the inner scope should now be expanded");
   }
@@ -116,7 +106,6 @@ function testVariablesFiltering()
   function test3()
   {
     backspace(3);
-    ignoreExtraMatchedProperties();
 
     is(gSearchBox.value, "*",
       "Searchbox value is incorrect after 3 backspaces");
@@ -147,7 +136,6 @@ function testVariablesFiltering()
   function test4()
   {
     backspace(1);
-    ignoreExtraMatchedProperties();
 
     is(gSearchBox.value, "",
       "Searchbox value is incorrect after 1 backspace");
@@ -260,19 +248,6 @@ function prepareVariables(aCallback)
     gDebuggee.window);
 }
 
-function ignoreExtraMatchedProperties()
-{
-  for (let [, item] of gDebugger.DebuggerView.Variables._currHierarchy) {
-    let name = item.name.toLowerCase();
-    let value = item._valueString || "";
-
-    if ((value.contains("DOM")) ||
-        (value.contains("XPC") && !name.contains("__proto__"))) {
-      item.target.setAttribute("non-match", "");
-    }
-  }
-}
-
 function clear() {
   gSearchBox.focus();
   gSearchBox.value = "";
@@ -285,7 +260,7 @@ function write(text) {
 
 function backspace(times) {
   for (let i = 0; i < times; i++) {
-    EventUtils.sendKey("BACK_SPACE")
+    EventUtils.sendKey("BACK_SPACE", gDebugger)
   }
 }
 
@@ -293,7 +268,7 @@ function append(text) {
   gSearchBox.focus();
 
   for (let i = 0; i < text.length; i++) {
-    EventUtils.sendChar(text[i]);
+    EventUtils.sendChar(text[i], gDebugger);
   }
 }
 

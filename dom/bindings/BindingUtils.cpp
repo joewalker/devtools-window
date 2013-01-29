@@ -17,6 +17,7 @@
 #include "WrapperFactory.h"
 #include "xpcprivate.h"
 #include "XPCQuickStubs.h"
+#include "XPCWrapper.h"
 #include "XrayWrapper.h"
 
 namespace mozilla {
@@ -492,6 +493,26 @@ NativeInterface2JSObjectAndThrowIfFailed(JSContext* aCx,
   return true;
 }
 
+bool
+TryPreserveWrapper(JSObject* obj)
+{
+  nsISupports* native;
+  if (UnwrapDOMObjectToISupports(obj, native)) {
+    nsWrapperCache* cache = nullptr;
+    CallQueryInterface(native, &cache);
+    if (cache) {
+      nsContentUtils::PreserveWrapper(native, cache);
+    }
+    return true;
+  }
+
+  // If this DOMClass is not cycle collected, then it isn't wrappercached,
+  // so it does not need to be preserved. If it is cycle collected, then
+  // we can't tell if it is wrappercached or not, so we just return false.
+  const DOMClass* domClass = GetDOMClass(obj);
+  return domClass && !domClass->mParticipant;
+}
+
 // Can only be called with the immediate prototype of the instance object. Can
 // only be called on the prototype of an object known to be a DOM instance.
 JSBool
@@ -572,7 +593,12 @@ QueryInterface(JSContext* cx, unsigned argc, JS::Value* vp)
     return WrapObject(cx, origObj, ci, &NS_GET_IID(nsIClassInfo), vp);
   }
 
-  // Lie, otherwise we need to check classinfo or QI
+  nsCOMPtr<nsISupports> unused;
+  nsresult rv = native->QueryInterface(*iid->GetID(), getter_AddRefs(unused));
+  if (NS_FAILED(rv)) {
+    return Throw<true>(cx, rv);
+  }
+
   *vp = thisv;
   return true;
 }
@@ -611,15 +637,15 @@ GetNativePropertyHooks(JSContext *cx, JSObject *obj, DOMObjectType& type)
 
 bool
 XrayResolveOwnProperty(JSContext* cx, JSObject* wrapper, JSObject* obj, jsid id,
-                       bool set, JSPropertyDescriptor* desc)
+                       JSPropertyDescriptor* desc, unsigned flags)
 {
   DOMObjectType type;
   const NativePropertyHooks *nativePropertyHooks =
     GetNativePropertyHooks(cx, obj, type);
 
   return type != eInstance || !nativePropertyHooks->mResolveOwnProperty ||
-         nativePropertyHooks->mResolveOwnProperty(cx, wrapper, obj, id, set,
-                                                  desc);
+         nativePropertyHooks->mResolveOwnProperty(cx, wrapper, obj, id, desc,
+                                                  flags);
 }
 
 static bool
@@ -1277,7 +1303,6 @@ public:
 private:
   JSObject* mOldReflector;
   JSObject* mNewReflector;
-  size_t mSlot;
 };
 
 nsresult
@@ -1412,6 +1437,54 @@ ReparentWrapper(JSContext* aCx, JSObject* aObj)
   }
 
   return NS_OK;
+}
+
+template<bool mainThread>
+inline JSObject*
+GetGlobalObject(JSContext* aCx, JSObject* aObject,
+                Maybe<JSAutoCompartment>& aAutoCompartment)
+{
+  if (js::IsWrapper(aObject)) {
+    aObject = XPCWrapper::Unwrap(aCx, aObject, false);
+    if (!aObject) {
+      Throw<mainThread>(aCx, NS_ERROR_XPC_SECURITY_MANAGER_VETO);
+      return nullptr;
+    }
+    aAutoCompartment.construct(aCx, aObject);
+  }
+
+  return JS_GetGlobalForObject(aCx, aObject);
+}
+
+GlobalObject::GlobalObject(JSContext* aCx, JSObject* aObject)
+  : mGlobalJSObject(aCx)
+{
+  Maybe<JSAutoCompartment> ac;
+  mGlobalJSObject = GetGlobalObject<true>(aCx, aObject, ac);
+  if (!mGlobalJSObject) {
+    return;
+  }
+
+  JS::Value val;
+  val.setObject(*mGlobalJSObject);
+
+  // Switch this to UnwrapDOMObjectToISupports once our global objects are
+  // using new bindings.
+  nsresult rv = xpc_qsUnwrapArg<nsISupports>(aCx, val, &mGlobalObject,
+                                             static_cast<nsISupports**>(getter_AddRefs(mGlobalObjectRef)),
+                                             &val);
+  if (NS_FAILED(rv)) {
+    mGlobalObject = nullptr;
+    Throw<true>(aCx, NS_ERROR_XPC_BAD_CONVERT_JS);
+  }
+}
+
+WorkerGlobalObject::WorkerGlobalObject(JSContext* aCx, JSObject* aObject)
+  : mGlobalJSObject(aCx),
+    mCx(aCx)
+{
+  Maybe<JSAutoCompartment> ac;
+  mGlobalJSObject = GetGlobalObject<false>(aCx, aObject, ac);
 }
 
 } // namespace dom

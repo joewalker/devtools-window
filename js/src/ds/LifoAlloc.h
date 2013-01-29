@@ -10,6 +10,7 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/DebugOnly.h"
+#include "mozilla/GuardObjects.h"
 
 /*
  * This data structure supports stacky LIFO allocation (mark/release and
@@ -181,8 +182,6 @@ class LifoAlloc
         last = end;
     }
 
-    bool ensureUnusedApproximateSlow(size_t n);
-
   public:
     explicit LifoAlloc(size_t defaultChunkSize) { reset(defaultChunkSize); }
 
@@ -245,7 +244,12 @@ class LifoAlloc
                 return true;
             chunk = chunk->next();
         }
-        return ensureUnusedApproximateSlow(n);
+        BumpChunk *latestBefore = latest;
+        if (!getOrCreateChunk(n))
+            return false;
+        if (latestBefore)
+            latest = latestBefore;
+        return true;
     }
 
     template <typename T>
@@ -349,13 +353,14 @@ class LifoAllocScope
     LifoAlloc   *lifoAlloc;
     void        *mark;
     bool        shouldRelease;
-    JS_DECL_USE_GUARD_OBJECT_NOTIFIER
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 
   public:
     explicit LifoAllocScope(LifoAlloc *lifoAlloc
-                            JS_GUARD_OBJECT_NOTIFIER_PARAM)
-      : lifoAlloc(lifoAlloc), shouldRelease(true) {
-        JS_GUARD_OBJECT_NOTIFIER_INIT;
+                            MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+      : lifoAlloc(lifoAlloc), shouldRelease(true)
+    {
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
         mark = lifoAlloc->mark();
     }
 

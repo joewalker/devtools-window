@@ -19,6 +19,8 @@
 #include "js/Utility.h"
 #include "js/Vector.h"
 
+class nsISupports;      // This is needed for ObjectPrivateVisitor.
+
 namespace js {
 
 // In memory reporting, we have concept of "sundries", line items which are too
@@ -118,22 +120,7 @@ struct HugeStringInfo
 // compartments within it.
 struct RuntimeSizes
 {
-    RuntimeSizes()
-      : object(0)
-      , atomsTable(0)
-      , contexts(0)
-      , dtoa(0)
-      , temporary(0)
-      , jaegerCode(0)
-      , ionCode(0)
-      , regexpCode(0)
-      , unusedCode(0)
-      , stack(0)
-      , gcMarker(0)
-      , mathCache(0)
-      , scriptFilenames(0)
-      , scriptSources(0)
-    {}
+    RuntimeSizes() { memset(this, 0, sizeof(RuntimeSizes)); }
 
     size_t object;
     size_t atomsTable;
@@ -144,6 +131,7 @@ struct RuntimeSizes
     size_t ionCode;
     size_t regexpCode;
     size_t unusedCode;
+    size_t regexpData;
     size_t stack;
     size_t gcMarker;
     size_t mathCache;
@@ -391,8 +379,17 @@ class ObjectPrivateVisitor
 {
 public:
     // Within CollectRuntimeStats, this method is called for each JS object
-    // that has a private slot containing an nsISupports pointer.
-    virtual size_t sizeOfIncludingThis(void *aSupports) = 0;
+    // that has an nsISupports pointer.
+    virtual size_t sizeOfIncludingThis(nsISupports *aSupports) = 0;
+
+    // A callback that gets a JSObject's nsISupports pointer, if it has one.
+    // Note: this function does *not* addref |iface|.
+    typedef JSBool(*GetISupportsFun)(JSObject *obj, nsISupports **iface);
+    GetISupportsFun getISupports;
+
+    ObjectPrivateVisitor(GetISupportsFun getISupports)
+      : getISupports(getISupports)
+    {}
 };
 
 extern JS_PUBLIC_API(bool)

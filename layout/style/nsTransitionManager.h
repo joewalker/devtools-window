@@ -24,7 +24,9 @@ struct ElementDependentRuleProcessorData;
 
 struct ElementPropertyTransition
 {
-  ElementPropertyTransition() {}
+  ElementPropertyTransition() 
+    : mIsRunningOnCompositor(false)
+  {}
 
   nsCSSProperty mProperty;
   nsStyleAnimation::Value mStartValue, mEndValue;
@@ -50,6 +52,10 @@ struct ElementPropertyTransition
   // in again when the transition is back to 2px, the mReversePortion
   // for the third transition (from 0px/2px to 10px) will be 0.8.
   double mReversePortion;
+  // true when the transition is running on the compositor. In particular,
+  // mIsRunningOnCompositor will be false if the transition has a delay and we
+  // are not yet at mStartTime, so there is no animation on the layer.
+  bool mIsRunningOnCompositor;
 
   // Compute the portion of the *value* space that we should be through
   // at the given time.  (The input to the transition timing function
@@ -214,12 +220,14 @@ private:
   // If the element has a transition, it is flushed back to its primary frame.
   // If the element does not have a transition, then its style is reparented.
   void UpdateThrottledStylesForSubtree(nsIContent* aContent,
-                                       nsStyleContext* aParentStyle);
+                                       nsStyleContext* aParentStyle,
+                                       nsStyleChangeList &aChangeList);
   // Update the style on aElement from the transition stored in this manager and
   // the new parent style - aParentStyle. aElement must be transitioning or
   // animated. Returns the updated style.
   nsStyleContext* UpdateThrottledStyle(mozilla::dom::Element* aElement,
-                                       nsStyleContext* aParentStyle);
+                                       nsStyleContext* aParentStyle,
+                                       nsStyleChangeList &aChangeList);
 };
 
 #endif /* !defined(nsTransitionManager_h_) */

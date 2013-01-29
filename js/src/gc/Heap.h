@@ -85,7 +85,9 @@ struct Cell
     MOZ_ALWAYS_INLINE bool markIfUnmarked(uint32_t color = BLACK) const;
     MOZ_ALWAYS_INLINE void unmark(uint32_t color) const;
 
+    inline JSRuntime *runtime() const;
     inline JSCompartment *compartment() const;
+    inline Zone *zone() const;
 
 #ifdef DEBUG
     inline bool isAligned() const;
@@ -444,12 +446,12 @@ struct ArenaHeader : public JS::shadow::ArenaHeader
         return allocKind < size_t(FINALIZE_LIMIT);
     }
 
-    void init(JSCompartment *comp, AllocKind kind) {
+    void init(Zone *zoneArg, AllocKind kind) {
         JS_ASSERT(!allocated());
         JS_ASSERT(!markOverflow);
         JS_ASSERT(!allocatedDuringIncremental);
         JS_ASSERT(!hasDelayedMarking);
-        compartment = comp;
+        zone = zoneArg;
 
         JS_STATIC_ASSERT(FINALIZE_LIMIT <= 255);
         allocKind = size_t(kind);
@@ -592,7 +594,7 @@ struct ChunkInfo
      * Calculating sizes and offsets is simpler if sizeof(ChunkInfo) is
      * architecture-independent.
      */
-    char            padding[12];
+    char            padding[16];
 #endif
 
     /*
@@ -610,6 +612,9 @@ struct ChunkInfo
 
     /* Number of GC cycles this chunk has survived. */
     uint32_t        age;
+
+    /* This is findable from any address in the Chunk by aligning to 1MiB. */
+    JSRuntime       *runtime;
 };
 
 /*
@@ -762,11 +767,11 @@ struct Chunk
         return info.numArenasFree != 0;
     }
 
-    inline void addToAvailableList(JSCompartment *compartment);
+    inline void addToAvailableList(Zone *zone);
     inline void insertToAvailableList(Chunk **insertPoint);
     inline void removeFromAvailableList();
 
-    ArenaHeader *allocateArena(JSCompartment *comp, AllocKind kind);
+    ArenaHeader *allocateArena(JS::Zone *zone, AllocKind kind);
 
     void releaseArena(ArenaHeader *aheader);
 
@@ -946,6 +951,12 @@ Cell::chunk() const
     return reinterpret_cast<Chunk *>(addr);
 }
 
+inline JSRuntime *
+Cell::runtime() const
+{
+    return chunk()->info.runtime;
+}
+
 AllocKind
 Cell::getAllocKind() const
 {
@@ -977,7 +988,13 @@ Cell::unmark(uint32_t color) const
 JSCompartment *
 Cell::compartment() const
 {
-    return arenaHeader()->compartment;
+    return arenaHeader()->zone;
+}
+
+Zone *
+Cell::zone() const
+{
+    return arenaHeader()->zone;
 }
 
 #ifdef DEBUG
@@ -987,6 +1004,36 @@ Cell::isAligned() const
     return Arena::isAligned(address(), arenaHeader()->getThingSize());
 }
 #endif
+
+inline bool
+InFreeList(ArenaHeader *aheader, void *thing)
+{
+    if (!aheader->hasFreeThings())
+        return false;
+
+    FreeSpan firstSpan(aheader->getFirstFreeSpan());
+    uintptr_t addr = reinterpret_cast<uintptr_t>(thing);
+
+    for (const FreeSpan *span = &firstSpan;;) {
+        /* If the thing comes before the current span, it's not free. */
+        if (addr < span->first)
+            return false;
+
+        /*
+         * If we find it inside the span, it's dead. We use here "<=" and not
+         * "<" even for the last span as we know that thing is inside the
+         * arena. Thus, for the last span thing < span->end.
+         */
+        if (addr <= span->last)
+            return true;
+
+        /*
+         * The last possible empty span is an the end of the arena. Here
+         * span->end < thing < thingsEnd and so we must have more spans.
+         */
+        span = span->nextSpan();
+    }
+}
 
 } /* namespace gc */
 } /* namespace js */

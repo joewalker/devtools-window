@@ -21,8 +21,8 @@ import android.text.TextUtils;
 import android.text.style.CharacterStyle;
 import android.util.Log;
 
-import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -77,9 +77,9 @@ final class GeckoEditable
     private final SpannableStringBuilder mText;
     private final SpannableStringBuilder mChangedText;
     private final Editable mProxy;
-    private final GeckoEditableListener mListener;
     private final ActionQueue mActionQueue;
 
+    private GeckoEditableListener mListener;
     private int mSavedSelectionStart;
     private volatile int mGeckoUpdateSeqno;
     private int mUIUpdateSeqno;
@@ -460,7 +460,7 @@ final class GeckoEditable
 
     // GeckoEditableListener interface
 
-    void geckoActionReply() {
+    private void geckoActionReply() {
         if (DEBUG) {
             // GeckoEditableListener methods should all be called from the Gecko thread
             GeckoApp.assertOnGeckoThread();
@@ -501,7 +501,6 @@ final class GeckoEditable
         if (action.mShouldUpdate) {
             geckoUpdateGecko(false);
         }
-        mActionQueue.poll();
     }
 
     @Override
@@ -511,7 +510,17 @@ final class GeckoEditable
             GeckoApp.assertOnGeckoThread();
         }
         if (type == NOTIFY_IME_REPLY_EVENT) {
-            geckoActionReply();
+            try {
+                if (mFocused) {
+                    // When mFocused is false, the reply is for a stale action,
+                    // and we should not do anything
+                    geckoActionReply();
+                }
+            } finally {
+                // Ensure action is always removed from queue
+                // even if stale action results in exception in geckoActionReply
+                mActionQueue.poll();
+            }
             return;
         }
         geckoPostToUI(new Runnable() {
@@ -523,8 +532,6 @@ final class GeckoEditable
                         mFocused = false;
                     } else {
                         mFocused = true;
-                        LayerView v = GeckoApp.mAppContext.getLayerView();
-                        v.setInputConnectionHandler((InputConnectionHandler)mListener);
                         // Unmask events on the Gecko side
                         GeckoAppShell.sendEventToGecko(GeckoEvent.createIMEEvent(
                                 GeckoEvent.IME_ACKNOWLEDGE_FOCUS));
@@ -538,16 +545,21 @@ final class GeckoEditable
     @Override
     public void notifyIMEEnabled(final int state, final String typeHint,
                           final String modeHint, final String actionHint) {
-        if (DEBUG) {
-            // GeckoEditableListener methods should all be called from the Gecko thread
-            GeckoApp.assertOnGeckoThread();
-        }
+        // Because we want to be able to bind GeckoEditable to the newest LayerView instance,
+        // this can be called from the Java UI thread in addition to the Gecko thread.
         geckoPostToUI(new Runnable() {
             public void run() {
                 // Make sure there are no other things going on
                 mActionQueue.syncWithGecko();
-                mListener.notifyIMEEnabled(state, typeHint,
-                                           modeHint, actionHint);
+                // Set InputConnectionHandler in notifyIMEEnabled because
+                // GeckoInputConnection.notifyIMEEnabled calls restartInput() which will invoke
+                // InputConnectionHandler.onCreateInputConnection
+                LayerView v = GeckoApp.mAppContext.getLayerView();
+                if (v != null) {
+                    mListener = GeckoInputConnection.create(v, GeckoEditable.this);
+                    v.setInputConnectionHandler((InputConnectionHandler)mListener);
+                    mListener.notifyIMEEnabled(state, typeHint, modeHint, actionHint);
+                }
             }
         });
     }
@@ -716,7 +728,30 @@ final class GeckoEditable
             mActionQueue.syncWithGecko();
             target = mText;
         }
-        Object ret = method.invoke(target, args);
+        Object ret;
+        try {
+            ret = method.invoke(target, args);
+        } catch (InvocationTargetException e) {
+            // Bug 817386
+            // Most likely Gecko has changed the text while GeckoInputConnection is
+            // trying to access the text. If we pass through the exception here, Fennec
+            // will crash due to a lack of exception handler. Log the exception and
+            // return an empty value instead.
+            if (!(e.getCause() instanceof IndexOutOfBoundsException)) {
+                // Only handle IndexOutOfBoundsException for now,
+                // as other exceptions might signal other bugs
+                throw e;
+            }
+            Log.w(LOGTAG, "Exception in GeckoEditable." + method.getName(), e.getCause());
+            Class<?> retClass = method.getReturnType();
+            if (retClass != Void.TYPE && retClass.isPrimitive()) {
+                ret = retClass.newInstance();
+            } else if (retClass == String.class) {
+                ret = "";
+            } else {
+                ret = null;
+            }
+        }
         if (DEBUG) {
             StringBuilder log = new StringBuilder(method.getName());
             log.append("(");

@@ -10,13 +10,14 @@
 
 #include "mozilla/CheckedInt.h"
 #include "mozilla/Attributes.h"
+#include <algorithm>
 
 class nsDOMMultipartFile : public nsDOMFile,
                            public nsIJSNativeInitializer
 {
 public:
   // Create as a file
-  nsDOMMultipartFile(nsTArray<nsCOMPtr<nsIDOMBlob> > aBlobs,
+  nsDOMMultipartFile(nsTArray<nsCOMPtr<nsIDOMBlob> >& aBlobs,
                      const nsAString& aName,
                      const nsAString& aContentType)
     : nsDOMFile(aName, aContentType, UINT64_MAX),
@@ -33,14 +34,15 @@ public:
   }
 
   // Create as a file to be later initialized
-  nsDOMMultipartFile(const nsAString& aName)
-    : nsDOMFile(aName, EmptyString(), UINT64_MAX)
+  nsDOMMultipartFile(const nsAString& aName,
+                     const nsAString& aContentType)
+    : nsDOMFile(aName, aContentType, UINT64_MAX)
   {
   }
 
   // Create as a blob to be later initialized
-  nsDOMMultipartFile()
-    : nsDOMFile(EmptyString(), UINT64_MAX)
+  nsDOMMultipartFile(const nsAString& aContentType)
+    : nsDOMFile(aContentType, UINT64_MAX)
   {
   }
 
@@ -88,6 +90,12 @@ public:
   virtual const nsTArray<nsCOMPtr<nsIDOMBlob> >*
   GetSubBlobs() const { return &mBlobs; }
 
+  void
+  AddBlob(nsIDOMBlob* aBlob)
+  {
+    mBlobs.AppendElement(aBlob);
+  }
+
 protected:
   nsTArray<nsCOMPtr<nsIDOMBlob> > mBlobs;
 };
@@ -125,7 +133,8 @@ protected:
     }
 
     // Start at 1 or we'll loop forever.
-    CheckedUint32 bufferLen = NS_MAX<uint32_t>(mDataBufferLen, 1);
+    CheckedUint32 bufferLen =
+      std::max<uint32_t>(static_cast<uint32_t>(mDataBufferLen), 1);
     while (bufferLen.isValid() && bufferLen.value() < mDataLen + aSize)
       bufferLen *= 2;
 

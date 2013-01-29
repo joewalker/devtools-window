@@ -8,18 +8,13 @@ package org.mozilla.gecko;
 import org.mozilla.gecko.gfx.BitmapUtils;
 import org.mozilla.gecko.util.GeckoEventListener;
 
-import org.json.JSONException;
 import org.json.JSONObject;
 
 import android.app.Application;
-import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.Canvas;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.BitmapDrawable;
-import android.graphics.drawable.ColorDrawable;
-import android.graphics.drawable.LayerDrawable;
 import android.graphics.Rect;
 import android.graphics.Shader;
 import android.os.Build;
@@ -29,7 +24,6 @@ import android.view.View;
 import android.view.ViewParent;
 
 import java.net.URL;
-import java.net.URLConnection;
 import java.io.InputStream;
 import java.util.List;
 import java.util.ArrayList;
@@ -113,18 +107,20 @@ public class LightweightTheme implements GeckoEventListener {
     }
 
     public void resetLightweightTheme() {
-        // Reset the bitmap.
-        mBitmap = null;
+        if (mBitmap != null) {
+            // Reset the bitmap.
+            mBitmap = null;
 
-        // Post the reset on the UI thread.
-        for (OnChangeListener listener : mListeners) {
-             final OnChangeListener oneListener = listener;
-             oneListener.post(new Runnable() {
-                 @Override
-                 public void run() {
-                     oneListener.onLightweightThemeReset();
-                 }
-             });
+            // Post the reset on the UI thread.
+            for (OnChangeListener listener : mListeners) {
+                 final OnChangeListener oneListener = listener;
+                 oneListener.post(new Runnable() {
+                     @Override
+                     public void run() {
+                         oneListener.onLightweightThemeReset();
+                     }
+                 });
+            }
         }
     }
 
@@ -162,6 +158,21 @@ public class LightweightTheme implements GeckoEventListener {
         }
     }
 
+
+    /**
+     * A lightweight theme is enabled only if there is an active bitmap.
+     *
+     * @return True if the theme is enabled.
+     */
+    public boolean isEnabled() {
+        return (mBitmap != null);
+    }
+
+    /**
+     * Based on the luminance of the domanint color, a theme is classified as light or dark.
+     *
+     * @return True if the theme is light.
+     */
     public boolean isLightTheme() {
         return mIsLight;
     }

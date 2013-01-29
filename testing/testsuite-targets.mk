@@ -241,7 +241,7 @@ jstestbrowser:
 	$(MAKE) -C $(DEPTH)/config
 	$(MAKE) -C $(DEPTH)/js/src/config
 	$(MAKE) stage-jstests
-	$(call RUN_REFTEST,$(DIST)/$(TESTS_PATH)/jstests.list --extra-profile-file=$(DIST)/$(TESTS_PATH)/user.js)
+	$(call RUN_REFTEST,$(DIST)/$(TESTS_PATH)/jstests.list --extra-profile-file=$(DIST)/test-package-stage/jsreftest/tests/user.js)
 	$(CHECK_TEST_ERROR)
 
 GARBAGE += $(addsuffix .log,$(MOCHITESTS) reftest crashtest jstestbrowser)
@@ -327,6 +327,23 @@ peptest:
 	$(RUN_PEPTEST)
 	$(CHECK_TEST_ERROR)
 
+REMOTE_CPPUNITTESTS = \
+	$(PYTHON) -u $(topsrcdir)/testing/remotecppunittests.py \
+	  --xre-path=$(DEPTH)/dist/bin \
+	  --localLib=$(DEPTH)/dist/fennec \
+	  --dm_trans=$(DM_TRANS) \
+	  --deviceIP=${TEST_DEVICE} \
+	  $(TEST_PATH) $(EXTRA_TEST_ARGS)
+
+# Usage: |make [TEST_PATH=...] [EXTRA_TEST_ARGS=...] cppunittests-remote|.
+cppunittests-remote: DM_TRANS?=adb
+cppunittests-remote:
+	@if [ "${TEST_DEVICE}" != "" -o "$(DM_TRANS)" = "adb" ]; \
+          then $(call REMOTE_CPPUNITTESTS); \
+        else \
+          echo "please prepare your host with environment variables for TEST_DEVICE"; \
+        fi
+
 # Package up the tests and test harnesses
 include $(topsrcdir)/toolkit/mozapps/installer/package-name.mk
 
@@ -366,6 +383,10 @@ ifeq ($(MOZ_WIDGET_TOOLKIT),android)
 package-tests: stage-android
 endif
 
+ifeq ($(MOZ_WIDGET_TOOLKIT),gonk)
+package-tests: stage-b2g
+endif
+
 make-stage-dir:
 	rm -rf $(PKG_STAGE)
 	$(NSINSTALL) -D $(PKG_STAGE)
@@ -376,6 +397,9 @@ make-stage-dir:
 	$(NSINSTALL) -D $(PKG_STAGE)/peptest
 	$(NSINSTALL) -D $(PKG_STAGE)/mozbase
 	$(NSINSTALL) -D $(PKG_STAGE)/modules
+
+stage-b2g: make-stage-dir
+	$(NSINSTALL) $(topsrcdir)/b2g/test/b2g-unittest-requirements.txt $(PKG_STAGE)/b2g
 
 robotium-id-map:
 ifeq ($(MOZ_BUILD_APP),mobile/android)
@@ -445,6 +469,7 @@ stage-mozbase: make-stage-dir
   peptest \
   package-tests \
   make-stage-dir \
+  stage-b2g \
   stage-mochitest \
   stage-reftest \
   stage-xpcshell \

@@ -103,17 +103,18 @@ var tests = {
     Social.provider.setAmbientNotification(ambience2);
     Social.provider.setAmbientNotification(ambience3);
 
-    let statusIcon = document.querySelector("#social-toolbar-item > box");
+    let statusIcon = document.querySelector("#social-toolbar-item > .social-notification-container > .toolbarbutton-1");
     waitForCondition(function() {
-      statusIcon = document.querySelector("#social-toolbar-item > box");
+      statusIcon = document.querySelector("#social-toolbar-item > .social-notification-container > .toolbarbutton-1");
       return !!statusIcon;
     }, function () {
-      let statusIconLabel = statusIcon.querySelector("label");
-      is(statusIconLabel.value, "42", "status value is correct");
+      let badge = statusIcon.getAttribute("badge");
+      is(badge, "42", "status value is correct");
 
       ambience.counter = 0;
       Social.provider.setAmbientNotification(ambience);
-      is(statusIconLabel.value, "", "status value is correct");
+      badge = statusIcon.getAttribute("badge");
+      is(badge, "", "status value is correct");
 
       // The menu bar isn't as easy to instrument on Mac.
       if (navigator.platform.contains("Mac"))
@@ -155,6 +156,15 @@ var tests = {
     let removeSocialMenuitems = document.getElementsByClassName("social-remove-menuitem");
     is(removeSocialMenuitems.length, 2, "Remove Social menuitems exist");
     next();
-  }
+  },
+  testToggleNotifications: function(next) {
+    let enabled = Services.prefs.getBoolPref("social.toast-notifications.enabled");
+    let cmd = document.getElementById("Social:ToggleNotifications");
+    is(cmd.getAttribute("checked"), enabled ? "true" : "false");
+    enabled = !enabled;
+    Services.prefs.setBoolPref("social.toast-notifications.enabled", enabled);
+    is(cmd.getAttribute("checked"), enabled ? "true" : "false");
+    Services.prefs.clearUserPref("social.toast-notifications.enabled");
+    next();
+  },
 }
-

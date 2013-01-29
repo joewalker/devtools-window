@@ -48,7 +48,7 @@ nsContentPermissionRequestProxy::OnParentDestroyed()
   mParent = nullptr;
 }
 
-NS_IMPL_ISUPPORTS1(nsContentPermissionRequestProxy, nsIContentPermissionRequest);
+NS_IMPL_ISUPPORTS1(nsContentPermissionRequestProxy, nsIContentPermissionRequest)
 
 NS_IMETHODIMP
 nsContentPermissionRequestProxy::GetType(nsACString & aType)
@@ -154,7 +154,9 @@ ContentPermissionRequestParent::Recvprompt()
 void
 ContentPermissionRequestParent::ActorDestroy(ActorDestroyReason why)
 {
-  mProxy->OnParentDestroyed();
+  if (mProxy) {
+    mProxy->OnParentDestroyed();
+  }
 }
 
 } // namespace dom

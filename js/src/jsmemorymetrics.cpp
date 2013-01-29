@@ -14,13 +14,13 @@
 #include "jscompartment.h"
 #include "jsgc.h"
 #include "jsobj.h"
-#include "jsscope.h"
 #include "jsscript.h"
 
-#include "jsobjinlines.h"
-
-#include "ion/IonCode.h"
 #include "ion/Ion.h"
+#include "ion/IonCode.h"
+#include "vm/Shape.h"
+
+#include "jsobjinlines.h"
 
 using namespace js;
 
@@ -142,10 +142,8 @@ StatsCellCallback(JSRuntime *rt, void *data, void *thing, JSGCTraceKind traceKin
         JSObject *obj = static_cast<JSObject *>(thing);
         if (obj->isFunction()) {
             cStats->gcHeapObjectsFunction += thingSize;
-        } else if (obj->isDenseArray()) {
+        } else if (obj->isArray()) {
             cStats->gcHeapObjectsDenseArray += thingSize;
-        } else if (obj->isSlowArray()) {
-            cStats->gcHeapObjectsSlowArray += thingSize;
         } else if (obj->isCrossCompartmentWrapper()) {
             cStats->gcHeapObjectsCrossCompartmentWrapper += thingSize;
         } else {
@@ -159,11 +157,9 @@ StatsCellCallback(JSRuntime *rt, void *data, void *thing, JSGCTraceKind traceKin
         // JSObject::sizeOfExcludingThis() doesn't measure objectsExtraPrivate,
         // so we do it here.
         if (ObjectPrivateVisitor *opv = closure->opv) {
-            js::Class *clazz = js::GetObjectClass(obj);
-            if (clazz->flags & JSCLASS_HAS_PRIVATE &&
-                clazz->flags & JSCLASS_PRIVATE_IS_NSISUPPORTS)
-            {
-                cStats->objectsExtra.private_ += opv->sizeOfIncludingThis(GetObjectPrivate(obj));
+            nsISupports *iface;
+            if (opv->getISupports(obj, &iface) && iface) {
+                cStats->objectsExtra.private_ += opv->sizeOfIncludingThis(iface);
             }
         }
         break;
@@ -338,7 +334,7 @@ JS::SystemCompartmentCount(const JSRuntime *rt)
 {
     size_t n = 0;
     for (size_t i = 0; i < rt->compartments.length(); i++) {
-        if (rt->compartments[i]->isSystemCompartment)
+        if (rt->compartments[i]->zone()->isSystem)
             ++n;
     }
     return n;
@@ -349,7 +345,7 @@ JS::UserCompartmentCount(const JSRuntime *rt)
 {
     size_t n = 0;
     for (size_t i = 0; i < rt->compartments.length(); i++) {
-        if (!rt->compartments[i]->isSystemCompartment)
+        if (!rt->compartments[i]->zone()->isSystem)
             ++n;
     }
     return n;

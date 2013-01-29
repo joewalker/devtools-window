@@ -17,6 +17,7 @@
 #include "Layers.h"
 #include "ImageTypes.h"
 #include "ImageContainer.h"
+#include "VideoUtils.h"
 #endif
 
 #include "logging.h"
@@ -50,6 +51,17 @@ static char kDTLSExporterLabel[] = "EXTRACTOR-dtls_srtp";
 
 nsresult MediaPipeline::Init() {
   ASSERT_ON_THREAD(main_thread_);
+
+  // TODO(ekr@rtfm.com): is there a way to make this async?
+  nsresult ret;
+  RUN_ON_THREAD(sts_thread_,
+		WrapRunnableRet(this, &MediaPipeline::Init_s, &ret),
+		NS_DISPATCH_SYNC);
+  return ret;
+}
+
+nsresult MediaPipeline::Init_s() {
+  ASSERT_ON_THREAD(sts_thread_);
   conduit_->AttachTransport(transport_);
 
   MOZ_ASSERT(rtp_transport_);
@@ -89,6 +101,7 @@ nsresult MediaPipeline::Init() {
 void MediaPipeline::DetachTransport_s() {
   ASSERT_ON_THREAD(sts_thread_);
 
+  disconnect_all();
   transport_->Detach();
   rtp_transport_ = NULL;
   rtcp_transport_ = NULL;
@@ -464,11 +477,17 @@ void MediaPipeline::PacketReceived(TransportLayer *layer,
 }
 
 nsresult MediaPipelineTransmit::Init() {
+  char track_id_string[11];
   ASSERT_ON_THREAD(main_thread_);
+
+  // We can replace this when we are allowed to do streams or std::to_string
+  PR_snprintf(track_id_string, sizeof(track_id_string), "%d", track_id_);
 
   description_ = pc_ + "| ";
   description_ += conduit_->type() == MediaSessionConduit::AUDIO ?
-      "Transmit audio" : "Transmit video";
+      "Transmit audio[" : "Transmit video[";
+  description_ += track_id_string;
+  description_ += "]";
 
   // TODO(ekr@rtfm.com): Check for errors
   MOZ_MTLOG(PR_LOG_DEBUG, "Attaching pipeline to stream "
@@ -485,7 +504,7 @@ nsresult MediaPipelineTransmit::Init() {
 nsresult MediaPipelineTransmit::TransportReady(TransportFlow *flow) {
   // Call base ready function.
   MediaPipeline::TransportReady(flow);
-  
+
   if (flow == rtp_transport_) {
     // TODO(ekr@rtfm.com): Move onto MSG thread.
     listener_->SetActive(true);
@@ -496,17 +515,16 @@ nsresult MediaPipelineTransmit::TransportReady(TransportFlow *flow) {
 
 nsresult MediaPipeline::PipelineTransport::SendRtpPacket(
     const void *data, int len) {
-    nsresult ret;
 
     nsAutoPtr<DataBuffer> buf(new DataBuffer(static_cast<const uint8_t *>(data),
                                              len));
 
     RUN_ON_THREAD(sts_thread_,
-		  WrapRunnableRet(
+                  WrapRunnable(
                       RefPtr<MediaPipeline::PipelineTransport>(this),
-		      &MediaPipeline::PipelineTransport::SendRtpPacket_s,
-                      buf, &ret),
-      NS_DISPATCH_NORMAL);
+                      &MediaPipeline::PipelineTransport::SendRtpPacket_s,
+                      buf),
+                  NS_DISPATCH_NORMAL);
 
     return NS_OK;
 }
@@ -548,17 +566,16 @@ nsresult MediaPipeline::PipelineTransport::SendRtpPacket_s(
 
 nsresult MediaPipeline::PipelineTransport::SendRtcpPacket(
     const void *data, int len) {
-    nsresult ret;
 
     nsAutoPtr<DataBuffer> buf(new DataBuffer(static_cast<const uint8_t *>(data),
                                              len));
 
     RUN_ON_THREAD(sts_thread_,
-		  WrapRunnableRet(
+                  WrapRunnable(
                       RefPtr<MediaPipeline::PipelineTransport>(this),
-		      &MediaPipeline::PipelineTransport::SendRtcpPacket_s,
-		      buf, &ret),
-		  NS_DISPATCH_NORMAL);
+                      &MediaPipeline::PipelineTransport::SendRtcpPacket_s,
+                      buf),
+                  NS_DISPATCH_NORMAL);
 
     return NS_OK;
 }
@@ -607,7 +624,7 @@ NotifyQueuedTrackChanges(MediaStreamGraph* graph, TrackID tid,
   MOZ_MTLOG(PR_LOG_DEBUG, "MediaPipeline::NotifyQueuedTrackChanges()");
 
   if (!active_) {
-    MOZ_MTLOG(PR_LOG_DEBUG, "Discarding packets because transport not ready");    
+    MOZ_MTLOG(PR_LOG_DEBUG, "Discarding packets because transport not ready");
     return;
   }
 
@@ -657,7 +674,7 @@ void MediaPipelineTransmit::PipelineListener::ProcessAudioChunk(
   nsAutoArrayPtr<int16_t> samples(new int16_t[chunk.mDuration]);
 
   if (chunk.mBuffer) {
-    switch(chunk.mBufferFormat) {
+    switch (chunk.mBufferFormat) {
       case AUDIO_FORMAT_FLOAT32:
         MOZ_MTLOG(PR_LOG_ERROR, "Can't process audio except in 16-bit PCM yet");
         MOZ_ASSERT(PR_FALSE);
@@ -665,7 +682,7 @@ void MediaPipelineTransmit::PipelineListener::ProcessAudioChunk(
         break;
       case AUDIO_FORMAT_S16:
         {
-          const short* buf = static_cast<const short *>(chunk.mBuffer->Data());
+          const short* buf = static_cast<const short *>(chunk.mChannelData[0]);
           ConvertAudioSamplesWithScale(buf, samples, chunk.mDuration, chunk.mVolume);
         }
         break;
@@ -681,8 +698,66 @@ void MediaPipelineTransmit::PipelineListener::ProcessAudioChunk(
     }
   }
 
-  MOZ_MTLOG(PR_LOG_DEBUG, "Sending an audio frame");
-  conduit->SendAudioFrame(samples.get(), chunk.mDuration, rate, 0);
+  MOZ_ASSERT(!(rate%100)); // rate should be a multiple of 100
+
+  // Check if the rate has changed since the last time we came through
+  // I realize it may be overkill to check if the rate has changed, but
+  // I believe it is possible (e.g. if we change sources) and it costs us
+  // very little to handle this case
+
+  if (samplenum_10ms_ !=  rate/100) {
+    // Determine number of samples in 10 ms from the rate:
+    samplenum_10ms_ = rate/100;
+    // If we switch sample rates (e.g. if we switch codecs),
+    // we throw away what was in the sample_10ms_buffer at the old rate
+    samples_10ms_buffer_ = new int16_t[samplenum_10ms_];
+    buffer_current_ = 0;
+  }
+
+  // Vars to handle the non-sunny-day case (where the audio chunks
+  // we got are not multiples of 10ms OR there were samples left over
+  // from the last run)
+  int64_t chunk_remaining;
+  int64_t tocpy;
+  int16_t *samples_tmp = samples.get();
+
+  chunk_remaining = chunk.mDuration;
+
+  MOZ_ASSERT(chunk_remaining >= 0);
+
+  if (buffer_current_) {
+    tocpy = std::min(chunk_remaining, samplenum_10ms_ - buffer_current_);
+    memcpy(&samples_10ms_buffer_[buffer_current_], samples_tmp, tocpy * sizeof(int16_t));
+    buffer_current_ += tocpy;
+    samples_tmp += tocpy;
+    chunk_remaining -= tocpy;
+
+    if (buffer_current_ == samplenum_10ms_) {
+      // Send out the audio buffer we just finished filling
+      conduit->SendAudioFrame(samples_10ms_buffer_, samplenum_10ms_, rate, 0);
+      buffer_current_ = 0;
+    } else {
+      // We still don't have enough data to send a buffer
+      return;
+    }
+  }
+
+  // Now send (more) frames if there is more than 10ms of input left
+  tocpy = (chunk_remaining / samplenum_10ms_) * samplenum_10ms_;
+  if (tocpy > 0) {
+    conduit->SendAudioFrame(samples_tmp, tocpy, rate, 0);
+    samples_tmp += tocpy;
+    chunk_remaining -= tocpy;
+  }
+  // Copy what remains for the next run
+
+  MOZ_ASSERT(chunk_remaining < samplenum_10ms_);
+
+  if (chunk_remaining) {
+    memcpy(samples_10ms_buffer_, samples_tmp, chunk_remaining * sizeof(int16_t));
+    buffer_current_ = chunk_remaining;
+  }
+
 }
 
 #ifdef MOZILLA_INTERNAL_API
@@ -742,49 +817,54 @@ void MediaPipelineTransmit::PipelineListener::ProcessVideoChunk(
 #endif
 
 nsresult MediaPipelineReceiveAudio::Init() {
+  char track_id_string[11];
   ASSERT_ON_THREAD(main_thread_);
   MOZ_MTLOG(PR_LOG_DEBUG, __FUNCTION__);
 
-  description_ = pc_ + "| Receive audio";
+  // We can replace this when we are allowed to do streams or std::to_string
+  PR_snprintf(track_id_string, sizeof(track_id_string), "%d", track_id_);
+
+  description_ = pc_ + "| Receive audio[";
+  description_ += track_id_string;
+  description_ += "]";
 
   stream_->AddListener(listener_);
 
   return MediaPipelineReceive::Init();
 }
 
+
+MediaPipelineReceiveAudio::PipelineListener::PipelineListener(
+    SourceMediaStream * source, TrackID track_id,
+    const RefPtr<MediaSessionConduit>& conduit)
+    : source_(source),
+      track_id_(track_id),
+      conduit_(conduit),
+      played_(0) {
+  mozilla::AudioSegment *segment = new mozilla::AudioSegment();
+  segment->Init(1); // 1 Channel
+  source_->AddTrack(track_id_, 16000, 0, segment);
+  source_->AdvanceKnownTracksTime(STREAM_TIME_MAX);
+}
+
 void MediaPipelineReceiveAudio::PipelineListener::
-NotifyPull(MediaStreamGraph* graph, StreamTime total) {
+NotifyPull(MediaStreamGraph* graph, StreamTime desired_time) {
   MOZ_ASSERT(source_);
   if (!source_) {
     MOZ_MTLOG(PR_LOG_ERROR, "NotifyPull() called from a non-SourceMediaStream");
     return;
   }
 
-  // "total" is absolute stream time.
-  // StreamTime desired = total - played_;
-  played_ = total;
-  //double time_s = MediaTimeToSeconds(desired);
-
-  // Number of 10 ms samples we need
-  //int num_samples = ceil(time_s / .01f);
-
-  // Doesn't matter what was asked for, always give 160 samples per 10 ms.
-  int num_samples = 1;
-
-  MOZ_MTLOG(PR_LOG_DEBUG, "Asking for " << num_samples << "sample from Audio Conduit");
-
-  if (num_samples <= 0) {
-    return;
-  }
-
-  while (num_samples--) {
+  // This comparison is done in total time to avoid accumulated roundoff errors.
+  while (MillisecondsToMediaTime(played_) < desired_time) {
     // TODO(ekr@rtfm.com): Is there a way to avoid mallocating here?
     nsRefPtr<SharedBuffer> samples = SharedBuffer::Create(1000);
+    int16_t *samples_data = static_cast<int16_t *>(samples->Data());
     int samples_length;
 
     MediaConduitErrorCode err =
         static_cast<AudioSessionConduit*>(conduit_.get())->GetAudioFrame(
-            static_cast<int16_t *>(samples->Data()),
+            samples_data,
             16000,  // Sampling rate fixed at 16 kHz for now
             0,  // TODO(ekr@rtfm.com): better estimate of capture delay
             samples_length);
@@ -796,19 +876,29 @@ NotifyPull(MediaStreamGraph* graph, StreamTime total) {
 
     AudioSegment segment;
     segment.Init(1);
-    segment.AppendFrames(samples.forget(), samples_length,
-                         0, samples_length, AUDIO_FORMAT_S16);
+    nsAutoTArray<const int16_t*,1> channels;
+    channels.AppendElement(samples_data);
+    segment.AppendFrames(samples.forget(), channels, samples_length);
 
-    source_->AppendToTrack(1,  // TODO(ekr@rtfm.com): Track ID
-                           &segment);
+    source_->AppendToTrack(track_id_, &segment);
+
+    played_ += 10;
   }
 }
 
 nsresult MediaPipelineReceiveVideo::Init() {
+  char track_id_string[11];
   ASSERT_ON_THREAD(main_thread_);
   MOZ_MTLOG(PR_LOG_DEBUG, __FUNCTION__);
 
-  description_ = pc_ + "| Receive video";
+  // We can replace this when we are allowed to do streams or std::to_string
+  PR_snprintf(track_id_string, sizeof(track_id_string), "%d", track_id_);
+
+  description_ = pc_ + "| Receive video[";
+  description_ += track_id_string;
+  description_ += "]";
+
+  stream_->AddListener(listener_);
 
   static_cast<VideoSessionConduit *>(conduit_.get())->
       AttachRenderer(renderer_);
@@ -816,28 +906,32 @@ nsresult MediaPipelineReceiveVideo::Init() {
   return MediaPipelineReceive::Init();
 }
 
-MediaPipelineReceiveVideo::PipelineRenderer::PipelineRenderer(
-    MediaPipelineReceiveVideo *pipeline) :
-    pipeline_(pipeline),
-    width_(640), height_(480) {
-
+MediaPipelineReceiveVideo::PipelineListener::PipelineListener(
+  SourceMediaStream* source, TrackID track_id)
+    : source_(source),
+      track_id_(track_id),
+      played_(0),
+      width_(640),
+      height_(480),
+#ifdef MOZILLA_INTERNAL_API
+      image_container_(),
+      image_(),
+#endif
+      monitor_("Video PipelineListener") {
 #ifdef MOZILLA_INTERNAL_API
   image_container_ = layers::LayerManager::CreateImageContainer();
-  SourceMediaStream *source =
-      pipeline_->stream_->AsSourceStream();
-  source->AddTrack(1 /* Track ID */, 30, 0, new VideoSegment());
-  source->AdvanceKnownTracksTime(STREAM_TIME_MAX);
+  source_->AddTrack(track_id_, USECS_PER_S, 0, new VideoSegment());
+  source_->AdvanceKnownTracksTime(STREAM_TIME_MAX);
 #endif
 }
 
-void MediaPipelineReceiveVideo::PipelineRenderer::RenderVideoFrame(
+void MediaPipelineReceiveVideo::PipelineListener::RenderVideoFrame(
     const unsigned char* buffer,
     unsigned int buffer_size,
     uint32_t time_stamp,
     int64_t render_time) {
 #ifdef MOZILLA_INTERNAL_API
-  SourceMediaStream *source =
-      pipeline_->stream_->AsSourceStream();
+  ReentrantMonitorAutoEnter enter(monitor_);
 
   // Create a video frame and append it to the track.
   ImageFormat format = PLANAR_YCBCR;
@@ -863,15 +957,32 @@ void MediaPipelineReceiveVideo::PipelineRenderer::RenderVideoFrame(
 
   videoImage->SetData(data);
 
-  VideoSegment segment;
-  char buf[32];
-  PR_snprintf(buf, 32, "%p", source);
+  image_ = image.forget();
+#endif
+}
 
-  segment.AppendFrame(image.forget(), 1, gfxIntSize(width_, height_));
-  source->AppendToTrack(1, &(segment));
+void MediaPipelineReceiveVideo::PipelineListener::
+NotifyPull(MediaStreamGraph* graph, StreamTime desired_time) {
+  ReentrantMonitorAutoEnter enter(monitor_);
+
+#ifdef MOZILLA_INTERNAL_API
+  nsRefPtr<layers::Image> image = image_;
+  TrackTicks target = TimeToTicksRoundUp(USECS_PER_S, desired_time);
+  TrackTicks delta = target - played_;
+
+  // Don't append if we've already provided a frame that supposedly
+  // goes past the current aDesiredTime Doing so means a negative
+  // delta and thus messes up handling of the graph
+  if (delta > 0) {
+    VideoSegment segment;
+    segment.AppendFrame(image ? image.forget() : nullptr, delta,
+                        gfxIntSize(width_, height_));
+    source_->AppendToTrack(track_id_, &(segment));
+
+    played_ = target;
+  }
 #endif
 }
 
 
 }  // end namespace
-

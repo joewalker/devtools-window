@@ -109,6 +109,10 @@ class B2GOptions(ReftestOptions):
                         type="string", dest="logcat_dir",
                         help="directory to store logcat dump files")
         defaults["logcat_dir"] = None
+        self.add_option('--busybox', action='store',
+                        type='string', dest='busybox',
+                        help="Path to busybox binary to install on device")
+        defaults['busybox'] = None
         defaults["remoteTestRoot"] = "/data/local/tests"
         defaults["logFile"] = "reftest.log"
         defaults["autorun"] = True
@@ -328,6 +332,12 @@ class B2GReftest(RefTest):
             print "ERROR: unable to find utility path for %s, please specify with --utility-path" % (os.name)
             sys.exit(1)
 
+        xpcshell = os.path.join(options.utilityPath, xpcshell)
+        if self._automation.elf_arm(xpcshell):
+            raise Exception('xpcshell at %s is an ARM binary; please use '
+                            'the --utility-path argument to specify the path '
+                            'to a desktop version.' % xpcshell)
+
         options.serverProfilePath = tempfile.mkdtemp()
         self.server = ReftestServer(localAutomation, options, self.scriptDir)
         retVal = self.server.start()
@@ -402,12 +412,12 @@ user_pref("dom.mozBrowserFramesWhitelist","app://system.gaiamobile.org");\n
 user_pref("network.dns.localDomains","app://system.gaiamobile.org");\n
 user_pref("font.size.inflation.emPerLine", 0);
 user_pref("font.size.inflation.minTwips", 0);
-user_pref("reftest.browser.iframe.enabled", true);
+user_pref("reftest.browser.iframe.enabled", false);
 user_pref("reftest.remote", true);
 user_pref("reftest.uri", "%s");
-#expand user_pref("toolkit.telemetry.prompted", __MOZ_TELEMETRY_DISPLAY_REV__);
-#expand user_pref("toolkit.telemetry.notifiedOptOut", __MOZ_TELEMETRY_DISPLAY_REV__);
-user_pref("marionette.loadearly", true);
+// Set a future policy version to avoid the telemetry prompt.
+user_pref("toolkit.telemetry.prompted", 999);
+user_pref("toolkit.telemetry.notifiedOptOut", 999);
 """ % reftestlist)
 
         #workaround for jsreftests.
@@ -483,6 +493,8 @@ def main(args=sys.argv[1:]):
             kwargs['gecko_path'] = options.geckoPath
         if options.logcat_dir:
             kwargs['logcat_dir'] = options.logcat_dir
+        if options.busybox:
+            kwargs['busybox'] = options.busybox
     if options.emulator_res:
         kwargs['emulator_res'] = options.emulator_res
     if options.b2gPath:
@@ -504,6 +516,7 @@ def main(args=sys.argv[1:]):
     auto.setDeviceManager(dm)
 
     options = parser.verifyRemoteOptions(options)
+
     if (options == None):
         print "ERROR: Invalid options specified, use --help for a list of valid options"
         sys.exit(1)
@@ -523,6 +536,7 @@ def main(args=sys.argv[1:]):
     auto.logFinish = "REFTEST TEST-START | Shutdown"
 
     reftest = B2GReftest(auto, dm, options, SCRIPT_DIRECTORY)
+    options = parser.verifyCommonOptions(options, reftest)
 
     logParent = os.path.dirname(options.remoteLogFile)
     dm.mkDir(logParent);

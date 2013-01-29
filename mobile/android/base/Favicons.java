@@ -6,6 +6,7 @@
 package org.mozilla.gecko;
 
 import org.mozilla.gecko.db.BrowserDB;
+import org.mozilla.gecko.util.GeckoBackgroundThread;
 import org.mozilla.gecko.util.GeckoJarReader;
 
 import org.apache.http.HttpEntity;
@@ -13,16 +14,10 @@ import org.apache.http.client.methods.HttpGet;
 import org.apache.http.entity.BufferedHttpEntity;
 
 import android.content.ContentResolver;
-import android.content.ContentValues;
 import android.content.Context;
-import android.database.Cursor;
-import android.database.sqlite.SQLiteDatabase;
-import android.database.sqlite.SQLiteOpenHelper;
-import android.database.sqlite.SQLiteQueryBuilder;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.drawable.BitmapDrawable;
-import android.graphics.drawable.Drawable;
 import android.net.http.AndroidHttpClient;
 import android.os.AsyncTask;
 import android.support.v4.util.LruCache;
@@ -43,6 +38,9 @@ public class Favicons {
     private static final String LOGTAG = "GeckoFavicons";
 
     public static final long NOT_LOADING = 0;
+
+    private static int sFaviconSmallSize = -1;
+    private static int sFaviconLargeSize = -1;
 
     private Context mContext;
 
@@ -175,8 +173,29 @@ public class Favicons {
        return Favicons.FaviconsInstanceHolder.INSTANCE;
     }
 
+    public boolean isLargeFavicon(Bitmap image) {
+        return image.getWidth() > sFaviconSmallSize || image.getHeight() > sFaviconSmallSize;
+    }
+
+    public Bitmap scaleImage(Bitmap image) {
+        // If the icon is larger than 16px, scale it to sFaviconLargeSize.
+        // Otherwise, scale it to sFaviconSmallSize.
+        if (isLargeFavicon(image)) {
+            image = Bitmap.createScaledBitmap(image, sFaviconLargeSize, sFaviconLargeSize, false);
+        } else {
+            image = Bitmap.createScaledBitmap(image, sFaviconSmallSize, sFaviconSmallSize, false);
+        }
+        return image;
+    }
+
     public void attachToContext(Context context) {
         mContext = context;
+        if (sFaviconSmallSize < 0) {
+            sFaviconSmallSize = Math.round(mContext.getResources().getDimension(R.dimen.awesomebar_row_favicon_size_small));
+        }
+        if (sFaviconLargeSize < 0) {
+            sFaviconLargeSize = Math.round(mContext.getResources().getDimension(R.dimen.awesomebar_row_favicon_size_large));
+        }
     }
 
     private class LoadFaviconTask extends AsyncTask<Void, Void, Bitmap> {
@@ -205,17 +224,20 @@ public class Favicons {
         }
 
         // Runs in background thread
-        private void saveFaviconToDb(Bitmap favicon) {
+        private void saveFaviconToDb(final Bitmap favicon) {
             if (!mPersist) {
                 return;
             }
 
-            // since the Async task can run this on any number of threads in the
-            // pool, we need to protect against inserting the same url twice
-            synchronized(Favicons.this) {
-                ContentResolver resolver = mContext.getContentResolver();
-                BrowserDB.updateFaviconForUrl(resolver, mPageUrl, favicon, mFaviconUrl);
-            }
+            // Even though this code is in a background thread, all DB writes
+            // should happen in GeckoBackgroundThread or we could get locked
+            // databases.
+            GeckoBackgroundThread.post(new Runnable() {
+                public void run() {
+                    ContentResolver resolver = mContext.getContentResolver();
+                    BrowserDB.updateFaviconForUrl(resolver, mPageUrl, favicon, mFaviconUrl);
+                }
+            });
         }
 
         // Runs in background thread
@@ -288,7 +310,7 @@ public class Favicons {
             if (storedFaviconUrl != null && storedFaviconUrl.equals(mFaviconUrl)) {
                 image = loadFaviconFromDb();
                 if (image != null)
-                    return image;
+                    return scaleImage(image);
             }
 
             if (isCancelled())
@@ -298,6 +320,7 @@ public class Favicons {
 
             if (image != null && image.getWidth() > 0 && image.getHeight() > 0) {
                 saveFaviconToDb(image);
+                image = scaleImage(image);
             } else {
                 image = null;
             }

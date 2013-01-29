@@ -1,4 +1,3 @@
-#filter substitution
 # -*- indent-tabs-mode: nil -*-
 # This Source Code Form is subject to the terms of the Mozilla Public
 # License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -438,11 +437,6 @@ BrowserGlue.prototype = {
     // Show about:rights notification, if needed.
     if (this._shouldShowRights()) {
       this._showRightsNotification();
-#ifdef MOZ_TELEMETRY_REPORTING
-    } else {
-      // Only show telemetry notification when about:rights notification is not shown.
-      this._showTelemetryNotification();
-#endif
     }
 
     // Show update notification, if needed.
@@ -506,7 +500,7 @@ BrowserGlue.prototype = {
           var win = this.getMostRecentBrowserWindow();
           var brandBundle = win.document.getElementById("bundle_brand");
           var shellBundle = win.document.getElementById("bundle_shell");
-  
+
           var brandShortName = brandBundle.getString("brandShortName");
           var promptTitle = shellBundle.getString("setDefaultBrowserTitle");
           var promptMessage = shellBundle.getFormattedString("setDefaultBrowserMessage",
@@ -551,18 +545,20 @@ BrowserGlue.prototype = {
     //    browser.startup.page == 3 or browser.sessionstore.resume_session_once == true
     // 3. browser.warnOnQuit == false
     // 4. The browser is currently in Private Browsing mode
+    // 5. The browser will be restarted.
     //
     // Otherwise these are the conditions and the associated dialogs that will be shown:
     // 1. aQuitType == "lastwindow" or "quit" and browser.showQuitWarning == true
     //    - The quit dialog will be shown
-    // 2. aQuitType == "restart" && browser.warnOnRestart == true
-    //    - The restart dialog will be shown
-    // 3. aQuitType == "lastwindow" && browser.tabs.warnOnClose == true
+    // 2. aQuitType == "lastwindow" && browser.tabs.warnOnClose == true
     //    - The "closing multiple tabs" dialog will be shown
     //
     // aQuitType == "lastwindow" is overloaded. "lastwindow" is used to indicate
     // "the last window is closing but we're not quitting (a non-browser window is open)"
     // and also "we're quitting by closing the last window".
+
+    if (aQuitType == "restart")
+      return;
 
     var windowcount = 0;
     var pagecount = 0;
@@ -586,12 +582,10 @@ BrowserGlue.prototype = {
     if (!aQuitType)
       aQuitType = "quit";
 
-    var showPrompt = false;
     var mostRecentBrowserWindow;
 
     // browser.warnOnQuit is a hidden global boolean to override all quit prompts
     // browser.showQuitWarning specifically covers quitting
-    // browser.warnOnRestart specifically covers app-initiated restarts where we restart the app
     // browser.tabs.warnOnClose is the global "warn when closing multiple tabs" pref
 
     var sessionWillBeRestored = Services.prefs.getIntPref("browser.startup.page") == 3 ||
@@ -601,19 +595,15 @@ BrowserGlue.prototype = {
 
     // On last window close or quit && showQuitWarning, we want to show the
     // quit warning.
-    if (aQuitType != "restart" && Services.prefs.getBoolPref("browser.showQuitWarning")) {
-      showPrompt = true;
-    }
-    else if (aQuitType == "restart" && Services.prefs.getBoolPref("browser.warnOnRestart")) {
-      showPrompt = true;
-    }
-    else if (aQuitType == "lastwindow") {
-      // If aQuitType is "lastwindow" and we aren't showing the quit warning,
-      // we should show the window closing warning instead. warnAboutClosing
-      // tabs checks browser.tabs.warnOnClose and returns if it's ok to close
-      // the window. It doesn't actually close the window.
-      mostRecentBrowserWindow = Services.wm.getMostRecentWindow("navigator:browser");
-      aCancelQuit.data = !mostRecentBrowserWindow.gBrowser.warnAboutClosingTabs(true);
+    if (!Services.prefs.getBoolPref("browser.showQuitWarning")) {
+      if (aQuitType == "lastwindow") {
+        // If aQuitType is "lastwindow" and we aren't showing the quit warning,
+        // we should show the window closing warning instead. warnAboutClosing
+        // tabs checks browser.tabs.warnOnClose and returns if it's ok to close
+        // the window. It doesn't actually close the window.
+        mostRecentBrowserWindow = Services.wm.getMostRecentWindow("navigator:browser");
+        aCancelQuit.data = !mostRecentBrowserWindow.gBrowser.warnAboutClosingTabs(true);
+      }
       return;
     }
 
@@ -621,21 +611,15 @@ BrowserGlue.prototype = {
     if (allWindowsPrivate)
       return;
 
-    if (!showPrompt)
-      return;
-
     var quitBundle = Services.strings.createBundle("chrome://browser/locale/quitDialog.properties");
     var brandBundle = Services.strings.createBundle("chrome://branding/locale/brand.properties");
 
     var appName = brandBundle.GetStringFromName("brandShortName");
-    var quitTitleString = (aQuitType == "restart" ? "restart" : "quit") + "DialogTitle";
+    var quitTitleString = "quitDialogTitle";
     var quitDialogTitle = quitBundle.formatStringFromName(quitTitleString, [appName], 1);
 
     var message;
-    if (aQuitType == "restart")
-      message = quitBundle.formatStringFromName("messageRestart",
-                                                [appName], 1);
-    else if (windowcount == 1)
+    if (windowcount == 1)
       message = quitBundle.formatStringFromName("messageNoWindows",
                                                 [appName], 1);
     else
@@ -646,20 +630,14 @@ BrowserGlue.prototype = {
 
     var flags = promptService.BUTTON_TITLE_IS_STRING * promptService.BUTTON_POS_0 +
                 promptService.BUTTON_TITLE_IS_STRING * promptService.BUTTON_POS_1 +
+                promptService.BUTTON_TITLE_IS_STRING * promptService.BUTTON_POS_2 +
                 promptService.BUTTON_POS_0_DEFAULT;
 
     var neverAsk = {value:false};
-    var button0Title, button2Title;
+    var button0Title = quitBundle.GetStringFromName("saveTitle");
     var button1Title = quitBundle.GetStringFromName("cancelTitle");
+    var button2Title = quitBundle.GetStringFromName("quitTitle");
     var neverAskText = quitBundle.GetStringFromName("neverAsk");
-
-    if (aQuitType == "restart")
-      button0Title = quitBundle.GetStringFromName("restartTitle");
-    else {
-      flags += promptService.BUTTON_TITLE_IS_STRING * promptService.BUTTON_POS_2;
-      button0Title = quitBundle.GetStringFromName("saveTitle");
-      button2Title = quitBundle.GetStringFromName("quitTitle");
-    }
 
     // This wouldn't have been set above since we shouldn't be here for
     // aQuitType == "lastwindow"
@@ -682,12 +660,8 @@ BrowserGlue.prototype = {
     case 0: // Save & Quit
       this._saveSession = true;
       if (neverAsk.value) {
-        if (aQuitType == "restart")
-          Services.prefs.setBoolPref("browser.warnOnRestart", false);
-        else {
-          // always save state when shutting down
-          Services.prefs.setIntPref("browser.startup.page", 3);
-        }
+        // always save state when shutting down
+        Services.prefs.setIntPref("browser.startup.page", 3);
       }
       break;
     }
@@ -876,166 +850,6 @@ BrowserGlue.prototype = {
     catch (e) {
     }
   },
-
-#ifdef MOZ_TELEMETRY_REPORTING
-  _showTelemetryNotification: function BG__showTelemetryNotification() {
-#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
-    const PREF_TELEMETRY_ENABLED = "toolkit.telemetry.enabledPreRelease";
-    const PREF_TELEMETRY_DISPLAYED = "toolkit.telemetry.notifiedOptOut";
-#else
-    const PREF_TELEMETRY_ENABLED  = "toolkit.telemetry.enabled";
-    const PREF_TELEMETRY_DISPLAYED = "toolkit.telemetry.prompted";
-#endif
-    const PREF_TELEMETRY_REJECTED  = "toolkit.telemetry.rejected";
-    const PREF_TELEMETRY_INFOURL  = "toolkit.telemetry.infoURL";
-    const PREF_TELEMETRY_SERVER_OWNER = "toolkit.telemetry.server_owner";
-    // This is used to reprompt/renotify users when privacy message changes
-    const TELEMETRY_DISPLAY_REV = @MOZ_TELEMETRY_DISPLAY_REV@;
-
-    // Stick notifications onto the selected tab of the active browser window.
-    var win = this.getMostRecentBrowserWindow();
-    var tabbrowser = win.gBrowser;
-    var notifyBox = tabbrowser.getNotificationBox();
-
-    var browserBundle = Services.strings.createBundle("chrome://browser/locale/browser.properties");
-    var brandBundle = Services.strings.createBundle("chrome://branding/locale/brand.properties");
-    var productName = brandBundle.GetStringFromName("brandFullName");
-    var serverOwner = Services.prefs.getCharPref(PREF_TELEMETRY_SERVER_OWNER);
-
-    function appendTelemetryNotification(message, buttons, hideclose) {
-      let notification = notifyBox.appendNotification(message, "telemetry", null,
-                                                      notifyBox.PRIORITY_INFO_LOW,
-                                                      buttons);
-      if (hideclose)
-        notification.setAttribute("hideclose", hideclose);
-      notification.persistence = -1;  // Until user closes it
-      return notification;
-    }
-
-    function appendLearnMoreLink(notification) {
-      let XULNS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-      let link = notification.ownerDocument.createElementNS(XULNS, "label");
-      link.className = "text-link telemetry-text-link";
-      link.setAttribute("value", browserBundle.GetStringFromName("telemetryLinkLabel"));
-      let description = notification.ownerDocument.getAnonymousElementByAttribute(notification, "anonid", "messageText");
-      description.appendChild(link);
-      return link;
-    }
-
-    /*
-     * Display an opt-out notification when telemetry is enabled by default,
-     * an opt-in prompt otherwise.
-     *
-     * But do not display this prompt/notification if:
-     *
-     * - The last accepted/refused policy (either by accepting the prompt or by
-     *   manually flipping the telemetry preference) is already at version
-     *   TELEMETRY_DISPLAY_REV.
-     */
-    var telemetryDisplayed;
-    try {
-      telemetryDisplayed = Services.prefs.getIntPref(PREF_TELEMETRY_DISPLAYED);
-    } catch(e) {}
-    if (telemetryDisplayed === TELEMETRY_DISPLAY_REV)
-      return;
-
-#ifdef MOZ_TELEMETRY_ON_BY_DEFAULT
-    /*
-     * Additionally, in opt-out builds, don't display the notification if:
-     *
-     * - Telemetry is disabled
-     * - Telemetry was explicitly refused through the UI
-     * - Opt-in telemetry was enabled and this is the first run with opt-out.
-     */
-
-    var telemetryEnabled = Services.prefs.getBoolPref(PREF_TELEMETRY_ENABLED);
-    if (!telemetryEnabled)
-      return;
-
-    // If telemetry was explicitly refused through the UI,
-    // also disable opt-out telemetry and bail out.
-    var telemetryRejected = false;
-    try {
-      telemetryRejected = Services.prefs.getBoolPref(PREF_TELEMETRY_REJECTED);
-    } catch(e) {}
-    if (telemetryRejected) {
-      Services.prefs.setBoolPref(PREF_TELEMETRY_ENABLED, false);
-      Services.prefs.setIntPref(PREF_TELEMETRY_DISPLAYED, TELEMETRY_DISPLAY_REV);
-      return;
-    }
-
-    // If opt-in telemetry was enabled and this is the first run with opt-out,
-    // don't notify the user.
-    var optInTelemetryEnabled = false;
-    try {
-      optInTelemetryEnabled = Services.prefs.getBoolPref("toolkit.telemetry.enabled");
-    } catch(e) {}
-    if (optInTelemetryEnabled && telemetryDisplayed === undefined) {
-      Services.prefs.setBoolPref(PREF_TELEMETRY_REJECTED, false);
-      Services.prefs.setIntPref(PREF_TELEMETRY_DISPLAYED, TELEMETRY_DISPLAY_REV);
-      return;
-    }
-
-    var telemetryPrompt = browserBundle.formatStringFromName("telemetryOptOutPrompt",
-                                                            [productName, serverOwner, productName], 3);
-    var buttons = null;
-    var hideCloseButton = false;
-    function learnModeClickHandler() {
-      // Open the learn more url in a new tab
-      var url = Services.urlFormatter.formatURLPref("app.support.baseURL");
-      url += "how-can-i-help-submitting-performance-data";
-      tabbrowser.selectedTab = tabbrowser.addTab(url);
-      // Remove the notification on which the user clicked
-      notification.parentNode.removeNotification(notification, true);
-    }
-#else
-
-    // Clear old prefs and reprompt
-    Services.prefs.clearUserPref(PREF_TELEMETRY_ENABLED);
-    Services.prefs.clearUserPref(PREF_TELEMETRY_REJECTED);
-
-    var telemetryPrompt = browserBundle.formatStringFromName("telemetryOptInPrompt",
-                                                            [productName, serverOwner], 2);
-    var buttons = [
-                    {
-                      label:     browserBundle.GetStringFromName("telemetryYesButtonLabel2"),
-                      accessKey: browserBundle.GetStringFromName("telemetryYesButtonAccessKey"),
-                      popup:     null,
-                      callback:  function(aNotificationBar, aButton) {
-                        Services.prefs.setBoolPref(PREF_TELEMETRY_ENABLED, true);
-                        Services.prefs.setBoolPref(PREF_TELEMETRY_REJECTED, false);
-                      }
-                    },
-                    {
-                      label:     browserBundle.GetStringFromName("telemetryNoButtonLabel"),
-                      accessKey: browserBundle.GetStringFromName("telemetryNoButtonAccessKey"),
-                      popup:     null,
-                      callback:  function(aNotificationBar, aButton) {
-                        Services.prefs.setBoolPref(PREF_TELEMETRY_REJECTED, true);
-                      }
-                    }
-                  ];
-
-    var hideCloseButton = true;
-    function learnModeClickHandler() {
-      // Open the learn more url in a new tab
-      win.openUILinkIn(Services.prefs.getCharPref(PREF_TELEMETRY_INFOURL), "tab");
-      // Remove the notification on which the user clicked
-      notification.parentNode.removeNotification(notification, true);
-      // Add a new notification to that tab, with no "Learn more" link
-      notifyBox = tabbrowser.getNotificationBox();
-      appendTelemetryNotification(telemetryPrompt, buttons, true);
-    }
-#endif
-
-    // Set pref to indicate we've shown the notification.
-    Services.prefs.setIntPref(PREF_TELEMETRY_DISPLAYED, TELEMETRY_DISPLAY_REV);
-
-    var notification = appendTelemetryNotification(telemetryPrompt, buttons, hideCloseButton);
-    var link = appendLearnMoreLink(notification);
-    link.addEventListener('click', learnModeClickHandler, false);
-  },
-#endif
 
   _showPluginUpdatePage: function BG__showPluginUpdatePage() {
     Services.prefs.setBoolPref(PREF_PLUGINS_NOTIFYUSER, false);
@@ -1313,7 +1127,7 @@ BrowserGlue.prototype = {
   },
 
   _migrateUI: function BG__migrateUI() {
-    const UI_VERSION = 8;
+    const UI_VERSION = 9;
     const BROWSER_DOCURL = "chrome://browser/content/browser.xul#";
     let currentUIVersion = 0;
     try {
@@ -1411,15 +1225,20 @@ BrowserGlue.prototype = {
         Services.prefs.setBoolPref("browser.tabs.onTop", tabsOnTopAttribute == "true");
     }
 
-    // This migration step is executed only if the Downloads Panel feature is
-    // enabled.  By default, the feature is enabled only in the Nightly channel.
-    // This means that, unless the preference that enables the feature is
-    // changed manually, the Downloads button is added to the toolbar only if
-    // migration happens while running a build from the Nightly channel.  This
-    // migration code will be updated when the feature will be enabled on all
-    // channels, see bug 748381 for details.
-    if (currentUIVersion < 7 &&
-        !Services.prefs.getBoolPref("browser.download.useToolkitUI")) {
+    // Migration at version 7 only occurred for users who wanted to try the new
+    // Downloads Panel feature before its release. Since migration at version
+    // 9 adds the button by default, this step has been removed.
+
+    if (currentUIVersion < 8) {
+      // Reset homepage pref for users who have it set to google.com/firefox
+      let uri = Services.prefs.getComplexValue("browser.startup.homepage",
+                                               Ci.nsIPrefLocalizedString).data;
+      if (uri && /^https?:\/\/(www\.)?google(\.\w{2,3}){1,2}\/firefox\/?$/.test(uri)) {
+        Services.prefs.clearUserPref("browser.startup.homepage");
+      }
+    }
+
+    if (currentUIVersion < 9) {
       // This code adds the customizable downloads buttons.
       let currentsetResource = this._rdf.GetResource("currentset");
       let toolbarResource = this._rdf.GetResource(BROWSER_DOCURL + "nav-bar");
@@ -1446,15 +1265,9 @@ BrowserGlue.prototype = {
         }
         this._setPersist(toolbarResource, currentsetResource, currentset);
       }
-    }
 
-    if (currentUIVersion < 8) {
-      // Reset homepage pref for users who have it set to google.com/firefox
-      let uri = Services.prefs.getComplexValue("browser.startup.homepage",
-                                               Ci.nsIPrefLocalizedString).data;
-      if (uri && /^https?:\/\/(www\.)?google(\.\w{2,3}){1,2}\/firefox\/?$/.test(uri)) {
-        Services.prefs.clearUserPref("browser.startup.homepage");
-      }
+      Services.prefs.clearUserPref("browser.download.useToolkitUI");
+      Services.prefs.clearUserPref("browser.library.useNewDownloadsView");
     }
 
     if (this._dirty)
@@ -1790,6 +1603,10 @@ ContentPermissionPrompt.prototype = {
         });
       }
     }
+
+    var link = chromeWin.document.getElementById("geolocation-learnmore-link");
+    link.value = browserBundle.GetStringFromName("geolocation.learnMore");
+    link.href = Services.urlFormatter.formatURLPref("browser.geolocation.warning.infoURL");
 
     var browser = chromeWin.gBrowser.getBrowserForDocument(requestingWindow.document);
 

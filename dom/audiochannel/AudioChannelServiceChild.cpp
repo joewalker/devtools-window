@@ -12,11 +12,8 @@
 #include "mozilla/StaticPtr.h"
 #include "mozilla/unused.h"
 #include "mozilla/Util.h"
-
 #include "mozilla/dom/ContentChild.h"
-
-#include "base/basictypes.h"
-
+#include "nsIObserverService.h"
 #include "nsThreadUtils.h"
 
 using namespace mozilla;
@@ -60,13 +57,26 @@ AudioChannelServiceChild::~AudioChannelServiceChild()
 }
 
 bool
-AudioChannelServiceChild::GetMuted(AudioChannelType aType, bool aMozHidden)
+AudioChannelServiceChild::GetMuted(AudioChannelAgent* aAgent, bool aElementHidden)
 {
+  AudioChannelAgentData* data;
+  if (!mAgents.Get(aAgent, &data)) {
+    return true;
+  }
+
   ContentChild *cc = ContentChild::GetSingleton();
-  bool muted = false;
+  bool muted = true;
 
   if (cc) {
-    cc->SendAudioChannelGetMuted(aType, aMozHidden, &muted);
+    cc->SendAudioChannelGetMuted(data->mType, aElementHidden, data->mElementHidden, &muted);
+  }
+
+  // Update visibility.
+  data->mElementHidden = aElementHidden;
+  data->mMuted = muted;
+
+  if (cc) {
+    cc->SendAudioChannelChangedNotification();
   }
 
   return muted;
@@ -74,7 +84,7 @@ AudioChannelServiceChild::GetMuted(AudioChannelType aType, bool aMozHidden)
 
 void
 AudioChannelServiceChild::RegisterAudioChannelAgent(AudioChannelAgent* aAgent,
-                                               AudioChannelType aType)
+                                                    AudioChannelType aType)
 {
   AudioChannelService::RegisterAudioChannelAgent(aAgent, aType);
 
@@ -82,21 +92,34 @@ AudioChannelServiceChild::RegisterAudioChannelAgent(AudioChannelAgent* aAgent,
   if (cc) {
     cc->SendAudioChannelRegisterType(aType);
   }
+
+  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+  if (obs) {
+    obs->NotifyObservers(nullptr, "audio-channel-agent-changed", nullptr);
+  }
 }
 
 void
 AudioChannelServiceChild::UnregisterAudioChannelAgent(AudioChannelAgent* aAgent)
 {
-  AudioChannelType type;
-  if (!mAgents.Get(aAgent, &type)) {
+  AudioChannelAgentData *pData;
+  if (!mAgents.Get(aAgent, &pData)) {
     return;
   }
+
+  // We need to keep a copy because unregister will remove the
+  // AudioChannelAgentData object from the hashtable.
+  AudioChannelAgentData data(*pData);
 
   AudioChannelService::UnregisterAudioChannelAgent(aAgent);
 
   ContentChild *cc = ContentChild::GetSingleton();
   if (cc) {
-    cc->SendAudioChannelUnregisterType(type);
+    cc->SendAudioChannelUnregisterType(data.mType, data.mElementHidden);
+  }
+
+  nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
+  if (obs) {
+    obs->NotifyObservers(nullptr, "audio-channel-agent-changed", nullptr);
   }
 }
-

@@ -15,10 +15,9 @@
 namespace mozilla {
 namespace image {
 
-extern const char* SVG_MIMETYPE;
-
-struct ImageFactory
+class ImageFactory
 {
+public:
   /**
    * Creates a new image with the given properties.
    *
@@ -49,14 +48,14 @@ private:
   static already_AddRefed<Image> CreateRasterImage(nsIRequest* aRequest,
                                                    imgStatusTracker* aStatusTracker,
                                                    const nsCString& aMimeType,
-                                                   const nsCString& aURIString,
+                                                   nsIURI* aURI,
                                                    uint32_t aImageFlags,
                                                    uint32_t aInnerWindowId);
 
   static already_AddRefed<Image> CreateVectorImage(nsIRequest* aRequest,
                                                    imgStatusTracker* aStatusTracker,
                                                    const nsCString& aMimeType,
-                                                   const nsCString& aURIString,
+                                                   nsIURI* aURI,
                                                    uint32_t aImageFlags,
                                                    uint32_t aInnerWindowId);
 

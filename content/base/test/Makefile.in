@@ -268,6 +268,9 @@ MOCHITEST_FILES_A = \
 		test_bug282547.html \
 		bug282547.sjs \
 		test_domparser_null_char.html \
+		test_bug811701.html \
+		test_bug811701.xhtml \
+		test_bug820909.html \
 		$(NULL)
 
 MOCHITEST_FILES_B = \
@@ -361,18 +364,33 @@ MOCHITEST_FILES_B = \
 		file_CSP.sjs \
 		file_CSP_main.html \
 		file_CSP_main.html^headers^ \
+		file_CSP_main_spec_compliant.html \
+		file_CSP_main_spec_compliant.html^headers^ \
 		file_CSP_main.js \
+		file_CSP_main_spec_compliant.js \
 		test_CSP_frameancestors.html \
 		file_CSP_frameancestors.sjs \
 		file_CSP_frameancestors_main.html \
 		file_CSP_frameancestors_main.js \
+		file_CSP_frameancestors_spec_compliant.sjs \
+		file_CSP_frameancestors_main_spec_compliant.html \
+		file_CSP_frameancestors_main_spec_compliant.js \
 		test_CSP_inlinescript.html \
 		file_CSP_inlinescript_main.html \
 		file_CSP_inlinescript_main.html^headers^ \
+		file_CSP_inlinescript_main_spec_compliant.html \
+		file_CSP_inlinescript_main_spec_compliant.html^headers^ \
+		file_CSP_inlinescript_main_spec_compliant_allowed.html \
+		file_CSP_inlinescript_main_spec_compliant_allowed.html^headers^ \
 		test_CSP_evalscript.html \
 		file_CSP_evalscript_main.html \
 		file_CSP_evalscript_main.html^headers^ \
 		file_CSP_evalscript_main.js \
+		file_CSP_evalscript_main_allowed.js \
+		file_CSP_evalscript_main_spec_compliant.html \
+	 	file_CSP_evalscript_main_spec_compliant.html^headers^ \
+		file_CSP_evalscript_main_spec_compliant_allowed.html \
+		file_CSP_evalscript_main_spec_compliant_allowed.html^headers^ \
 		file_csp_bug768029.html \
 		file_csp_bug768029.sjs \
 		file_csp_bug773891.html \
@@ -479,8 +497,6 @@ MOCHITEST_FILES_B = \
 		eventsource_redirect_to.resource^headers^ \
 		badContentType.eventsource \
 		badContentType.eventsource^headers^ \
-		badEventFieldName.eventsource \
-		badEventFieldName.eventsource^headers^ \
 		badHTTPResponseCode.eventsource \
 		badHTTPResponseCode.eventsource^headers^ \
 		badMessageEvent.eventsource \
@@ -503,6 +519,8 @@ MOCHITEST_FILES_B = \
 		file_html_in_xhr3.html \
 		file_html_in_xhr.sjs \
 		test_bug647518.html \
+		test_caretPositionFromPoint.html \
+		Ahem.ttf \
 		test_bug664916.html \
 		test_bug666604.html \
 		test_bug675121.html \
@@ -581,6 +599,8 @@ MOCHITEST_FILES_B = \
 		test_XHR_onuploadprogress.html \
 		test_XHR_anon.html \
 		file_XHR_anon.sjs \
+		file_XHR_system_redirect.html \
+		file_XHR_system_redirect.html^headers^ \
 		test_XHR_system.html \
 		test_XHR_parameters.html \
 		test_ipc_messagemanager_blob.html \
@@ -602,6 +622,11 @@ MOCHITEST_FILES_B = \
 		test_bug813919.html \
 		test_bug814576.html \
 		test_xhr_withCredentials.html \
+		test_bothCSPheaders.html \
+		file_bothCSPheaders.html \
+		file_bothCSPheaders.html^headers^ \
+		badMessageEvent2.eventsource \
+		badMessageEvent2.eventsource^headers^ \
 		$(NULL)
 
 # OOP tests don't work on Windows (bug 763081) or native-fennec

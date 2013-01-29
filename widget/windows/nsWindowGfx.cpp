@@ -214,7 +214,7 @@ bool nsWindow::OnPaint(HDC aDC, uint32_t aNestingLevel)
 
   nsIWidgetListener* listener = GetPaintListener();
   if (listener) {
-    listener->WillPaintWindow(this, true);
+    listener->WillPaintWindow(this);
   }
   // Re-get the listener since the will paint notification may have killed it.
   listener = GetPaintListener();
@@ -397,7 +397,7 @@ bool nsWindow::OnPaint(HDC aDC, uint32_t aNestingLevel)
           {
             AutoLayerManagerSetup
                 setupLayerManager(this, thebesContext, doubleBuffering);
-            result = listener->PaintWindow(this, region, nsIWidgetListener::SENT_WILL_PAINT | nsIWidgetListener::WILL_SEND_DID_PAINT);
+            result = listener->PaintWindow(this, region, 0);
           }
 
 #ifdef MOZ_XUL
@@ -512,15 +512,15 @@ bool nsWindow::OnPaint(HDC aDC, uint32_t aNestingLevel)
       case LAYERS_OPENGL:
         static_cast<mozilla::layers::LayerManagerOGL*>(GetLayerManager())->
           SetClippingRegion(region);
-        result = listener->PaintWindow(this, region, nsIWidgetListener::SENT_WILL_PAINT | nsIWidgetListener::WILL_SEND_DID_PAINT);
+        result = listener->PaintWindow(this, region, 0);
         break;
 #ifdef MOZ_ENABLE_D3D9_LAYER
       case LAYERS_D3D9:
         {
-          LayerManagerD3D9 *layerManagerD3D9 =
+          nsRefPtr<LayerManagerD3D9> layerManagerD3D9 =
             static_cast<mozilla::layers::LayerManagerD3D9*>(GetLayerManager());
           layerManagerD3D9->SetClippingRegion(region);
-          result = listener->PaintWindow(this, region, nsIWidgetListener::SENT_WILL_PAINT | nsIWidgetListener::WILL_SEND_DID_PAINT);
+          result = listener->PaintWindow(this, region, 0);
           if (layerManagerD3D9->DeviceWasRemoved()) {
             mLayerManager->Destroy();
             mLayerManager = nullptr;
@@ -540,7 +540,7 @@ bool nsWindow::OnPaint(HDC aDC, uint32_t aNestingLevel)
           if (layerManagerD3D10->device() != gfxWindowsPlatform::GetPlatform()->GetD3D10Device()) {
             Invalidate();
           } else {
-            result = listener->PaintWindow(this, region, nsIWidgetListener::SENT_WILL_PAINT | nsIWidgetListener::WILL_SEND_DID_PAINT);
+            result = listener->PaintWindow(this, region, 0);
           }
         }
         break;
@@ -577,6 +577,8 @@ bool nsWindow::OnPaint(HDC aDC, uint32_t aNestingLevel)
 
   mPainting = false;
 
+  // Re-get the listener since painting may have killed it.
+  listener = GetPaintListener();
   if (listener)
     listener->DidPaintWindow();
 

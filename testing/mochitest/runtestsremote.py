@@ -8,6 +8,7 @@ import time
 import tempfile
 import re
 import traceback
+import shutil
 
 sys.path.insert(0, os.path.abspath(os.path.realpath(os.path.dirname(sys.argv[0]))))
 
@@ -173,6 +174,8 @@ class RemoteOptions(MochitestOptions):
                 return None
             options.robocopIds = os.path.abspath(options.robocopIds)
 
+        # allow us to keep original application around for cleanup while running robocop via 'am'
+        options.remoteappname = options.app
         return options
 
     def verifyOptions(self, options, mochitest):
@@ -271,6 +274,12 @@ class MochiRemote(Mochitest):
             print "ERROR: unable to find utility path for %s, please specify with --utility-path" % (os.name)
             sys.exit(1)
 
+        xpcshell_path = os.path.join(options.utilityPath, xpcshell)
+        if localAutomation.elf_arm(xpcshell_path):
+            self.error('xpcshell at %s is an ARM binary; please use '
+                       'the --utility-path argument to specify the path '
+                       'to a desktop version.' % xpcshell)
+
         options.profilePath = tempfile.mkdtemp()
         self.server = MochitestServer(localAutomation, options)
         self.server.start()
@@ -294,6 +303,20 @@ class MochiRemote(Mochitest):
         manifest = Mochitest.buildProfile(self, options)
         self.localProfile = options.profilePath
         self._dm.removeDir(self.remoteProfile)
+
+        # we do not need this for robotium based tests, lets save a LOT of time
+        if options.robocop:
+            shutil.rmtree(os.path.join(options.profilePath, 'webapps'))
+            shutil.rmtree(os.path.join(options.profilePath, 'extensions', 'staged', 'mochikit@mozilla.org'))
+            shutil.rmtree(os.path.join(options.profilePath, 'extensions', 'staged', 'worker-test@mozilla.org'))
+            shutil.rmtree(os.path.join(options.profilePath, 'extensions', 'staged', 'workerbootstrap-test@mozilla.org'))
+            shutil.rmtree(os.path.join(options.profilePath, 'extensions', 'staged', 'special-powers@mozilla.org'))
+            os.remove(os.path.join(options.profilePath, 'userChrome.css'))
+            if os.path.exists(os.path.join(options.profilePath, 'tests.jar')):
+                os.remove(os.path.join(options.profilePath, 'tests.jar'))
+            if os.path.exists(os.path.join(options.profilePath, 'tests.manifest')):
+                os.remove(os.path.join(options.profilePath, 'tests.manifest'))
+
         try:
             self._dm.pushDir(options.profilePath, self.remoteProfile)
         except devicemanager.DMError:
@@ -309,12 +332,14 @@ class MochiRemote(Mochitest):
         options.profilePath = self.localProfile
         env["MOZ_HIDE_RESULTS_TABLE"] = "1"
         retVal = Mochitest.buildURLOptions(self, options, env)
-        #we really need testConfig.js (for browser chrome)
-        try:
-            self._dm.pushDir(options.profilePath, self.remoteProfile)
-        except devicemanager.DMError:
-            print "Automation Error: Unable to copy profile to device."
-            raise
+
+        if not options.robocop:
+            #we really need testConfig.js (for browser chrome)
+            try:
+                self._dm.pushDir(options.profilePath, self.remoteProfile)
+            except devicemanager.DMError:
+                print "Automation Error: Unable to copy profile to device."
+                raise
 
         options.profilePath = self.remoteProfile
         options.logFile = self.localLog
@@ -344,13 +369,15 @@ class MochiRemote(Mochitest):
 
         restart = re.compile('0 INFO SimpleTest START.*')
         reend = re.compile('([0-9]+) INFO TEST-START . Shutdown.*')
+        refail = re.compile('([0-9]+) INFO TEST-UNEXPECTED-FAIL.*')
         start_found = False
         end_found = False
+        fail_found = False
         for line in data:
             if reend.match(line):
                 end_found = True
                 start_found = False
-                return
+                break
 
             if start_found and not end_found:
                 # Append the line without the number to increment
@@ -358,6 +385,15 @@ class MochiRemote(Mochitest):
 
             if restart.match(line):
                 start_found = True
+            if refail.match(line):
+                fail_found = True
+        result = 0
+        if fail_found:
+            result = 1
+        if not end_found:
+            print "ERROR: missing end of test marker (process crashed?)"
+            result = 1
+        return result
 
     def printLog(self):
         passed = 0
@@ -497,7 +533,6 @@ def main():
         if (options.dm_trans == 'adb' and options.robocopPath):
           dm._checkCmd(["install", "-r", os.path.join(options.robocopPath, "robocop.apk")])
 
-        appname = options.app
         retVal = None
         for test in robocop_tests:
             if options.testPath and options.testPath != test['name']:
@@ -505,19 +540,20 @@ def main():
 
             options.app = "am"
             options.browserArgs = ["instrument", "-w", "-e", "deviceroot", deviceRoot, "-e", "class"]
-            options.browserArgs.append("%s.tests.%s" % (appname, test['name']))
-            options.browserArgs.append("org.mozilla.roboexample.test/%s.FennecInstrumentationTestRunner" % appname)
+            options.browserArgs.append("%s.tests.%s" % (options.remoteappname, test['name']))
+            options.browserArgs.append("org.mozilla.roboexample.test/%s.FennecInstrumentationTestRunner" % options.remoteappname)
 
             try:
                 dm.recordLogcat()
                 result = mochitest.runTests(options)
                 if result != 0:
                     print "ERROR: runTests() exited with code %s" % result
+                log_result = mochitest.addLogData()
+                if result != 0 or log_result != 0:
                     mochitest.printDeviceInfo()
                 # Ensure earlier failures aren't overwritten by success on this run
                 if retVal is None or retVal == 0:
                     retVal = result
-                mochitest.addLogData()
             except:
                 print "Automation Error: Exception caught while running tests"
                 traceback.print_exc()
@@ -536,7 +572,9 @@ def main():
         else:
             # if we didn't have some kind of error running the tests, make
             # sure the tests actually passed
+            print "INFO | runtests.py | Test summary: start."
             overallResult = mochitest.printLog()
+            print "INFO | runtests.py | Test summary: end."
             if retVal == 0:
                 retVal = overallResult
     else:

@@ -274,6 +274,8 @@
            side="right"
            type="arrow"
            hidden="true"
+           rolluponmousewheel="true"
+           consumeoutsideclicks="false"
            noautofocus="true"
            position="topcenter topright"/>
 
@@ -312,7 +314,7 @@
     <menupopup id="contentAreaContextMenu" pagemenu="start"
                onpopupshowing="if (event.target != this)
                                  return true;
-                               gContextMenu = new nsContextMenu(this, gBrowser, event.shiftKey);
+                               gContextMenu = new nsContextMenu(this, event.shiftKey);
                                if (gContextMenu.shouldDisplay)
                                  updateEditUIVisibility();
                                return gContextMenu.shouldDisplay;"
@@ -464,6 +466,13 @@
         </menulist>
       </popupnotificationcontent>
     </popupnotification>
+
+    <popupnotification id="geolocation-notification" hidden="true">
+      <popupnotificationcontent orient="vertical" align="start">
+        <separator class="thin"/>
+        <label id="geolocation-learnmore-link" class="text-link"/>
+      </popupnotificationcontent>
+    </popupnotification>
   </popupset>
 
 #ifdef CAN_DRAW_IN_TITLEBAR
@@ -521,7 +530,7 @@
              toolbarname="&navbarCmd.label;" accesskey="&navbarCmd.accesskey;"
              fullscreentoolbar="true" mode="icons" customizable="true"
              iconsize="large"
-             defaultset="unified-back-forward-button,urlbar-container,reload-button,stop-button,search-container,downloads-button,home-button,bookmarks-menu-button-container,window-controls"
+             defaultset="unified-back-forward-button,urlbar-container,reload-button,stop-button,search-container,webrtc-status-button,downloads-button,home-button,bookmarks-menu-button-container,window-controls"
              context="toolbar-context-menu">
 
       <toolbaritem id="unified-back-forward-button" class="chromeclass-toolbar-additional"
@@ -578,6 +587,8 @@
             <image id="webapps-notification-icon" class="notification-anchor-icon" role="button"/>
             <image id="plugins-notification-icon" class="notification-anchor-icon" role="button"/>
             <image id="blocked-plugins-notification-icon" class="notification-anchor-icon" role="button"/>
+            <image id="webRTC-shareDevices-notification-icon" class="notification-anchor-icon" role="button"/>
+            <image id="webRTC-sharingDevices-notification-icon" class="notification-anchor-icon" role="button"/>
           </box>
           <!-- Use onclick instead of normal popup= syntax since the popup
                code fires onmousedown, and hence eats our favicon drag events.
@@ -652,6 +663,18 @@
                    flex="100" persist="width" removable="true">
         <searchbar id="searchbar" flex="1"/>
       </toolbaritem>
+
+      <toolbarbutton id="webrtc-status-button"
+                     class="toolbarbutton-1 chromeclass-toolbar-additional"
+                     type="menu"
+                     hidden="true"
+                     orient="horizontal"
+                     label="&webrtcIndicatorButton.label;"
+                     tooltiptext="&webrtcIndicatorButton.tooltip;">
+        <menupopup onpopupshowing="WebrtcIndicator.fillPopup(this);"
+                   onpopuphiding="WebrtcIndicator.clearPopup(this);"
+                   oncommand="WebrtcIndicator.menuCommand(event.target);"/>
+      </toolbarbutton>
 
       <toolbarbutton id="home-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
                      persist="class" removable="true"
@@ -1050,6 +1073,8 @@
     </toolbarpalette>
   </toolbox>
 
+  <hbox id="fullscr-toggler" collapsed="true"/>
+
   <hbox flex="1" id="browser">
     <vbox id="browser-border-start" hidden="true" layer="true"/>
     <vbox id="sidebar-box" hidden="true" class="chromeclass-extrachrome">
@@ -1082,6 +1107,7 @@
           persist="width">
       <browser id="social-sidebar-browser"
                type="content"
+               context="contentAreaContextMenu"
                disableglobalhistory="true"
                flex="1"
                style="min-width: 14em; width: 18em; max-width: 36em;"/>

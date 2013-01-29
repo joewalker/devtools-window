@@ -8,6 +8,7 @@ let Cu = Components.utils;
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/FileUtils.jsm");
 Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/commonjs/promise/core.js");
 
 function pref(name, value) {
   return {
@@ -16,7 +17,7 @@ function pref(name, value) {
   }
 }
 
-var WebAppRT = {
+let WebAppRT = {
   DEFAULT_PREFS_FILENAME: "default-prefs.js",
 
   prefs: [
@@ -26,9 +27,9 @@ var WebAppRT = {
     pref("extensions.autoDisableScopes", 1),
     // Disable add-on installation via the web-exposed APIs
     pref("xpinstall.enabled", false),
-    // Disable the telemetry prompt in webapps
-#expand pref("toolkit.telemetry.prompted", __MOZ_TELEMETRY_DISPLAY_REV__),
-#expand pref("toolkit.telemetry.notifiedOptOut", __MOZ_TELEMETRY_DISPLAY_REV__)
+    // Set a future policy version to avoid the telemetry prompt.
+    pref("toolkit.telemetry.prompted", 999),
+    pref("toolkit.telemetry.notifiedOptOut", 999)
   ],
 
   init: function(isUpdate, url) {
@@ -52,6 +53,43 @@ var WebAppRT = {
       blocklist = blocklist.replace(/%APP_ID%/g, "webapprt-mobile@mozilla.org");
       Services.prefs.setCharPref("extensions.blocklist.url", blocklist);
     }
+
+    return this.findManifestUrlFor(url);
+  },
+
+  findManifestUrlFor: function(aUrl) {
+    let deferred = Promise.defer();
+    let request = navigator.mozApps.mgmt.getAll();
+    request.onsuccess = function() {
+      let apps = request.result;
+      for (let i = 0; i < apps.length; i++) {
+        let app = apps[i];
+        let manifest = new ManifestHelper(app.manifest, app.origin);
+
+        // First see if this url matches any manifests we have registered
+        // If so, get the launchUrl from the manifest and we'll launch with that
+        //let app = DOMApplicationRegistry.getAppByManifestURL(aUrl);
+        if (app.manifestURL == aUrl) {
+          BrowserApp.manifestUrl = aUrl;
+          deferred.resolve(manifest.fullLaunchPath());
+          return;
+        }
+    
+        // Otherwise, see if the apps launch path is this url
+        if (manifest.fullLaunchPath() == aUrl) {
+          BrowserApp.manifestUrl = app.manifestURL;
+          deferred.resolve(aUrl);
+          return;
+        }
+      }
+      deferred.reject("");
+    };
+
+    request.onerror = function() {
+      deferred.reject("");
+    };
+
+    return deferred.promise;
   },
 
   getDefaultPrefs: function() {

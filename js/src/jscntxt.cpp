@@ -10,6 +10,7 @@
  */
 
 #include <limits.h>
+#include <locale.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,6 +22,8 @@
 # include <fstream>
 # include <string>
 #endif  // ANDROID
+
+#include "mozilla/Util.h"
 
 #include "jstypes.h"
 #include "jsutil.h"
@@ -40,7 +43,6 @@
 #include "jsobj.h"
 #include "jsopcode.h"
 #include "jspubtd.h"
-#include "jsscope.h"
 #include "jsscript.h"
 #include "jsstr.h"
 #include "jsworkers.h"
@@ -54,9 +56,11 @@
 # include "methodjit/MethodJIT.h"
 #endif
 #include "gc/Marking.h"
+#include "js/CharacterEncoding.h"
 #include "js/MemoryMetrics.h"
 #include "frontend/TokenStream.h"
 #include "frontend/ParseMaps.h"
+#include "vm/Shape.h"
 #include "yarr/BumpPointerAllocator.h"
 
 #include "jsatominlines.h"
@@ -68,6 +72,7 @@ using namespace js;
 using namespace js::gc;
 
 using mozilla::DebugOnly;
+using mozilla::PointerRangeSize;
 
 bool
 js::AutoCycleDetector::init()
@@ -129,6 +134,8 @@ JSRuntime::sizeOfIncludingThis(JSMallocSizeOfFun mallocSizeOf, RuntimeSizes *rtS
         rtSizes->unusedCode = 0;
     }
 
+    rtSizes->regexpData = bumpAlloc_ ? bumpAlloc_->sizeOfNonHeapData() : 0;
+
     rtSizes->stack = stackSpace.sizeOf();
 
     rtSizes->gcMarker = gcMarker.sizeOfExcludingThis(mallocSizeOf);
@@ -143,15 +150,18 @@ JSRuntime::sizeOfIncludingThis(JSMallocSizeOfFun mallocSizeOf, RuntimeSizes *rtS
 size_t
 JSRuntime::sizeOfExplicitNonHeap()
 {
-    size_t size = stackSpace.sizeOf();
+    size_t n = stackSpace.sizeOf();
 
     if (execAlloc_) {
         size_t jaegerCode, ionCode, regexpCode, unusedCode;
         execAlloc_->sizeOfCode(&jaegerCode, &ionCode, &regexpCode, &unusedCode);
-        size += jaegerCode + ionCode + regexpCode + unusedCode;
+        n += jaegerCode + ionCode + regexpCode + unusedCode;
     }
 
-    return size;
+    if (bumpAlloc_)
+        n += bumpAlloc_->sizeOfNonHeapData();
+
+    return n;
 }
 
 void
@@ -163,7 +173,7 @@ JSRuntime::triggerOperationCallback()
      * into a weird state where interrupt is stuck at 0 but ionStackLimit is
      * MAXADDR.
      */
-    ionStackLimit = -1;
+    mainThread.ionStackLimit = -1;
 
     /*
      * Use JS_ATOMIC_SET in the hope that it ensures the write will become
@@ -241,6 +251,58 @@ JSRuntime::createJaegerRuntime(JSContext *cx)
 }
 #endif
 
+void
+JSCompartment::sweepCallsiteClones()
+{
+    if (callsiteClones.initialized()) {
+        for (CallsiteCloneTable::Enum e(callsiteClones); !e.empty(); e.popFront()) {
+            CallsiteCloneKey key = e.front().key;
+            JSFunction *fun = e.front().value;
+            if (!key.script->isMarked() || !fun->isMarked())
+                e.removeFront();
+        }
+    }
+}
+
+RawFunction
+js::CloneFunctionAtCallsite(JSContext *cx, HandleFunction fun, HandleScript script, jsbytecode *pc)
+{
+    JS_ASSERT(cx->typeInferenceEnabled());
+    JS_ASSERT(fun->isCloneAtCallsite());
+    JS_ASSERT(types::UseNewTypeForClone(fun));
+    JS_ASSERT(!fun->nonLazyScript()->enclosingStaticScope());
+
+    typedef CallsiteCloneKey Key;
+    typedef CallsiteCloneTable Table;
+
+    Table &table = cx->compartment->callsiteClones;
+    if (!table.initialized() && !table.init())
+        return NULL;
+
+    Key key;
+    key.script = script;
+    key.offset = pc - script->code;
+    key.original = fun;
+
+    Table::AddPtr p = table.lookupForAdd(key);
+    if (p)
+        return p->value;
+
+    RootedObject parent(cx, fun->environment());
+    RootedFunction clone(cx, CloneFunctionObject(cx, fun, parent,
+                                                 JSFunction::ExtendedFinalizeKind));
+    if (!clone)
+        return NULL;
+
+    // Store a link back to the original for function.caller.
+    clone->setExtendedSlot(0, ObjectValue(*fun));
+
+    if (!table.relookupOrAdd(p, key, clone.get()))
+        return NULL;
+
+    return clone;
+}
+
 JSContext *
 js::NewContext(JSRuntime *rt, size_t stackChunkSize)
 {
@@ -263,8 +325,6 @@ js::NewContext(JSRuntime *rt, size_t stackChunkSize)
      */
     bool first = rt->contextList.isEmpty();
     rt->contextList.insertBack(cx);
-
-    js_InitRandom(cx);
 
     /*
      * If cx is the first context on this runtime, initialize well-known atoms,
@@ -307,8 +367,6 @@ js::DestroyContext(JSContext *cx, DestroyContextMode mode)
 {
     JSRuntime *rt = cx->runtime;
     JS_AbortIfWrongThread(rt);
-
-    JS_ASSERT(!cx->enumerators);
 
 #ifdef JS_THREADSAFE
     JS_ASSERT(cx->outstandingRequests == 0);
@@ -409,7 +467,7 @@ ReportError(JSContext *cx, const char *message, JSErrorReport *reportp,
          * the reporter triggers an over-recursion.
          */
         int stackDummy;
-        if (!JS_CHECK_STACK_SIZE(cx->runtime->nativeStackLimit, &stackDummy))
+        if (!JS_CHECK_STACK_SIZE(cx->mainThread().nativeStackLimit, &stackDummy))
             return;
 
         if (cx->errorReporter)
@@ -499,8 +557,10 @@ js_ReportOverRecursed(JSContext *maybecx)
 void
 js_ReportAllocationOverflow(JSContext *maybecx)
 {
-    if (maybecx)
+    if (maybecx) {
+        AutoSuppressGC suppressGC(maybecx);
         JS_ReportErrorNumber(maybecx, js_GetErrorMessage, NULL, JSMSG_ALLOC_OVERFLOW);
+    }
 }
 
 /*
@@ -575,13 +635,14 @@ js::ReportUsageError(JSContext *cx, HandleObject callee, const char *msg)
 {
     const char *usageStr = "usage";
     PropertyName *usageAtom = Atomize(cx, usageStr, strlen(usageStr))->asPropertyName();
-    DebugOnly<RawShape> shape = static_cast<RawShape>(callee->nativeLookup(cx, NameToId(usageAtom)));
+    RootedId id(cx, NameToId(usageAtom));
+    DebugOnly<RawShape> shape = static_cast<RawShape>(callee->nativeLookup(cx, id));
     JS_ASSERT(!shape->configurable());
     JS_ASSERT(!shape->writable());
     JS_ASSERT(shape->hasDefaultGetter());
 
-    jsval usage;
-    if (!JS_LookupProperty(cx, callee, "usage", &usage))
+    RootedValue usage(cx);
+    if (!JS_LookupProperty(cx, callee, "usage", usage.address()))
         return;
 
     if (JSVAL_IS_VOID(usage)) {
@@ -781,8 +842,10 @@ js_ExpandErrorArguments(JSContext *cx, JSErrorCallback callback,
                 JS_ASSERT(expandedArgs == argCount);
                 *out = 0;
                 js_free(buffer);
-                *messagep = DeflateString(cx, reportp->ucmessage,
-                                          size_t(out - reportp->ucmessage));
+                TwoByteChars ucmsg(reportp->ucmessage,
+                                   PointerRangeSize(static_cast<const jschar *>(reportp->ucmessage),
+                                                    static_cast<const jschar *>(out)));
+                *messagep = LossyTwoByteCharsToNewLatin1CharsZ(cx, ucmsg).c_str();
                 if (!*messagep)
                     goto error;
             }
@@ -1022,7 +1085,7 @@ js_ReportValueErrorFlags(JSContext *cx, unsigned flags, const unsigned errorNumb
     return ok;
 }
 
-JSErrorFormatString js_ErrorFormatString[JSErr_Limit] = {
+const JSErrorFormatString js_ErrorFormatString[JSErr_Limit] = {
 #define MSG_DEF(name, number, count, exception, format) \
     { format, count, exception } ,
 #include "js.msg"
@@ -1097,6 +1160,7 @@ JSContext::JSContext(JSRuntime *rt)
     throwing(false),
     exception(UndefinedValue()),
     runOptions(0),
+    defaultLocale(NULL),
     reportGranularity(JS_DEFAULT_JITREPORT_GRANULARITY),
     localeCallbacks(NULL),
     resolvingList(NULL),
@@ -1115,7 +1179,6 @@ JSContext::JSContext(JSRuntime *rt)
     outstandingRequests(0),
 #endif
     resolveFlags(0),
-    rngSeed(0),
     iterValue(MagicValue(JS_NO_ITER_VALUE)),
 #ifdef JS_METHODJIT
     methodJitEnabled(false),
@@ -1123,7 +1186,6 @@ JSContext::JSContext(JSRuntime *rt)
 #ifdef MOZ_TRACE_JSCALLS
     functionCallback(NULL),
 #endif
-    enumerators(NULL),
     innermostGenerator_(NULL),
 #ifdef DEBUG
     stackIterAssertionEnabled(true),
@@ -1144,10 +1206,55 @@ JSContext::JSContext(JSRuntime *rt)
 JSContext::~JSContext()
 {
     /* Free the stuff hanging off of cx. */
+    js_free(defaultLocale);
     if (parseMapPool_)
         js_delete(parseMapPool_);
 
     JS_ASSERT(!resolvingList);
+}
+
+bool
+JSContext::setDefaultLocale(const char *locale)
+{
+    if (!locale)
+        return false;
+    resetDefaultLocale();
+    defaultLocale = JS_strdup(this, locale);
+    return defaultLocale != NULL;
+}
+
+void
+JSContext::resetDefaultLocale()
+{
+    js_free(defaultLocale);
+    defaultLocale = NULL;
+}
+
+const char *
+JSContext::getDefaultLocale()
+{
+    if (defaultLocale)
+        return defaultLocale;
+
+    char *locale, *lang, *p;
+#ifdef HAVE_SETLOCALE
+    locale = setlocale(LC_ALL, NULL);
+#else
+    locale = getenv("LANG");
+#endif
+    // convert to a well-formed BCP 47 language tag
+    if (!locale || !strcmp(locale, "C"))
+        locale = (char *) "und";
+    lang = JS_strdup(this, locale);
+    if (!lang)
+        return NULL;
+    if ((p = strchr(lang, '.')))
+        *p = '\0';
+    while ((p = strchr(lang, '_')))
+        *p = '-';
+
+    defaultLocale = lang;
+    return defaultLocale;
 }
 
 /*
@@ -1236,7 +1343,7 @@ JSRuntime::setGCMaxMallocBytes(size_t value)
 }
 
 void
-JSRuntime::updateMallocCounter(JSContext *cx, size_t nbytes)
+JSRuntime::updateMallocCounter(JSCompartment *comp, size_t nbytes)
 {
     /* We tolerate any thread races when updating gcMallocBytes. */
     ptrdiff_t oldCount = gcMallocBytes;
@@ -1244,8 +1351,8 @@ JSRuntime::updateMallocCounter(JSContext *cx, size_t nbytes)
     gcMallocBytes = newCount;
     if (JS_UNLIKELY(newCount <= 0 && oldCount > 0))
         onTooMuchMalloc();
-    else if (cx && cx->compartment)
-        cx->compartment->updateMallocCounter(nbytes);
+    else if (comp)
+        comp->updateMallocCounter(nbytes);
 }
 
 JS_FRIEND_API(void)

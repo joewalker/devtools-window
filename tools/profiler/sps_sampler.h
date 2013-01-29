@@ -8,9 +8,11 @@
 #include <stdarg.h>
 #include "mozilla/ThreadLocal.h"
 #include "nscore.h"
+#include "mozilla/Assertions.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Util.h"
 #include "nsAlgorithm.h"
+#include <algorithm>
 
 
 /* QT has a #define for the word "slots" and jsfriendapi.h has a struct with
@@ -64,6 +66,9 @@ extern bool stack_key_initialized;
 #define SAMPLE_LABEL(name_space, info) mozilla::SamplerStackFrameRAII SAMPLER_APPEND_LINE_NUMBER(sampler_raii)(name_space "::" info, __LINE__)
 #define SAMPLE_LABEL_PRINTF(name_space, info, ...) mozilla::SamplerStackFramePrintfRAII SAMPLER_APPEND_LINE_NUMBER(sampler_raii)(name_space "::" info, __LINE__, __VA_ARGS__)
 #define SAMPLE_MARKER(info) mozilla_sampler_add_marker(info)
+#define SAMPLE_MAIN_THREAD_LABEL(name_space, info)  MOZ_ASSERT(NS_IsMainThread(), "This can only be called on the main thread"); mozilla::SamplerStackFrameRAII SAMPLER_APPEND_LINE_NUMBER(sampler_raii)(name_space "::" info, __LINE__)
+#define SAMPLE_MAIN_THREAD_LABEL_PRINTF(name_space, info, ...)  MOZ_ASSERT(NS_IsMainThread(), "This can only be called on the main thread"); mozilla::SamplerStackFramePrintfRAII SAMPLER_APPEND_LINE_NUMBER(sampler_raii)(name_space "::" info, __LINE__, __VA_ARGS__)
+#define SAMPLE_MAIN_THREAD_MARKER(info)  MOZ_ASSERT(NS_IsMainThread(), "This can only be called on the main thread"); mozilla_sampler_add_marker(info)
 
 #define SAMPLER_PRINT_LOCATION() mozilla_sampler_print_location()
 
@@ -131,6 +136,9 @@ LinuxKernelMemoryBarrierFunc pLinuxKernelMemoryBarrier __attribute__((weak)) =
 # define STORE_SEQUENCER() pLinuxKernelMemoryBarrier()
 #elif defined(V8_HOST_ARCH_IA32) || defined(V8_HOST_ARCH_X64)
 # if defined(_MSC_VER)
+#if _MSC_VER > 1400
+#  include <intrin.h>
+#else // _MSC_VER > 1400
     // MSVC2005 has a name collision bug caused when both <intrin.h> and <winnt.h> are included together.
 #ifdef _WINNT_
 #  define _interlockedbittestandreset _interlockedbittestandreset_NAME_CHANGED_TO_AVOID_MSVS2005_ERROR
@@ -144,6 +152,7 @@ LinuxKernelMemoryBarrierFunc pLinuxKernelMemoryBarrier __attribute__((weak)) =
    // Even though MSVC2005 has the intrinsic _ReadWriteBarrier, it fails to link to it when it's
    // not explicitly declared.
 #  pragma intrinsic(_ReadWriteBarrier)
+#endif // _MSC_VER > 1400
 #  define STORE_SEQUENCER() _ReadWriteBarrier();
 # elif defined(__INTEL_COMPILER)
 #  define STORE_SEQUENCER() __memory_barrier();
@@ -174,8 +183,13 @@ JSObject *mozilla_sampler_get_profile_data(JSContext *aCx);
 const char** mozilla_sampler_get_features();
 void mozilla_sampler_init();
 void mozilla_sampler_shutdown();
-
 void mozilla_sampler_print_location();
+// Lock the profiler. When locked the profiler is (1) stopped,
+// (2) profile data is cleared, (3) profiler-locked is fired.
+// This is used to lock down the profiler during private browsing
+void mozilla_sampler_lock();
+// Unlock the profiler, leaving it stopped and fires profiler-unlocked.
+void mozilla_sampler_unlock();
 
 namespace mozilla {
 
@@ -353,11 +367,16 @@ public:
   }
   uint32_t stackSize() const
   {
-    return NS_MIN<uint32_t>(mStackPointer, mozilla::ArrayLength(mStack));
+    return std::min<uint32_t>(mStackPointer, mozilla::ArrayLength(mStack));
   }
 
   void sampleRuntime(JSRuntime *runtime) {
     mRuntime = runtime;
+    if (!runtime) {
+      // JS shut down
+      return;
+    }
+
     JS_STATIC_ASSERT(sizeof(mStack[0]) == sizeof(js::ProfileEntry));
     js::SetRuntimeProfilingStack(runtime,
                                  (js::ProfileEntry*) mStack,

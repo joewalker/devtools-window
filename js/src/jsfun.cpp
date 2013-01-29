@@ -31,7 +31,6 @@
 #include "jsopcode.h"
 #include "jspropertytree.h"
 #include "jsproxy.h"
-#include "jsscope.h"
 #include "jsscript.h"
 #include "jsstr.h"
 
@@ -41,6 +40,7 @@
 #include "gc/Marking.h"
 #include "vm/Debugger.h"
 #include "vm/ScopeObject.h"
+#include "vm/Shape.h"
 #include "vm/StringBuffer.h"
 #include "vm/Xdr.h"
 
@@ -85,6 +85,13 @@ fun_getProperty(JSContext *cx, HandleObject obj_, HandleId id, MutableHandleValu
     RootedFunction fun(cx, obj->toFunction());
 
     /*
+     * Callsite clones should never escape to script, so get the original
+     * function.
+     */
+    if (fun->isCallsiteClone())
+        fun = fun->getExtendedSlot(0).toObject().toFunction();
+
+    /*
      * Mark the function's script as uninlineable, to expand any of its
      * frames on the stack before we go looking for them. This allows the
      * below walk to only check each explicit frame rather than needing to
@@ -99,7 +106,7 @@ fun_getProperty(JSContext *cx, HandleObject obj_, HandleId id, MutableHandleValu
     vp.setNull();
 
     /* Find fun's top-most activation record. */
-    StackIter iter(cx);
+    NonBuiltinScriptFrameIter iter(cx);
     for (; !iter.done(); ++iter) {
         if (!iter.isFunctionFrame() || iter.isEvalFrame())
             continue;
@@ -211,22 +218,22 @@ fun_enumerate(JSContext *cx, HandleObject obj)
 
     if (!obj->isBoundFunction()) {
         id = NameToId(cx->names().classPrototype);
-        if (!JSObject::hasProperty(cx, obj, id, &found, JSRESOLVE_QUALIFIED))
+        if (!JSObject::hasProperty(cx, obj, id, &found, 0))
             return false;
     }
 
     id = NameToId(cx->names().length);
-    if (!JSObject::hasProperty(cx, obj, id, &found, JSRESOLVE_QUALIFIED))
+    if (!JSObject::hasProperty(cx, obj, id, &found, 0))
         return false;
 
     id = NameToId(cx->names().name);
-    if (!JSObject::hasProperty(cx, obj, id, &found, JSRESOLVE_QUALIFIED))
+    if (!JSObject::hasProperty(cx, obj, id, &found, 0))
         return false;
 
     for (unsigned i = 0; i < ArrayLength(poisonPillProps); i++) {
         const uint16_t offset = poisonPillProps[i];
         id = NameToId(OFFSET_TO_NAME(cx->runtime, offset));
-        if (!JSObject::hasProperty(cx, obj, id, &found, JSRESOLVE_QUALIFIED))
+        if (!JSObject::hasProperty(cx, obj, id, &found, 0))
             return false;
     }
 
@@ -672,7 +679,7 @@ js::FunctionToString(JSContext *cx, HandleFunction fun, bool bodyOnly, bool lamb
 
             // Fish out the argument names.
             BindingVector *localNames = cx->new_<BindingVector>(cx);
-            js::ScopedDeletePtr<BindingVector> freeNames(localNames);
+            ScopedJSDeletePtr<BindingVector> freeNames(localNames);
             if (!FillBindingVector(script, localNames))
                 return NULL;
             for (unsigned i = 0; i < fun->nargs; i++) {
@@ -817,7 +824,7 @@ fun_toSource(JSContext *cx, unsigned argc, Value *vp)
 JSBool
 js_fun_call(JSContext *cx, unsigned argc, Value *vp)
 {
-    Value fval = vp[1];
+    RootedValue fval(cx, vp[1]);
 
     if (!js_IsCallable(fval)) {
         ReportIncompatibleMethod(cx, CallReceiverFromVp(vp), &FunctionClass);
@@ -825,10 +832,8 @@ js_fun_call(JSContext *cx, unsigned argc, Value *vp)
     }
 
     Value *argv = vp + 2;
-    Value thisv;
-    if (argc == 0) {
-        thisv.setUndefined();
-    } else {
+    RootedValue thisv(cx, UndefinedValue());
+    if (argc != 0) {
         thisv = argv[0];
 
         argc--;
@@ -892,7 +897,7 @@ js_fun_apply(JSContext *cx, unsigned argc, Value *vp)
             JS_ASSERT(frame.isNative());
             // Stop on the next Ion JS Frame.
             ++frame;
-            ion::InlineFrameIterator iter(&frame);
+            ion::InlineFrameIterator iter(cx, &frame);
 
             unsigned length = iter.numActualArgs();
             JS_ASSERT(length <= StackSpace::ARGS_LENGTH_MAX);
@@ -905,7 +910,7 @@ js_fun_apply(JSContext *cx, unsigned argc, Value *vp)
             args.setThis(vp[2]);
 
             /* Steps 7-8. */
-            iter.forEachCanonicalActualArg(CopyTo(args.array()), 0, -1);
+            iter.forEachCanonicalActualArg(cx, CopyTo(args.array()), 0, -1);
         } else
 #endif
         {
@@ -1054,7 +1059,7 @@ JSFunction::initializeLazyScript(JSContext *cx)
 JSBool
 js::CallOrConstructBoundFunction(JSContext *cx, unsigned argc, Value *vp)
 {
-    JSFunction *fun = vp[0].toObject().toFunction();
+    RootedFunction fun(cx, vp[0].toObject().toFunction());
     JS_ASSERT(fun->isBoundFunction());
 
     bool constructing = IsConstructing(vp);
@@ -1258,7 +1263,7 @@ js::Function(JSContext *cx, unsigned argc, Value *vp)
         size_t args_length = 0;
         for (unsigned i = 0; i < n; i++) {
             /* Collect the lengths for all the function-argument arguments. */
-            arg = ToString(cx, args[i]);
+            arg = ToString<CanGC>(cx, args[i]);
             if (!arg)
                 return false;
             args[i].setString(arg);
@@ -1373,19 +1378,18 @@ js::Function(JSContext *cx, unsigned argc, Value *vp)
     }
 #endif
 
-    JS::Anchor<JSString *> strAnchor(NULL);
-
     RootedString str(cx);
     if (!args.length())
         str = cx->runtime->emptyString;
     else
-        str = ToString(cx, args[args.length() - 1]);
+        str = ToString<CanGC>(cx, args[args.length() - 1]);
     if (!str)
         return false;
     JSStableString *stable = str->ensureStable(cx);
     if (!stable)
         return false;
-    strAnchor.set(str);
+
+    JS::Anchor<JSString *> strAnchor(str);
     StableCharPtr chars = stable->chars();
     size_t length = stable->length();
 
@@ -1459,28 +1463,29 @@ js_NewFunction(JSContext *cx, HandleObject funobjArg, Native native, unsigned na
     return fun;
 }
 
-JSFunction * JS_FASTCALL
-js_CloneFunctionObject(JSContext *cx, HandleFunction fun, HandleObject parent,
-                       HandleObject proto, gc::AllocKind kind)
+JSFunction *
+js::CloneFunctionObject(JSContext *cx, HandleFunction fun, HandleObject parent,
+                        gc::AllocKind kind)
 {
     AssertCanGC();
     JS_ASSERT(parent);
-    JS_ASSERT(proto);
     JS_ASSERT(!fun->isBoundFunction());
 
-    RawObject cloneobj =
+    JSObject *cloneobj =
         NewObjectWithClassProto(cx, &FunctionClass, NULL, SkipScopeParent(parent), kind);
     if (!cloneobj)
         return NULL;
-    RootedFunction clone(cx, cloneobj->toFunction());
+    JSFunction *clone = cloneobj->toFunction();
 
     clone->nargs = fun->nargs;
     clone->flags = fun->flags & ~JSFunction::EXTENDED;
     if (fun->isInterpreted()) {
         if (fun->isInterpretedLazy()) {
+            RootedFunction cloneRoot(cx, clone);
             AutoCompartment ac(cx, fun);
             if (!fun->getOrCreateScript(cx))
                 return NULL;
+            clone = cloneRoot;
         }
         clone->initScript(fun->nonLazyScript());
         clone->initEnvironment(parent);
@@ -1494,51 +1499,34 @@ js_CloneFunctionObject(JSContext *cx, HandleFunction fun, HandleObject parent,
         clone->initializeExtended();
     }
 
-    if (cx->compartment == fun->compartment() && !types::UseNewTypeForClone(fun)) {
+    if (cx->compartment == fun->compartment() &&
+        !fun->hasSingletonType() &&
+        !types::UseNewTypeForClone(fun))
+    {
         /*
-         * We can use the same type as the original function provided that (a)
-         * its prototype is correct, and (b) its type is not a singleton. The
-         * first case will hold in all compileAndGo code, and the second case
-         * will have been caught by CloneFunctionObject coming from function
-         * definitions or read barriers, so will not get here.
+         * Clone the function, reusing its script. We can use the same type as
+         * the original function provided that its prototype is correct.
          */
-        if (fun->getProto() == proto && !fun->hasSingletonType())
+        if (fun->getProto() == clone->getProto())
             clone->setType(fun->type());
-    } else {
-        if (!JSObject::setSingletonType(cx, clone))
-            return NULL;
-
-        /*
-         * Across compartments we have to clone the script for interpreted
-         * functions. Cross-compartment cloning only happens via JSAPI
-         * (JS_CloneFunctionObject) which dynamically ensures that 'script' has
-         * no enclosing lexical scope (only the global scope).
-         */
-        if (clone->isInterpreted()) {
-            RootedScript script(cx, clone->nonLazyScript());
-            JS_ASSERT(script->compartment() == fun->compartment());
-            JS_ASSERT_IF(script->compartment() != cx->compartment,
-                         !script->enclosingStaticScope());
-
-            RootedObject scope(cx, script->enclosingStaticScope());
-
-            clone->mutableScript().init(NULL);
-
-            RootedScript cscript(cx, CloneScript(cx, scope, clone, script));
-            if (!cscript)
-                return NULL;
-
-            clone->setScript(cscript);
-            cscript->setFunction(clone);
-
-            GlobalObject *global = script->compileAndGo ? &script->global() : NULL;
-
-            script = clone->nonLazyScript();
-            CallNewScriptHook(cx, script, clone);
-            Debugger::onNewScript(cx, script, global);
-        }
+        return clone;
     }
-    return clone;
+
+    RootedFunction cloneRoot(cx, clone);
+
+    if (!JSObject::setSingletonType(cx, cloneRoot))
+        return NULL;
+
+    /*
+     * Across compartments we have to clone the script for interpreted
+     * functions. Cross-compartment cloning only happens via JSAPI
+     * (JS_CloneFunctionObject) which dynamically ensures that 'script' has
+     * no enclosing lexical scope (only the global scope).
+     */
+    if (cloneRoot->isInterpreted() && !CloneFunctionScript(cx, fun, cloneRoot))
+        return NULL;
+
+    return cloneRoot;
 }
 
 JSFunction *
@@ -1585,7 +1573,7 @@ js_DefineFunction(JSContext *cx, HandleObject obj, HandleId id, Native native,
 void
 js::ReportIncompatibleMethod(JSContext *cx, CallReceiver call, Class *clasp)
 {
-    Value thisv = call.thisv();
+    RootedValue thisv(cx, call.thisv());
 
 #ifdef DEBUG
     if (thisv.isObject()) {

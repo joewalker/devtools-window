@@ -45,7 +45,7 @@ using mozilla::DefaultXDisplay;
 #include "nsIWebBrowserChrome.h"
 #include "nsLayoutUtils.h"
 #include "nsIPluginWidget.h"
-#include "nsIViewManager.h"
+#include "nsViewManager.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIDOMHTMLObjectElement.h"
 #include "nsIAppShell.h"
@@ -304,7 +304,6 @@ nsPluginInstanceOwner::nsPluginInstanceOwner()
 
   mObjectFrame = nullptr;
   mContent = nullptr;
-  mTagText = nullptr;
   mWidgetCreationComplete = false;
 #ifdef XP_MACOSX
   memset(&mCGPluginPortCopy, 0, sizeof(NP_CGContext));
@@ -373,11 +372,6 @@ nsPluginInstanceOwner::~nsPluginInstanceOwner()
   if (mCachedAttrParamValues) {
     NS_Free(mCachedAttrParamValues);
     mCachedAttrParamValues = nullptr;
-  }
-
-  if (mTagText) {
-    NS_Free(mTagText);
-    mTagText = nullptr;
   }
 
   PLUG_DeletePluginNativeWindow(mPluginWindow);
@@ -693,7 +687,7 @@ NS_IMETHODIMP nsPluginInstanceOwner::GetNetscapeWindow(void *value)
   
 #if defined(XP_WIN) || defined(XP_OS2)
   void** pvalue = (void**)value;
-  nsIViewManager* vm = mObjectFrame->PresContext()->GetPresShell()->GetViewManager();
+  nsViewManager* vm = mObjectFrame->PresContext()->GetPresShell()->GetViewManager();
   if (!vm)
     return NS_ERROR_FAILURE;
 #if defined(XP_WIN)
@@ -727,7 +721,7 @@ NS_IMETHODIMP nsPluginInstanceOwner::GetNetscapeWindow(void *value)
     
     nsIWidget* win = mObjectFrame->GetNearestWidget();
     if (win) {
-      nsIView *view = nsIView::GetViewFor(win);
+      nsView *view = nsView::GetViewFor(win);
       NS_ASSERTION(view, "No view for widget");
       nsPoint offset = view->GetOffsetTo(nullptr);
       
@@ -743,14 +737,14 @@ NS_IMETHODIMP nsPluginInstanceOwner::GetNetscapeWindow(void *value)
 #endif
   // simply return the topmost document window
   nsCOMPtr<nsIWidget> widget;
-  nsresult rv = vm->GetRootWidget(getter_AddRefs(widget));            
+  vm->GetRootWidget(getter_AddRefs(widget));
   if (widget) {
     *pvalue = (void*)widget->GetNativeData(NS_NATIVE_WINDOW);
   } else {
     NS_ASSERTION(widget, "couldn't get doc's widget in getting doc's window handle");
   }
 
-  return rv;
+  return NS_OK;
 #elif (defined(MOZ_WIDGET_GTK) || defined(MOZ_WIDGET_QT)) && defined(MOZ_X11)
   // X11 window managers want the toplevel window for WM_TRANSIENT_FOR.
   nsIWidget* win = mObjectFrame->GetNearestWidget();
@@ -834,49 +828,6 @@ NS_IMETHODIMP nsPluginInstanceOwner::GetTagType(nsPluginTagType *result)
   else if (atom == nsGkAtoms::object)
     *result = nsPluginTagType_Object;
 
-  return NS_OK;
-}
-
-NS_IMETHODIMP nsPluginInstanceOwner::GetTagText(const char* *result)
-{
-  NS_ENSURE_ARG_POINTER(result);
-  if (nullptr == mTagText) {
-    nsresult rv;
-    nsCOMPtr<nsIDOMNode> node(do_QueryInterface(mContent, &rv));
-    if (NS_FAILED(rv))
-      return rv;
-
-    nsCOMPtr<nsIDocument> document;
-    rv = GetDocument(getter_AddRefs(document));
-    if (NS_FAILED(rv))
-      return rv;
-
-    nsCOMPtr<nsIDOMDocument> domDoc = do_QueryInterface(document);
-    NS_ASSERTION(domDoc, "Need a document");
-
-    nsCOMPtr<nsIDocumentEncoder> docEncoder(do_CreateInstance(NS_DOC_ENCODER_CONTRACTID_BASE "text/html", &rv));
-    if (NS_FAILED(rv))
-      return rv;
-    rv = docEncoder->Init(domDoc, NS_LITERAL_STRING("text/html"), nsIDocumentEncoder::OutputEncodeBasicEntities);
-    if (NS_FAILED(rv))
-      return rv;
-
-    nsRefPtr<nsRange> range = new nsRange();
-    rv = range->SelectNode(node);
-    if (NS_FAILED(rv))
-      return rv;
-
-    docEncoder->SetRange(range);
-    nsString elementHTML;
-    rv = docEncoder->EncodeToString(elementHTML);
-    if (NS_FAILED(rv))
-      return rv;
-
-    mTagText = ToNewUTF8String(elementHTML);
-    if (!mTagText)
-      return NS_ERROR_OUT_OF_MEMORY;
-  }
-  *result = mTagText;
   return NS_OK;
 }
 
@@ -1018,7 +969,7 @@ NS_IMETHODIMP nsPluginInstanceOwner::GetDocumentEncoding(const char* *result)
   if (charset.EqualsLiteral("us-ascii")) {
     *result = PL_strdup("US_ASCII");
   } else if (charset.EqualsLiteral("ISO-8859-1") ||
-      !nsCRT::strncmp(PromiseFlatCString(charset).get(), "UTF", 3)) {
+      !nsCRT::strncmp(charset.get(), "UTF", 3)) {
     *result = ToNewCString(charset);
   } else {
     if (!gCharsetMap) {

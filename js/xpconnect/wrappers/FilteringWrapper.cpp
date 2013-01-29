@@ -61,9 +61,9 @@ FilterSetter(JSContext *cx, JSObject *wrapper, jsid id, js::PropertyDescriptor *
 template <typename Base, typename Policy>
 bool
 FilteringWrapper<Base, Policy>::getPropertyDescriptor(JSContext *cx, JSObject *wrapper, jsid id,
-                                                      bool set, js::PropertyDescriptor *desc)
+                                                      js::PropertyDescriptor *desc, unsigned flags)
 {
-    if (!Base::getPropertyDescriptor(cx, wrapper, id, set, desc))
+    if (!Base::getPropertyDescriptor(cx, wrapper, id, desc, flags))
         return false;
     return FilterSetter<Policy>(cx, wrapper, id, desc);
 }
@@ -71,9 +71,10 @@ FilteringWrapper<Base, Policy>::getPropertyDescriptor(JSContext *cx, JSObject *w
 template <typename Base, typename Policy>
 bool
 FilteringWrapper<Base, Policy>::getOwnPropertyDescriptor(JSContext *cx, JSObject *wrapper, jsid id,
-                                                         bool set, js::PropertyDescriptor *desc)
+                                                         js::PropertyDescriptor *desc,
+                                                         unsigned flags)
 {
-    if (!Base::getOwnPropertyDescriptor(cx, wrapper, id, set, desc))
+    if (!Base::getOwnPropertyDescriptor(cx, wrapper, id, desc, flags))
         return false;
     return FilterSetter<Policy>(cx, wrapper, id, desc);
 }
@@ -145,7 +146,7 @@ FilteringWrapper<Base, Policy>::enter(JSContext *cx, JSObject *wrapper, jsid id,
 #define SCSOW FilteringWrapper<SameCompartmentSecurityWrapper, OnlyIfSubjectIsSystem>
 #define XOW FilteringWrapper<SecurityXrayXPCWN, CrossOriginAccessiblePropertiesOnly>
 #define DXOW   FilteringWrapper<SecurityXrayDOM, CrossOriginAccessiblePropertiesOnly>
-#define NNXOW FilteringWrapper<CrossCompartmentSecurityWrapper, CrossOriginAccessiblePropertiesOnly>
+#define NNXOW FilteringWrapper<CrossCompartmentSecurityWrapper, Opaque>
 #define CW FilteringWrapper<SameCompartmentSecurityWrapper, ComponentsObjectPolicy>
 #define XCW FilteringWrapper<CrossCompartmentSecurityWrapper, ComponentsObjectPolicy>
 template<> SOW SOW::singleton(WrapperFactory::SCRIPT_ACCESS_ONLY_FLAG |

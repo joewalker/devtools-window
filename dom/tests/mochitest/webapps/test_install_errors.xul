@@ -29,6 +29,9 @@ var steps = [
   invalidLaunchPath2,
   invalidEntryPoint,
   invalidLocaleEntryPoint,
+  invalidActivityHref,
+  invalidActivityHref2,
+  invalidMessage,
   fileURL,
   originNotAllowed,
   originAllowed,
@@ -79,7 +82,7 @@ function permissionDenied(next) {
 
   request.onsuccess = function onInstall() {
     todo(false, "manifest without installs_allowed_from fails");
-    this.result.uninstall().onsuccess = function onUninstall() {
+    navigator.mozApps.mgmt.uninstall(this.result).onsuccess = function onUninstall() {
       next();
     };
   };
@@ -98,7 +101,7 @@ function invalidContent(next) {
 
   request.onsuccess = function onInstall() {
     ok(false, "manifest with bad content type should fail");
-    this.result.uninstall().onsuccess = function onUninstall() {
+    navigator.mozApps.mgmt.uninstall(this.result).onsuccess = function onUninstall() {
       next();
     };
   };
@@ -144,6 +147,36 @@ function invalidLocaleEntryPoint(next) {
   };
 }
 
+function invalidActivityHref(next) {
+  var url = "http://test/chrome/dom/tests/mochitest/webapps/apps/invalid_activity_href.webapp";
+
+  confirmNextInstall();
+  navigator.mozApps.install(url, null).onerror = function onInstallError() {
+    is(this.error.name, "INVALID_MANIFEST", "Manifest has non-relative URI for activity href");
+    next();
+  };
+}
+
+function invalidActivityHref2(next) {
+  var url = "http://test/chrome/dom/tests/mochitest/webapps/apps/invalid_activity_href2.webapp";
+
+  confirmNextInstall();
+  navigator.mozApps.install(url, null).onerror = function onInstallError() {
+    is(this.error.name, "INVALID_MANIFEST", "Manifest has data: URI for activity href");
+    next();
+  };
+}
+
+function invalidMessage(next) {
+  var url = "http://test/chrome/dom/tests/mochitest/webapps/apps/invalid_message.webapp";
+
+  confirmNextInstall();
+  navigator.mozApps.install(url, null).onerror = function onInstallError() {
+    is(this.error.name, "INVALID_MANIFEST", "Manifest has absolute message href");
+    next();
+  };
+}
+
 function installPackageNotImplemented(next) {
   ok(!("installPackage" in navigator.mozApps),
      "installPackage not in navigator.mozApps");
@@ -184,7 +217,7 @@ function originNotAllowed(next) {
 
   request.onsuccess = function onInstall() {
     ok(false, "test should fail because of installs_allowed_from");
-    this.result.uninstall().onsuccess = function onUninstall() {
+    navigator.mozApps.mgmt.uninstall(this.result).onsuccess = function onUninstall() {
       next();
     };
   };
@@ -203,7 +236,7 @@ function originAllowed(next) {
 
   request.onsuccess = function onInstall() {
     ok(true, "test origin is in installs_allowed_from");
-    this.result.uninstall().onsuccess = function onUninstall() {
+    navigator.mozApps.mgmt.uninstall(this.result).onsuccess = function onUninstall() {
       next();
     };
   };

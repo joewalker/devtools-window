@@ -36,6 +36,7 @@
 #include "qcms.h"
 
 #include "mozilla/Preferences.h"
+#include <algorithm>
 
 namespace mozilla {
 namespace layers {
@@ -89,9 +90,11 @@ NS_IMPL_ISUPPORTS_INHERITED1(nsCocoaWindow, Inherited, nsPIWidgetCocoa)
 static void RollUpPopups()
 {
   nsIRollupListener* rollupListener = nsBaseWidget::GetActiveRollupListener();
+  NS_ENSURE_TRUE_VOID(rollupListener);
   nsCOMPtr<nsIWidget> rollupWidget = rollupListener->GetRollupWidget();
-  if (rollupWidget)
-    rollupListener->Rollup(0, nullptr);
+  if (!rollupWidget)
+    return;
+  rollupListener->Rollup(0, nullptr);
 }
 
 nsCocoaWindow::nsCocoaWindow()
@@ -1043,8 +1046,8 @@ NS_IMETHODIMP nsCocoaWindow::ConstrainPosition(bool aAllowSlop,
   NSRect frame = [mWindow frame];
 
   // zero size rects confuse the screen manager
-  width = NS_MAX<int32_t>(frame.size.width, 1);
-  height = NS_MAX<int32_t>(frame.size.height, 1);
+  width = std::max<int32_t>(frame.size.width, 1);
+  height = std::max<int32_t>(frame.size.height, 1);
 
   nsCOMPtr<nsIScreenManager> screenMgr = do_GetService("@mozilla.org/gfx/screenmanager;1");
   if (screenMgr) {
@@ -1099,10 +1102,10 @@ void nsCocoaWindow::SetSizeConstraints(const SizeConstraints& aConstraints)
 
   SizeConstraints c = aConstraints;
   c.mMinSize.width =
-    NS_MAX(nsCocoaUtils::CocoaPointsToDevPixels(rect.size.width, scaleFactor),
+    std::max(nsCocoaUtils::CocoaPointsToDevPixels(rect.size.width, scaleFactor),
            c.mMinSize.width);
   c.mMinSize.height =
-    NS_MAX(nsCocoaUtils::CocoaPointsToDevPixels(rect.size.height, scaleFactor),
+    std::max(nsCocoaUtils::CocoaPointsToDevPixels(rect.size.height, scaleFactor),
            c.mMinSize.height);
 
   NSSize minSize = {
@@ -1504,12 +1507,12 @@ nsCocoaWindow::BackingScaleFactorChanged()
       NSToIntRound(mSizeConstraints.mMinSize.height * scaleFactor);
     if (mSizeConstraints.mMaxSize.width < NS_MAXSIZE) {
       mSizeConstraints.mMaxSize.width =
-        NS_MIN(NS_MAXSIZE,
+        std::min(NS_MAXSIZE,
                NSToIntRound(mSizeConstraints.mMaxSize.width * scaleFactor));
     }
     if (mSizeConstraints.mMaxSize.height < NS_MAXSIZE) {
       mSizeConstraints.mMaxSize.height =
-        NS_MIN(NS_MAXSIZE,
+        std::min(NS_MAXSIZE,
                NSToIntRound(mSizeConstraints.mMaxSize.height * scaleFactor));
     }
   }
@@ -2961,15 +2964,9 @@ TitlebarDrawCallback(void* aInfo, CGContextRef aContext)
     if (!view || ![view isKindOfClass:[ChildView class]])
       return;
 
-    // Gecko drawing assumes flippedness, but the current context isn't flipped
-    // (because we're painting into the window's border view, which is not a
-    // ChildView, so it isn't flipped).
-    // So we need to set a flip transform.
-    CGContextScaleCTM(aContext, 1.0f, -1.0f);
-    CGContextTranslateCTM(aContext, 0.0f, -[window frame].size.height);
+    CGContextTranslateCTM(aContext, 0.0f, [window frame].size.height - titlebarRect.size.height);
 
-    NSRect flippedTitlebarRect = { NSZeroPoint, titlebarRect.size };
-    [(ChildView*)view drawRect:flippedTitlebarRect inTitlebarContext:aContext];
+    [(ChildView*)view drawTitlebar:[window frame] inTitlebarContext:aContext];
   } else {
     BOOL isMain = [window isMainWindow];
     NSColor *titlebarColor = [window titlebarColorForActiveWindow:isMain];

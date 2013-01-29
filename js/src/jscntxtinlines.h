@@ -106,7 +106,7 @@ NewObjectCache::newObjectFromHit(JSContext *cx, EntryIndex entry_)
     JS_ASSERT(unsigned(entry_) < mozilla::ArrayLength(entries));
     Entry *entry = &entries[entry_];
 
-    JSObject *obj = js_TryNewGCObject(cx, entry->kind);
+    JSObject *obj = js_NewGCObject<NoGC>(cx, entry->kind);
     if (obj) {
         copyCachedToObject(obj, reinterpret_cast<JSObject *>(&entry->templateObject));
         Probes::createObject(cx, obj);
@@ -159,31 +159,6 @@ class AutoNamespaceArray : protected AutoGCRooter {
 };
 
 #endif /* JS_HAS_XML_SUPPORT */
-
-template <typename T>
-class AutoPtr
-{
-    JSContext *cx;
-    T *value;
-
-    AutoPtr(const AutoPtr &other) MOZ_DELETE;
-
-  public:
-    explicit AutoPtr(JSContext *cx) : cx(cx), value(NULL) {}
-    ~AutoPtr() {
-        js_delete<T>(value);
-    }
-
-    void operator=(T *ptr) { value = ptr; }
-
-    typedef void ***** ConvertibleToBool;
-    operator ConvertibleToBool() const { return (ConvertibleToBool) value; }
-
-    const T *operator->() const { return value; }
-    T *operator->() { return value; }
-
-    T *get() { return value; }
-};
 
 #ifdef JS_CRASH_DIAGNOSTICS
 class CompartmentChecker
@@ -281,6 +256,11 @@ class CompartmentChecker
     void check(StackFrame *fp) {
         if (fp)
             check(fp->scopeChain());
+    }
+
+    void check(AbstractFramePtr frame) {
+        if (frame)
+            check(frame.scopeChain());
     }
 };
 #endif /* JS_CRASH_DIAGNOSTICS */
@@ -483,8 +463,8 @@ JSContext::findVersion() const
     if (hasVersionOverride)
         return versionOverride;
 
-    if (stack.hasfp())
-        return fp()->script()->getVersion();
+    if (JSScript *script = stack.currentScript(NULL, js::ContextStack::ALLOW_CROSS_COMPARTMENT))
+        return script->getVersion();
 
     return defaultVersion;
 }
@@ -625,6 +605,12 @@ JSContext::leaveCompartment(JSCompartment *oldCompartment)
 
     if (throwing)
         wrapPendingException();
+}
+
+inline JS::Zone *
+JSContext::zone()
+{
+    return compartment->zone();
 }
 
 #endif /* jscntxtinlines_h___ */

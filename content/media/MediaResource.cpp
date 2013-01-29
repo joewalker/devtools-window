@@ -30,6 +30,7 @@
 #include "nsIAsyncVerifyRedirectCallback.h"
 #include "nsContentUtils.h"
 #include "nsHostObjectProtocolHandler.h"
+#include <algorithm>
 
 #ifdef PR_LOGGING
 PRLogModuleInfo* gMediaResourceLog;
@@ -231,17 +232,6 @@ ChannelMediaResource::OnStartRequest(nsIRequest* aRequest)
 
     // Check response code for byte-range requests (seeking, chunk requests).
     if (!mByteRange.IsNull() && (responseStatus == HTTP_PARTIAL_RESPONSE_CODE)) {
-      // Byte range requests should get partial response codes and should
-      // accept ranges.
-      if (!acceptsRanges) {
-        CMLOG("Error! HTTP_PARTIAL_RESPONSE_CODE received but server says "
-              "range requests are not accepted! Channel[%p] decoder[%p]",
-              hc.get(), mDecoder);
-        mDecoder->NetworkError();
-        CloseChannel();
-        return NS_OK;
-      }
-
       // Parse Content-Range header.
       int64_t rangeStart = 0;
       int64_t rangeEnd = 0;
@@ -276,6 +266,7 @@ ChannelMediaResource::OnStartRequest(nsIRequest* aRequest)
       mCacheStream.NotifyDataStarted(rangeStart);
 
       mOffset = rangeStart;
+      // We received 'Content-Range', so the server accepts range requests.
       acceptsRanges = true;
     } else if (((mOffset > 0) || !mByteRange.IsNull())
                && (responseStatus == HTTP_OK_CODE)) {
@@ -314,15 +305,6 @@ ChannelMediaResource::OnStartRequest(nsIRequest* aRequest)
   }
   mDecoder->SetTransportSeekable(seekable);
   mCacheStream.SetTransportSeekable(seekable);
-
-  nsCOMPtr<nsICachingChannel> cc = do_QueryInterface(aRequest);
-  if (cc) {
-    bool fromCache = false;
-    rv = cc->IsFromCache(&fromCache);
-    if (NS_SUCCEEDED(rv) && !fromCache) {
-      cc->SetCacheAsFile(true);
-    }
-  }
 
   {
     MutexAutoLock lock(mLock);
@@ -568,18 +550,6 @@ ChannelMediaResource::OpenByteRange(nsIStreamListener** aStreamListener,
   return OpenChannel(aStreamListener);
 }
 
-void
-ChannelMediaResource::CancelByteRangeOpen()
-{
-  NS_ASSERTION(NS_IsMainThread(), "Only call on main thread");
-
-  // Byte range download will be cancelled in |CacheClientSeek|. Here, we only
-  // need to notify the cache to in turn notify any waiting reads.
-  if (mByteRangeDownloads) {
-    mCacheStream.NotifyDownloadCancelled();
-  }
-}
-
 nsresult ChannelMediaResource::Open(nsIStreamListener **aStreamListener)
 {
   NS_ASSERTION(NS_IsMainThread(), "Only call on main thread");
@@ -735,7 +705,7 @@ MediaResource* ChannelMediaResource::CloneData(MediaDecoder* aDecoder)
     // and perform a useless HTTP transaction.
     resource->mSuspendCount = 1;
     resource->mCacheStream.InitAsClone(&mCacheStream);
-    resource->mChannelStatistics = mChannelStatistics;
+    resource->mChannelStatistics = new MediaChannelStatistics(mChannelStatistics);
     resource->mChannelStatistics->Stop();
   }
   return resource;
@@ -1074,8 +1044,11 @@ ChannelMediaResource::CacheClientSeek(int64_t aOffset, bool aResume)
           mByteRange.Clear();
         }
         mSeekOffset = -1;
+      } else if (mByteRange.mStart <= aOffset && aOffset <= mByteRange.mEnd) {
+        CMLOG("Trying to resume download at offset [%lld].", aOffset);
+        rv = NS_OK;
       } else {
-        LOG("MediaCache [%p] trying to seek independently to offset [%lld].",
+        CMLOG("MediaCache [%p] trying to seek independently to offset [%lld].",
             &mCacheStream, aOffset);
         rv = NS_ERROR_NOT_AVAILABLE;
       }
@@ -1302,27 +1275,22 @@ public:
   }
   virtual int64_t GetLength() {
     MutexAutoLock lock(mLock);
-    if (mInput) {
-      EnsureSizeInitialized();
-    }
+
+    EnsureSizeInitialized();
     return mSizeInitialized ? mSize : 0;
   }
   virtual int64_t GetNextCachedData(int64_t aOffset)
   {
     MutexAutoLock lock(mLock);
-    if (!mInput) {
-      return -1;
-    }
+
     EnsureSizeInitialized();
     return (aOffset < mSize) ? aOffset : -1;
   }
   virtual int64_t GetCachedDataEnd(int64_t aOffset) {
     MutexAutoLock lock(mLock);
-    if (!mInput) {
-      return aOffset;
-    }
+
     EnsureSizeInitialized();
-    return NS_MAX(aOffset, mSize);
+    return std::max(aOffset, mSize);
   }
   virtual bool    IsDataCachedToEndOfResource(int64_t aOffset) { return true; }
   virtual bool    IsSuspendedByCache(MediaResource** aActiveResource)
@@ -1357,9 +1325,7 @@ private:
   nsCOMPtr<nsISeekableStream> mSeekable;
 
   // Input stream for the media data. This can be used from any
-  // thread. This is annulled when the decoder is being shutdown.
-  // The decoder can be shut down while we're calculating buffered
-  // ranges or seeking, so this must be null-checked before it's used.
+  // thread.
   nsCOMPtr<nsIInputStream>  mInput;
 
   // Whether we've attempted to initialize mSize. Note that mSize can be -1
@@ -1411,9 +1377,7 @@ void FileMediaResource::EnsureSizeInitialized()
 nsresult FileMediaResource::GetCachedRanges(nsTArray<MediaByteRange>& aRanges)
 {
   MutexAutoLock lock(mLock);
-  if (!mInput) {
-    return NS_ERROR_FAILURE;
-  }
+
   EnsureSizeInitialized();
   if (mSize == -1) {
     return NS_ERROR_FAILURE;
@@ -1479,12 +1443,11 @@ nsresult FileMediaResource::Close()
 {
   NS_ASSERTION(NS_IsMainThread(), "Only call on main thread");
 
-  MutexAutoLock lock(mLock);
+  // Since mChennel is only accessed by main thread, there is no necessary to
+  // take the lock.
   if (mChannel) {
     mChannel->Cancel(NS_ERROR_PARSED_DATA_CACHED);
     mChannel = nullptr;
-    mInput = nullptr;
-    mSeekable = nullptr;
   }
 
   return NS_OK;
@@ -1536,8 +1499,7 @@ MediaResource* FileMediaResource::CloneData(MediaDecoder* aDecoder)
 nsresult FileMediaResource::ReadFromCache(char* aBuffer, int64_t aOffset, uint32_t aCount)
 {
   MutexAutoLock lock(mLock);
-  if (!mInput || !mSeekable)
-    return NS_ERROR_FAILURE;
+
   EnsureSizeInitialized();
   int64_t offset = 0;
   nsresult res = mSeekable->Tell(&offset);
@@ -1566,8 +1528,7 @@ nsresult FileMediaResource::ReadFromCache(char* aBuffer, int64_t aOffset, uint32
 nsresult FileMediaResource::Read(char* aBuffer, uint32_t aCount, uint32_t* aBytes)
 {
   MutexAutoLock lock(mLock);
-  if (!mInput)
-    return NS_ERROR_FAILURE;
+
   EnsureSizeInitialized();
   return mInput->Read(aBuffer, aCount, aBytes);
 }

@@ -107,8 +107,10 @@ public:
       // We still need to take into account clipBounds if it contains additional
       // clipping information.
       RefPtr<ID2D1RectangleGeometry> rectGeom;
-      factory()->CreateRectangleGeometry(D2D1::Rect(clipBounds.x, clipBounds.y,
-                                                    clipBounds.XMost(), clipBounds.YMost()),
+      factory()->CreateRectangleGeometry(D2D1::Rect(Float(clipBounds.x),
+                                                    Float(clipBounds.y),
+                                                    Float(clipBounds.XMost()),
+                                                    Float(clipBounds.YMost())),
                                          byRef(rectGeom));
 
       mClippedArea = mDT->Intersect(mClippedArea, rectGeom);
@@ -2799,7 +2801,7 @@ DrawTargetD2D::PushD2DLayer(ID2D1RenderTarget *aRT, ID2D1Geometry *aGeometry, ID
   D2D1_LAYER_OPTIONS options = D2D1_LAYER_OPTIONS_NONE;
   D2D1_LAYER_OPTIONS1 options1 =  D2D1_LAYER_OPTIONS1_NONE;
 
-  if (mFormat == FORMAT_B8G8R8X8) {
+  if (aRT->GetPixelFormat().alphaMode == D2D1_ALPHA_MODE_IGNORE) {
     options = D2D1_LAYER_OPTIONS_INITIALIZE_FOR_CLEARTYPE;
     options1 = D2D1_LAYER_OPTIONS1_IGNORE_ALPHA | D2D1_LAYER_OPTIONS1_INITIALIZE_FROM_BACKGROUND;
   }

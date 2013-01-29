@@ -15,6 +15,7 @@
 #include "nsDataHashtable.h"
 #include "nsIFrame.h"
 #include "nsTPriorityQueue.h"
+#include "mozilla/SplayTree.h"
 
 class nsCSSFrameConstructor;
 
@@ -42,7 +43,18 @@ public:
    * be called on the parent.
    */
   void AddFrame(nsIFrame* aFrame) {
-    mEntryList.Push(Entry(aFrame, true));
+    if (!mEntryList.contains(Entry(aFrame, true))) {
+      mEntryList.insert(new Entry(aFrame, true));
+    }
+  }
+
+  /**
+   * Remove a frame.
+   */
+  void RemoveFrame(nsIFrame* aFrame) {
+    if (mEntryList.contains(Entry(aFrame, 0, false))) {
+      delete mEntryList.remove(Entry(aFrame, 0, false));
+    }
   }
 
   /**
@@ -52,23 +64,13 @@ public:
    * us from processing the same frame twice.
    */
   void Flush() {
-    while (!mEntryList.IsEmpty()) {
-      Entry entry = mEntryList.Pop();
+    while (!mEntryList.empty()) {
+      Entry *entry = mEntryList.removeMin();
 
-      // Pop off any duplicate entries and copy back mInitial
-      // if any have it set.
-      while (!mEntryList.IsEmpty() &&
-             mEntryList.Top().mFrame == entry.mFrame) {
-        Entry next = mEntryList.Pop();
-
-        if (next.mInitial) {
-          entry.mInitial = true;
-        }
-      }
-      nsIFrame *frame = entry.mFrame;
+      nsIFrame *frame = entry->mFrame;
 
       bool updateParent = false;
-      if (entry.mInitial) {
+      if (entry->mInitial) {
         nsOverflowAreas* pre = static_cast<nsOverflowAreas*>
           (frame->Properties().Get(frame->PreTransformOverflowAreasProperty()));
         if (pre) {
@@ -80,23 +82,26 @@ public:
           updateParent = true;
         }
       }
-      
+
       // If the overflow changed, then we want to also update the parent's
       // overflow. We always update the parent for initial frames.
       if (!updateParent) {
-        updateParent = frame->UpdateOverflow() || entry.mInitial;
+        updateParent = frame->UpdateOverflow() || entry->mInitial;
       }
       if (updateParent) {
         nsIFrame *parent = frame->GetParent();
         if (parent) {
-          mEntryList.Push(Entry(parent, entry.mDepth - 1, false));
+          if (!mEntryList.contains(Entry(parent, entry->mDepth - 1, false))) {
+            mEntryList.insert(new Entry(parent, entry->mDepth - 1, false));
+          }
         }
       }
+      delete entry;
     }
   }
   
 private:
-  struct Entry
+  struct Entry : SplayTreeNode<Entry>
   {
     Entry(nsIFrame* aFrame, bool aInitial)
       : mFrame(aFrame)
@@ -116,18 +121,22 @@ private:
     }
  
     /**
-     * Sort by the depth in the frame tree, and then
-     * the frame pointer.
+     * Sort by the frame pointer.
      */
     bool operator<(const Entry& aOther) const
     {
-      if (mDepth != aOther.mDepth) {
-        // nsTPriorityQueue implements a min-heap and we
-        // want the highest depth first, so reverse this check.
-        return mDepth > aOther.mDepth;
-      }
-
       return mFrame < aOther.mFrame;
+    }
+
+    static int compare(const Entry& aOne, const Entry& aTwo)
+    {
+      if (aOne == aTwo) {
+        return 0;
+      } else if (aOne < aTwo) {
+        return -1;
+      } else {
+        return 1;
+      }
     }
 
     nsIFrame* mFrame;
@@ -141,7 +150,7 @@ private:
   };
 
   /* A list of frames to process, sorted by their depth in the frame tree */
-  nsTPriorityQueue<Entry> mEntryList;
+  SplayTree<Entry, Entry> mEntryList;
 };
 
 class RestyleTracker {

@@ -115,6 +115,9 @@ const DB_MIGRATE_METADATA= ["installDate", "userDisabled", "softDisabled",
 const STATIC_BLOCKLIST_PATTERNS = [
   { creator: "Mozilla Corp.",
     level: Ci.nsIBlocklistService.STATE_BLOCKED,
+    blockID: "i162" },
+  { creator: "Mozilla.org",
+    level: Ci.nsIBlocklistService.STATE_BLOCKED,
     blockID: "i162" }
 ];
 
@@ -3623,10 +3626,11 @@ var XPIProvider = {
    *         The nsIFile for the add-on
    * @param  aVersion
    *         The add-on's version
+   * @param  aType
+   *         The type for the add-on
    * @return a JavaScript scope
    */
   loadBootstrapScope: function XPI_loadBootstrapScope(aId, aFile, aVersion, aType) {
-    LOG("Loading bootstrap scope from " + aFile.path);
     // Mark the add-on as active for the crash reporter before loading
     this.bootstrappedAddons[aId] = {
       version: aVersion,
@@ -3634,6 +3638,14 @@ var XPIProvider = {
       descriptor: aFile.persistentDescriptor
     };
     this.addAddonsToCrashReporter();
+
+    // Locales only contain chrome and can't have bootstrap scripts
+    if (aType == "locale") {
+      this.bootstrapScopes[aId] = null;
+      return;
+    }
+
+    LOG("Loading bootstrap scope from " + aFile.path);
 
     let principal = Cc["@mozilla.org/systemprincipal;1"].
                     createInstance(Ci.nsIPrincipal);
@@ -3721,14 +3733,13 @@ var XPIProvider = {
       Components.manager.addBootstrappedManifestLocation(aFile);
 
     try {
-      // Don't call bootstrap.js methods for language packs,
-      // they only contain chrome.
-      if (aType == "locale")
-         return;
-
       // Load the scope if it hasn't already been loaded
       if (!(aId in this.bootstrapScopes))
         this.loadBootstrapScope(aId, aFile, aVersion, aType);
+
+      // Nothing to call for locales
+      if (aType == "locale")
+        return;
 
       if (!(aMethod in this.bootstrapScopes[aId])) {
         WARN("Add-on " + aId + " is missing bootstrap method " + aMethod);

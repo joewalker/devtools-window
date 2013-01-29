@@ -1,4 +1,5 @@
-/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+/* vim: set ts=4 et sw=4 tw=80: */
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
@@ -1610,7 +1611,7 @@ nsScriptSecurityManager::CheckFunctionAccess(JSContext *aCx, void *aFunObj,
     // This check is called for event handlers
     nsresult rv;
     nsIPrincipal* subject =
-        GetFunctionObjectPrincipal(aCx, (JSObject *)aFunObj, nullptr, &rv);
+        GetFunctionObjectPrincipal(aCx, (JSObject *)aFunObj, &rv);
 
     // If subject is null, get a principal from the function object's scope.
     if (NS_SUCCEEDED(rv) && !subject)
@@ -1970,7 +1971,6 @@ nsScriptSecurityManager::GetScriptPrincipal(JSScript *script,
 nsIPrincipal*
 nsScriptSecurityManager::GetFunctionObjectPrincipal(JSContext *cx,
                                                     JSObject *obj,
-                                                    JSStackFrame *fp,
                                                     nsresult *rv)
 {
     NS_PRECONDITION(rv, "Null out param");
@@ -1995,22 +1995,7 @@ nsScriptSecurityManager::GetFunctionObjectPrincipal(JSContext *cx,
         return nullptr;
     }
 
-    JSScript *frameScript = fp ? JS_GetFrameScript(cx, fp) : nullptr;
-
-    if (frameScript && frameScript != script)
-    {
-        // There is a frame script, and it's different from the
-        // function script. In this case we're dealing with either
-        // an eval or a Script object, and in these cases the
-        // principal we want is in the frame's script, not in the
-        // function's script. The function's script is where the
-        // eval-calling code came from, not where the eval or new
-        // Script object came from, and we want the principal of
-        // the eval function object or new Script object.
-
-        script = frameScript;
-    }
-    else if (!js::IsOriginalScriptFunction(fun))
+    if (!js::IsOriginalScriptFunction(fun))
     {
         // Here, obj is a cloned function object.  In this case, the
         // clone's prototype may have been precompiled from brutally
@@ -2440,7 +2425,6 @@ nsScriptSecurityManager::nsScriptSecurityManager(void)
       mCapabilities(nullptr),
       mPrefInitialized(false),
       mIsJavaScriptEnabled(false),
-      mIsWritingPrefs(false),
       mPolicyPrefsChanged(true)
 {
     MOZ_STATIC_ASSERT(sizeof(intptr_t) == sizeof(void*),

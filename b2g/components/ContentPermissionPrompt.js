@@ -18,7 +18,7 @@ const Cr = Components.results;
 const Cu = Components.utils;
 const Cc = Components.classes;
 
-const PROMPT_FOR_UNKNOWN = ['geolocation'];
+const PROMPT_FOR_UNKNOWN = ['geolocation', 'desktop-notification'];
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
@@ -35,7 +35,7 @@ XPCOMUtils.defineLazyServiceGetter(this,
                                    "@mozilla.org/permissionSettings;1",
                                    "nsIDOMPermissionSettings");
 
-function rememberPermission(aPermission, aPrincipal)
+function rememberPermission(aPermission, aPrincipal, aSession)
 {
   function convertPermToAllow(aPerm, aPrincipal)
   {
@@ -44,9 +44,16 @@ function rememberPermission(aPermission, aPrincipal)
     if (type == Ci.nsIPermissionManager.PROMPT_ACTION ||
         (type == Ci.nsIPermissionManager.UNKNOWN_ACTION &&
         PROMPT_FOR_UNKNOWN.indexOf(aPermission) >= 0)) {
-      permissionManager.addFromPrincipal(aPrincipal,
-                                         aPerm,
-                                         Ci.nsIPermissionManager.ALLOW_ACTION);
+      if (!aSession) {
+        permissionManager.addFromPrincipal(aPrincipal,
+                                           aPerm,
+                                           Ci.nsIPermissionManager.ALLOW_ACTION);
+      } else {
+        permissionManager.addFromPrincipal(aPrincipal,
+                                           aPerm,
+                                           Ci.nsIPermissionManager.ALLOW_ACTION,
+                                           Ci.nsIPermissionManager.EXPIRE_SESSION, 0);
+      }
     }
   }
 
@@ -81,12 +88,69 @@ ContentPermissionPrompt.prototype = {
     return false;
   },
 
-  _id: 0,
+  handledByApp: function handledByApp(request) {
+    if (request.principal.appId == Ci.nsIScriptSecurityManager.NO_APP_ID ||
+        request.principal.appId == Ci.nsIScriptSecurityManager.UNKNOWN_APP_ID) {
+      // This should not really happen
+      request.cancel();
+      return true;
+    }
+
+    let appsService = Cc["@mozilla.org/AppsService;1"]
+                        .getService(Ci.nsIAppsService);
+    let app = appsService.getAppByLocalId(request.principal.appId);
+
+    let url = Services.io.newURI(app.origin, null, null);
+    let principal = secMan.getAppCodebasePrincipal(url, request.principal.appId,
+                                                   /*mozbrowser*/false);
+    let access = (request.access && request.access !== "unused") ? request.type + "-" + request.access :
+                                                                   request.type;
+    let result = Services.perms.testExactPermissionFromPrincipal(principal, access);
+
+    if (result == Ci.nsIPermissionManager.ALLOW_ACTION ||
+        result == Ci.nsIPermissionManager.PROMPT_ACTION) {
+      return false;
+    }
+
+    request.cancel();
+    return true;
+  },
+
   prompt: function(request) {
+
+    if (secMan.isSystemPrincipal(request.principal)) {
+      request.allow();
+      return true;
+    }
+
+    if (this.handledByApp(request))
+        return;
+
     // returns true if the request was handled
     if (this.handleExistingPermission(request))
        return;
 
+    // If the request was initiated from a hidden iframe
+    // we don't forward it to content and cancel it right away
+    let frame = request.element;
+
+    if (!frame) {
+      this.delegatePrompt(request);
+    }
+
+    var self = this;
+    frame.wrappedJSObject.getVisible().onsuccess = function gv_success(evt) {
+      if (!evt.target.result) {
+        request.cancel();
+        return;
+      }
+
+      self.delegatePrompt(request);
+    };
+  },
+
+  _id: 0,
+  delegatePrompt: function(request) {
     let browser = Services.wm.getMostRecentWindow("navigator:browser");
     let content = browser.getContentWindow();
     if (!content)
@@ -102,10 +166,7 @@ ContentPermissionPrompt.prototype = {
       evt.target.removeEventListener(evt.type, contentEvent);
 
       if (evt.detail.type == "permission-allow") {
-        if (evt.detail.remember) {
-          rememberPermission(request.type, request.principal);
-        }
-
+        rememberPermission(request.type, request.principal, !evt.detail.remember);
         request.allow();
         return;
       }
@@ -113,6 +174,10 @@ ContentPermissionPrompt.prototype = {
       if (evt.detail.remember) {
         Services.perms.addFromPrincipal(request.principal, access,
                                         Ci.nsIPermissionManager.DENY_ACTION);
+      } else {
+        Services.perms.addFromPrincipal(request.principal, access,
+                                        Ci.nsIPermissionManager.DENY_ACTION,
+                                        Ci.nsIPermissionManager.EXPIRE_SESSION, 0);
       }
 
       request.cancel();
@@ -120,9 +185,10 @@ ContentPermissionPrompt.prototype = {
 
     let principal = request.principal;
     let isApp = principal.appStatus != Ci.nsIPrincipal.APP_STATUS_NOT_INSTALLED;
-    let remember = principal.appStatus == Ci.nsIPrincipal.APP_STATUS_PRIVILEGED
-                   ? true
-                   : request.remember;
+    let remember = (principal.appStatus == Ci.nsIPrincipal.APP_STATUS_PRIVILEGED ||
+                    principal.appStatus == Ci.nsIPrincipal.APP_STATUS_CERTIFIED)
+                    ? true
+                    : request.remember;
 
     let details = {
       type: "permission-prompt",

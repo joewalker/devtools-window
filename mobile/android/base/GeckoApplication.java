@@ -6,8 +6,6 @@ package org.mozilla.gecko;
 
 import android.app.Application;
 
-import java.util.ArrayList;
-
 public class GeckoApplication extends Application {
 
     private boolean mInited;
@@ -43,7 +41,7 @@ public class GeckoApplication extends Application {
     }
 
     protected void onActivityResume(GeckoActivity activity) {
-        if (GeckoApp.checkLaunchState(GeckoApp.LaunchState.GeckoRunning))
+        if (GeckoThread.checkLaunchState(GeckoThread.LaunchState.GeckoRunning))
             GeckoAppShell.sendEventToGecko(GeckoEvent.createResumeEvent(true));
         GeckoConnectivityReceiver.getInstance().start();
         GeckoNetworkManager.getInstance().start();

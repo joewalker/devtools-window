@@ -491,6 +491,8 @@ MAKEFILES_xulapp="
   toolkit/forgetaboutsite/test/browser/Makefile
   toolkit/identity/Makefile
   toolkit/locales/Makefile
+  toolkit/modules/Makefile
+  toolkit/modules/tests/Makefile
   toolkit/mozapps/downloads/Makefile
   toolkit/mozapps/extensions/Makefile
   toolkit/mozapps/handling/Makefile
@@ -619,6 +621,7 @@ elif [ "$MOZ_WIDGET_TOOLKIT" = "cocoa" ]; then
     toolkit/themes/pinstripe/global/Makefile
     toolkit/themes/pinstripe/mozapps/Makefile
     toolkit/components/alerts/mac/Makefile
+    toolkit/components/alerts/mac/growl/Makefile
     widget/cocoa/Makefile
   "
 elif [ "$MOZ_WIDGET_TOOLKIT" = "gtk2" ]; then
@@ -1574,12 +1577,6 @@ fi
 if [ ! "$MOZ_NATIVE_PNG" ]; then
   add_makefiles "
     media/libpng/Makefile
-  "
-fi
-
-if [ "$MOZ_DMDV" ]; then
-  add_makefiles "
-    tools/dmdv/Makefile
   "
 fi
 

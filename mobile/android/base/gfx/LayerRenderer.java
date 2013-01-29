@@ -13,12 +13,13 @@ import org.mozilla.gecko.mozglue.DirectBufferAllocator;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Matrix;
 import android.graphics.Point;
 import android.graphics.Rect;
 import android.graphics.RectF;
-import android.graphics.Region;
-import android.graphics.RegionIterator;
 import android.opengl.GLES20;
 import android.os.SystemClock;
 import android.util.Log;
@@ -134,8 +135,11 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
         CairoImage shadowImage = new BufferedCairoImage(view.getShadowPattern());
         mShadowLayer = new NinePatchTileLayer(shadowImage);
 
-        mHorizScrollLayer = ScrollbarLayer.create(this, false);
-        mVertScrollLayer = ScrollbarLayer.create(this, true);
+        Bitmap scrollbarImage = view.getScrollbarImage();
+        IntSize size = new IntSize(scrollbarImage.getWidth(), scrollbarImage.getHeight());
+        scrollbarImage = expandCanvasToPowerOfTwo(scrollbarImage, size);
+        mVertScrollLayer = new ScrollbarLayer(this, scrollbarImage, size, true);
+        mHorizScrollLayer = new ScrollbarLayer(this, diagonalFlip(scrollbarImage), new IntSize(size.height, size.width), false);
         mFadeRunnable = new FadeRunnable();
 
         mFrameTimings = new int[60];
@@ -150,6 +154,24 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
         Tabs.registerOnTabsChangedListener(this);
     }
 
+    private Bitmap expandCanvasToPowerOfTwo(Bitmap image, IntSize size) {
+        IntSize potSize = size.nextPowerOfTwo();
+        if (size.equals(potSize)) {
+            return image;
+        }
+        // make the bitmap size a power-of-two in both dimensions if it's not already.
+        Bitmap potImage = Bitmap.createBitmap(potSize.width, potSize.height, image.getConfig());
+        new Canvas(potImage).drawBitmap(image, new Matrix(), null);
+        return potImage;
+    }
+
+    private Bitmap diagonalFlip(Bitmap image) {
+        Matrix rotation = new Matrix();
+        rotation.setValues(new float[] { 0, 1, 0, 1, 0, 0, 0, 0, 1 }); // transform (x,y) into (y,x)
+        Bitmap rotated = Bitmap.createBitmap(image, 0, 0, image.getWidth(), image.getHeight(), rotation, true);
+        return rotated;
+    }
+
     public void destroy() {
         DirectBufferAllocator.free(mCoordByteBuffer);
         mCoordByteBuffer = null;
@@ -161,6 +183,7 @@ public class LayerRenderer implements Tabs.OnTabsChangedListener {
         if (mFrameRateLayer != null) {
             mFrameRateLayer.destroy();
         }
+        Tabs.unregisterOnTabsChangedListener(this);
     }
 
     void onSurfaceCreated(EGLConfig config) {

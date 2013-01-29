@@ -8,7 +8,6 @@ package org.mozilla.gecko.ui;
 import org.mozilla.gecko.GeckoApp;
 import org.mozilla.gecko.GeckoAppShell;
 import org.mozilla.gecko.GeckoEvent;
-import org.mozilla.gecko.PrefsHelper;
 import org.mozilla.gecko.ZoomConstraints;
 import org.mozilla.gecko.gfx.ImmutableViewportMetrics;
 import org.mozilla.gecko.gfx.PointUtils;
@@ -25,8 +24,6 @@ import android.util.Log;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
 
-import java.util.Arrays;
-import java.util.StringTokenizer;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -60,6 +57,9 @@ public class PanZoomController
 
     // The maximum amount we allow you to zoom into a page
     private static final float MAX_ZOOM = 4.0f;
+
+    // The maximum amount we would like to scroll with the mouse
+    private static final float MAX_SCROLL = 0.075f * GeckoAppShell.getDpi();
 
     private enum PanZoomState {
         NOTHING,        /* no touch-start events received */
@@ -137,7 +137,10 @@ public class PanZoomController
     }
 
     private void setState(PanZoomState state) {
-        mState = state;
+        if (state != mState) {
+            GeckoAppShell.sendEventToGecko(GeckoEvent.createBroadcastEvent("PanZoom:StateChange", state.toString()));
+            mState = state;
+        }
     }
 
     private ImmutableViewportMetrics getMetrics() {
@@ -195,6 +198,7 @@ public class PanZoomController
         case MotionEvent.ACTION_MOVE:   return onTouchMove(event);
         case MotionEvent.ACTION_UP:     return onTouchEnd(event);
         case MotionEvent.ACTION_CANCEL: return onTouchCancel(event);
+        case MotionEvent.ACTION_SCROLL: return onScroll(event);
         default:                        return false;
         }
     }
@@ -278,7 +282,7 @@ public class PanZoomController
             // We just interrupted a double-tap animation, so force a redraw in
             // case this touchstart is just a tap that doesn't end up triggering
             // a redraw
-            mTarget.setForceRedraw();
+            mTarget.forceRedraw();
             // fall through
         case FLING:
         case BOUNCE:
@@ -402,6 +406,18 @@ public class PanZoomController
         return false;
     }
 
+    private boolean onScroll(MotionEvent event) {
+        if (mState == PanZoomState.NOTHING || mState == PanZoomState.FLING) {
+            float scrollX = event.getAxisValue(MotionEvent.AXIS_HSCROLL);
+            float scrollY = event.getAxisValue(MotionEvent.AXIS_VSCROLL);
+
+            scrollBy(scrollX * MAX_SCROLL, scrollY * MAX_SCROLL);
+            bounce();
+            return true;
+        }
+        return false;
+    }
+
     private void startTouch(float x, float y, long time) {
         mX.startTouch(x);
         mY.startTouch(y);
@@ -499,7 +515,7 @@ public class PanZoomController
     }
 
     /* Performs a bounce-back animation to the given viewport metrics. */
-    private void bounce(ImmutableViewportMetrics metrics) {
+    private void bounce(ImmutableViewportMetrics metrics, PanZoomState state) {
         stopAnimationTimer();
 
         ImmutableViewportMetrics bounceStartMetrics = getMetrics();
@@ -507,6 +523,8 @@ public class PanZoomController
             setState(PanZoomState.NOTHING);
             return;
         }
+
+        setState(state);
 
         // At this point we have already set mState to BOUNCE or ANIMATED_ZOOM, so
         // getRedrawHint() is returning false. This means we can safely call
@@ -518,8 +536,7 @@ public class PanZoomController
 
     /* Performs a bounce-back animation to the nearest valid viewport metrics. */
     private void bounce() {
-        setState(PanZoomState.BOUNCE);
-        bounce(getValidViewportMetrics());
+        bounce(getValidViewportMetrics(), PanZoomState.BOUNCE);
     }
 
     /* Starts the fling or bounce animation. */
@@ -719,7 +736,7 @@ public class PanZoomController
         stopAnimationTimer();
 
         // Force a viewport synchronisation
-        mTarget.setForceRedraw();
+        mTarget.forceRedraw();
     }
 
     /* Returns the nearest viewport metrics with no overscroll visible. */
@@ -910,7 +927,7 @@ public class PanZoomController
         startTouch(detector.getFocusX(), detector.getFocusY(), detector.getEventTime());
 
         // Force a viewport synchronisation
-        mTarget.setForceRedraw();
+        mTarget.forceRedraw();
 
         PointF point = new PointF(detector.getFocusX(), detector.getFocusY());
         GeckoEvent event = GeckoEvent.createNativeGestureEvent(GeckoEvent.ACTION_MAGNIFY_END, point, getMetrics().zoomFactor);
@@ -1008,7 +1025,6 @@ public class PanZoomController
      * pixels.
      */
     private boolean animatedZoomTo(RectF zoomToRect) {
-        setState(PanZoomState.ANIMATED_ZOOM);
         final float startZoom = getMetrics().zoomFactor;
 
         RectF viewport = getMetrics().getViewport();
@@ -1044,7 +1060,7 @@ public class PanZoomController
         // clamped down to prevent overscroll, over-zoom, and other bad conditions.
         finalMetrics = getValidViewportMetrics(finalMetrics);
 
-        bounce(finalMetrics);
+        bounce(finalMetrics, PanZoomState.ANIMATED_ZOOM);
         return true;
     }
 

@@ -37,7 +37,7 @@
 #ifdef DEBUG
 #define ALOG_BRIDGE(args...) ALOG(args)
 #else
-#define ALOG_BRIDGE(args...)
+#define ALOG_BRIDGE(args...) ((void)0)
 #endif
 
 #define IME_FULLSCREEN_PREF "widget.ime.android.landscape_fullscreen"
@@ -101,6 +101,9 @@ AndroidBridge::Init(JNIEnv *jEnv,
 
     mGeckoAppShellClass = (jclass) jEnv->NewGlobalRef(jGeckoAppShellClass);
 
+    jclass jAndroidSmsMessageClass = jEnv->FindClass("android/telephony/SmsMessage");
+    mAndroidSmsMessageClass = (jclass) jEnv->NewGlobalRef(jAndroidSmsMessageClass);
+
     jNotifyIME = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "notifyIME", "(II)V");
     jNotifyIMEEnabled = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "notifyIMEEnabled", "(ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)V");
     jNotifyIMEChange = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "notifyIMEChange", "(Ljava/lang/String;III)V");
@@ -157,7 +160,7 @@ AndroidBridge::Init(JNIEnv *jEnv,
     jCheckUriVisited = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "checkUriVisited", "(Ljava/lang/String;)V");
     jMarkUriVisited = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "markUriVisited", "(Ljava/lang/String;)V");
 
-    jNumberOfMessages = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "getNumberOfMessagesForText", "(Ljava/lang/String;)I");
+    jCalculateLength = (jmethodID) jEnv->GetStaticMethodID(jAndroidSmsMessageClass, "calculateLength", "(Ljava/lang/CharSequence;Z)[I");
     jSendMessage = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "sendMessage", "(Ljava/lang/String;Ljava/lang/String;I)V");
     jGetMessage = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "getMessage", "(II)V");
     jDeleteMessage = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "deleteMessage", "(II)V");
@@ -176,7 +179,7 @@ AndroidBridge::Init(JNIEnv *jEnv,
     jUnlockScreenOrientation = (jmethodID) jEnv->GetStaticMethodID(jGeckoAppShellClass, "unlockScreenOrientation", "()V");
 
     jThumbnailHelperClass = (jclass) jEnv->NewGlobalRef(jEnv->FindClass("org/mozilla/gecko/ThumbnailHelper"));
-    jNotifyThumbnail = jEnv->GetStaticMethodID(jThumbnailHelperClass, "notifyThumbnail", "(Ljava/nio/ByteBuffer;I)V");
+    jNotifyThumbnail = jEnv->GetStaticMethodID(jThumbnailHelperClass, "notifyThumbnail", "(Ljava/nio/ByteBuffer;IZ)V");
 
     jEGLContextClass = (jclass) jEnv->NewGlobalRef(jEnv->FindClass("javax/microedition/khronos/egl/EGLContext"));
     jEGL10Class = (jclass) jEnv->NewGlobalRef(jEnv->FindClass("javax/microedition/khronos/egl/EGL10"));
@@ -1202,9 +1205,11 @@ AndroidBridge::RegisterCompositor(JNIEnv *env, bool resetting)
 }
 
 EGLSurface
-AndroidBridge::ProvideEGLSurface()
+AndroidBridge::ProvideEGLSurface(bool waitUntilValid)
 {
-    sController.WaitForValidSurface();
+    if (waitUntilValid) {
+        sController.WaitForValidSurface();
+    }
     return sController.ProvideEGLSurface();
 }
 
@@ -1656,22 +1661,40 @@ AndroidBridge::MarkURIVisited(const nsAString& aURI)
     env->CallStaticVoidMethod(mGeckoAppShellClass, jMarkUriVisited, jstrURI);
 }
 
-uint16_t
-AndroidBridge::GetNumberOfMessagesForText(const nsAString& aText)
+nsresult
+AndroidBridge::GetSegmentInfoForText(const nsAString& aText,
+                                     dom::sms::SmsSegmentInfoData* aData)
 {
-    ALOG_BRIDGE("AndroidBridge::GetNumberOfMessagesForText");
+    ALOG_BRIDGE("AndroidBridge::GetSegmentInfoForText");
+
+    aData->segments() = 0;
+    aData->charsPerSegment() = 0;
+    aData->charsAvailableInLastSegment() = 0;
 
     JNIEnv *env = GetJNIEnv();
     if (!env)
-        return 0;
+        return NS_ERROR_FAILURE;
 
     AutoLocalJNIFrame jniFrame(env);
     jstring jText = NewJavaString(&jniFrame, aText);
-    uint16_t ret = env->CallStaticIntMethod(mGeckoAppShellClass, jNumberOfMessages, jText);
+    jobject obj = env->CallStaticObjectMethod(mAndroidSmsMessageClass,
+                                              jCalculateLength, jText, JNI_FALSE);
     if (jniFrame.CheckForException())
-        return 0;
+        return NS_ERROR_FAILURE;
 
-    return ret;
+    jintArray arr = static_cast<jintArray>(obj);
+    if (!arr || env->GetArrayLength(arr) != 4)
+        return NS_ERROR_FAILURE;
+
+    jint* info = env->GetIntArrayElements(arr, JNI_FALSE);
+
+    aData->segments() = info[0]; // msgCount
+    aData->charsPerSegment() = info[2]; // codeUnitsRemaining
+    // segmentChars = (codeUnitCount + codeUnitsRemaining) / msgCount
+    aData->charsAvailableInLastSegment() = (info[1] + info[2]) / info[0];
+
+    env->ReleaseIntArrayElements(arr, info, JNI_ABORT);
+    return NS_OK;
 }
 
 void
@@ -1683,8 +1706,9 @@ AndroidBridge::SendMessage(const nsAString& aNumber, const nsAString& aMessage, 
     if (!env)
         return;
 
-    int32_t requestId = QueueSmsRequest(aRequest);
-    NS_ENSURE_TRUE_VOID(requestId >= 0);
+    uint32_t requestId;
+    if (!QueueSmsRequest(aRequest, &requestId))
+        return;
 
     AutoLocalJNIFrame jniFrame(env);
     jstring jNumber = NewJavaString(&jniFrame, aNumber);
@@ -1702,8 +1726,9 @@ AndroidBridge::GetMessage(int32_t aMessageId, nsISmsRequest* aRequest)
     if (!env)
         return;
 
-    int32_t requestId = QueueSmsRequest(aRequest);
-    NS_ENSURE_TRUE_VOID(requestId >= 0);
+    uint32_t requestId;
+    if (!QueueSmsRequest(aRequest, &requestId))
+        return;
 
     AutoLocalJNIFrame jniFrame(env, 0);
     env->CallStaticVoidMethod(mGeckoAppShellClass, jGetMessage, aMessageId, requestId);
@@ -1718,8 +1743,9 @@ AndroidBridge::DeleteMessage(int32_t aMessageId, nsISmsRequest* aRequest)
     if (!env)
         return;
 
-    int32_t requestId = QueueSmsRequest(aRequest);
-    NS_ENSURE_TRUE_VOID(requestId >= 0);
+    uint32_t requestId;
+    if (!QueueSmsRequest(aRequest, &requestId))
+        return;
 
     AutoLocalJNIFrame jniFrame(env, 0);
     env->CallStaticVoidMethod(mGeckoAppShellClass, jDeleteMessage, aMessageId, requestId);
@@ -1735,8 +1761,9 @@ AndroidBridge::CreateMessageList(const dom::sms::SmsFilterData& aFilter, bool aR
     if (!env)
         return;
 
-    int32_t requestId = QueueSmsRequest(aRequest);
-    NS_ENSURE_TRUE_VOID(requestId >= 0);
+    uint32_t requestId;
+    if (!QueueSmsRequest(aRequest, &requestId))
+        return;
 
     AutoLocalJNIFrame jniFrame(env);
 
@@ -1765,8 +1792,9 @@ AndroidBridge::GetNextMessageInList(int32_t aListId, nsISmsRequest* aRequest)
     if (!env)
         return;
 
-    int32_t requestId = QueueSmsRequest(aRequest);
-    NS_ENSURE_TRUE_VOID(requestId >= 0);
+    uint32_t requestId;
+    if (!QueueSmsRequest(aRequest, &requestId))
+        return;
 
     AutoLocalJNIFrame jniFrame(env, 0);
     env->CallStaticVoidMethod(mGeckoAppShellClass, jGetNextMessageinList, aListId, requestId);
@@ -1785,38 +1813,45 @@ AndroidBridge::ClearMessageList(int32_t aListId)
     env->CallStaticVoidMethod(mGeckoAppShellClass, jClearMessageList, aListId);
 }
 
-int32_t
-AndroidBridge::QueueSmsRequest(nsISmsRequest* aRequest)
+bool
+AndroidBridge::QueueSmsRequest(nsISmsRequest* aRequest, uint32_t* aRequestIdOut)
 {
-    NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
-
-    // XXX: This method will always fail on Android because we do not
-    // init sSmsRequests. See bug 775997 and Bug 809459.
+    MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
+    MOZ_ASSERT(aRequest && aRequestIdOut);
 
     if (!sSmsRequests) {
         // Probably shutting down.
-        return -1;
+        return false;
     }
 
-    uint32_t length = sSmsRequests->Length();
-    for (int32_t i = 0; i < length; i++) {
+    const uint32_t length = sSmsRequests->Length();
+    for (uint32_t i = 0; i < length; i++) {
         if (!(*sSmsRequests)[i]) {
             (*sSmsRequests)[i] = aRequest;
-            return i;
+            *aRequestIdOut = i;
+            return true;
         }
     }
 
     sSmsRequests->AppendElement(aRequest);
 
-    return length;
+    // After AppendElement(), previous `length` points to the new tail element.
+    *aRequestIdOut = length;
+    return true;
 }
 
 already_AddRefed<nsISmsRequest>
-AndroidBridge::DequeueSmsRequest(int32_t aRequestId)
+AndroidBridge::DequeueSmsRequest(uint32_t aRequestId)
 {
-    NS_ASSERTION(NS_IsMainThread(), "Wrong thread!");
+    MOZ_ASSERT(NS_IsMainThread(), "Wrong thread!");
 
-    if (!sSmsRequests || (aRequestId >= sSmsRequests->Length())) {
+    if (!sSmsRequests) {
+        // Probably shutting down.
+        return nullptr;
+    }
+
+    MOZ_ASSERT(aRequestId < sSmsRequests->Length());
+    if (aRequestId >= sSmsRequests->Length()) {
         return nullptr;
     }
 
@@ -2435,13 +2470,29 @@ jobject JNICALL
 Java_org_mozilla_gecko_GeckoAppShell_allocateDirectBuffer(JNIEnv *env, jclass, jlong size);
 
 
+void
+AndroidBridge::SendThumbnail(jobject buffer, int32_t tabId, bool success) {
+    // Regardless of whether we successfully captured a thumbnail, we need to
+    // send a response to process the remaining entries in the queue. If we
+    // don't get an env here, we'll stall the thumbnail loop, but there isn't
+    // much we can do about it.
+    JNIEnv* env = GetJNIEnv();
+    if (!env)
+        return;
+
+    AutoLocalJNIFrame jniFrame(env, 0);
+    env->CallStaticVoidMethod(AndroidBridge::Bridge()->jThumbnailHelperClass,
+                              AndroidBridge::Bridge()->jNotifyThumbnail,
+                              buffer, tabId, success);
+}
+
 nsresult AndroidBridge::CaptureThumbnail(nsIDOMWindow *window, int32_t bufW, int32_t bufH, int32_t tabId, jobject buffer)
 {
     nsresult rv;
     float scale = 1.0;
 
     if (!buffer)
-        return NS_OK;
+        return NS_ERROR_FAILURE;
 
     // take a screenshot, as wide as possible, proportional to the destination size
     nsCOMPtr<nsIDOMWindowUtils> utils = do_GetInterface(window);
@@ -2479,9 +2530,9 @@ nsresult AndroidBridge::CaptureThumbnail(nsIDOMWindow *window, int32_t bufW, int
 
     JNIEnv* env = GetJNIEnv();
     if (!env)
-        return NS_OK;
+        return NS_ERROR_FAILURE;
 
-    AutoLocalJNIFrame jniFrame(env);
+    AutoLocalJNIFrame jniFrame(env, 0);
 
     nsCOMPtr<nsPIDOMWindow> win = do_QueryInterface(window);
     if (!win)
@@ -2519,9 +2570,6 @@ nsresult AndroidBridge::CaptureThumbnail(nsIDOMWindow *window, int32_t bufW, int
     context->Scale(scale * bufW / srcW, scale * bufH / srcH);
     rv = presShell->RenderDocument(r, renderDocFlags, bgColor, context);
     NS_ENSURE_SUCCESS(rv, rv);
-    env->CallStaticVoidMethod(AndroidBridge::Bridge()->jThumbnailHelperClass,
-                              AndroidBridge::Bridge()->jNotifyThumbnail,
-                              buffer, tabId);
     return NS_OK;
 }
 

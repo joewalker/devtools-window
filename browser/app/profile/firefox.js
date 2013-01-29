@@ -244,7 +244,6 @@ pref("browser.chrome.site_icons", true);
 pref("browser.chrome.favicons", true);
 // browser.warnOnQuit == false will override all other possible prompts when quitting or restarting
 pref("browser.warnOnQuit", true);
-pref("browser.warnOnRestart", false);
 // browser.showQuitWarning specifically controls the quit warning dialog. We
 // might still show the window closing dialog with showQuitWarning == false.
 pref("browser.showQuitWarning", false);
@@ -368,6 +367,11 @@ pref("browser.search.update.interval", 21600);
 
 // enable search suggestions by default
 pref("browser.search.suggest.enabled", true);
+
+#ifdef MOZ_OFFICIAL_BRANDING
+// {moz:official} expands to "official"
+pref("browser.search.official", true);
+#endif
 
 pref("browser.sessionhistory.max_entries", 50);
 
@@ -537,6 +541,11 @@ pref("mousewheel.with_shift.action", 1);
 // acceleration is the best modifier for zoom-in/out.  However, we should keep
 // the control key setting for backward compatibility.
 pref("mousewheel.with_meta.action", 3); // command key on Mac
+// Disable control-/meta-modified horizontal mousewheel events, since
+// those are used on Mac as part of modified swipe gestures (e.g.
+// Left swipe+Cmd = go back in a new tab).
+pref("mousewheel.with_control.action.override_x", 0);
+pref("mousewheel.with_meta.action.override_x", 0);
 #else
 pref("mousewheel.with_alt.action", 1);
 pref("mousewheel.with_shift.action", 2);
@@ -725,6 +734,12 @@ pref("browser.safebrowsing.reportMalwareErrorURL", "http://%LOCALE%.malware-erro
 pref("browser.safebrowsing.warning.infoURL", "http://www.mozilla.com/%LOCALE%/firefox/phishing-protection/");
 pref("browser.safebrowsing.malware.reportURL", "http://safebrowsing.clients.google.com/safebrowsing/diagnostic?client=%NAME%&hl=%LOCALE%&site=");
 
+#ifdef MOZILLA_OFFICIAL
+// Normally the "client ID" sent in updates is appinfo.name, but for
+// official Firefox releases from Mozilla we use a special identifier.
+pref("browser.safebrowsing.id", "navclient-auto-ffox");
+#endif
+
 // Name of the about: page contributed by safebrowsing to handle display of error
 // pages on phishing/malware hits.  (bug 399233)
 pref("urlclassifier.alternate_error_page", "blocked");
@@ -732,16 +747,13 @@ pref("urlclassifier.alternate_error_page", "blocked");
 // The number of random entries to send with a gethash request.
 pref("urlclassifier.gethashnoise", 4);
 
-// Randomize all UrlClassifier data with a per-client key.
-pref("urlclassifier.randomizeclient", false);
-
 // The list of tables that use the gethash request to confirm partial results.
 pref("urlclassifier.gethashtables", "goog-phish-shavar,goog-malware-shavar");
 
 // If an urlclassifier table has not been updated in this number of seconds,
 // a gethash request will be forced to check that the result is still in
 // the database.
-pref("urlclassifier.confirm-age", 2700);
+pref("urlclassifier.max-complete-age", 2700);
 #endif
 
 pref("browser.geolocation.warning.infoURL", "http://www.mozilla.com/%LOCALE%/firefox/geolocation/");
@@ -852,6 +864,10 @@ pref("breakpad.reportURL", "http://crash-stats.mozilla.com/report/index/");
 // Override submission of plugin hang reports to a different processing server
 pref("toolkit.crashreporter.pluginHangSubmitURL",
      "https://hang-reports.mozilla.org/submit");
+
+// URL for "Learn More" for Crash Reporter
+pref("toolkit.crashreporter.infoURL",
+     "http://www.mozilla.com/legal/privacy/firefox.html#crash-reporter");
 
 // base URL for web-based support pages
 pref("app.support.baseURL", "http://support.mozilla.org/1/firefox/%VERSION%/%OS%/%LOCALE%/");
@@ -985,6 +1001,7 @@ pref("services.sync.prefs.sync.privacy.clearOnShutdown.passwords", true);
 pref("services.sync.prefs.sync.privacy.clearOnShutdown.sessions", true);
 pref("services.sync.prefs.sync.privacy.clearOnShutdown.siteSettings", true);
 pref("services.sync.prefs.sync.privacy.donottrackheader.enabled", true);
+pref("services.sync.prefs.sync.privacy.donottrackheader.value", true);
 pref("services.sync.prefs.sync.privacy.sanitize.sanitizeOnShutdown", true);
 pref("services.sync.prefs.sync.security.OCSP.disable_button.managecrl", true);
 pref("services.sync.prefs.sync.security.OCSP.enabled", true);
@@ -1041,6 +1058,7 @@ pref("devtools.debugger.ui.win-width", 900);
 pref("devtools.debugger.ui.win-height", 400);
 pref("devtools.debugger.ui.stackframes-width", 200);
 pref("devtools.debugger.ui.variables-width", 300);
+pref("devtools.debugger.ui.pause-on-exceptions", false);
 pref("devtools.debugger.ui.panes-visible-on-startup", false);
 pref("devtools.debugger.ui.variables-sorting-enabled", true);
 pref("devtools.debugger.ui.variables-only-enum-visible", false);

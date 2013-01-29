@@ -390,11 +390,7 @@ GonkGPSGeolocationProvider::ReleaseDataConnection()
     return;
   }
 
-  if (mCid.IsEmpty()) {
-    // We didn't request data call or the data call failed, bail out.
-    return;
-  }
-  mRIL->DeactivateDataCall(mCid, NS_LITERAL_STRING("Close SUPL session"));
+  mRIL->DeactivateDataCallByType(NS_LITERAL_STRING("supl"));
 }
 
 void
@@ -597,7 +593,6 @@ NS_IMETHODIMP
 GonkGPSGeolocationProvider::Shutdown()
 {
   MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(mInitThread);
 
   if (!mStarted) {
     return NS_OK;
@@ -623,8 +618,6 @@ GonkGPSGeolocationProvider::ShutdownGPS()
     mGpsInterface->stop();
     mGpsInterface->cleanup();
   }
-
-  mInitThread = nullptr;
 }
 
 NS_IMETHODIMP

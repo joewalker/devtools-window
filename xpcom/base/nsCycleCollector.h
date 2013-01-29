@@ -68,6 +68,11 @@ struct nsCycleCollectionJSRuntime
     virtual void NotifyEnterMainThread() = 0;
 
     /**
+     * Unmark gray any weak map values, as needed.
+     */
+    virtual void FixWeakMappingGrayBits() = 0;
+
+    /**
      * Should we force a JavaScript GC before a CC?
      */
     virtual bool NeedCollect() = 0;
@@ -91,11 +96,6 @@ struct nsCycleCollectionJSRuntime
 // Helpers for interacting with JS
 void nsCycleCollector_registerJSRuntime(nsCycleCollectionJSRuntime *rt);
 void nsCycleCollector_forgetJSRuntime();
-
-#ifdef DEBUG
-void nsCycleCollector_DEBUG_shouldBeFreed(nsISupports *n);
-void nsCycleCollector_DEBUG_wasFreed(nsISupports *n);
-#endif
 
 #define NS_CYCLE_COLLECTOR_LOGGER_CID \
 { 0x58be81b4, 0x39d2, 0x437c, \

@@ -1346,27 +1346,23 @@ SourceActor.prototype = {
    * Handler for the "source" packet.
    */
   onSource: function SA_onSource(aRequest) {
-    this
+    return this
       ._loadSource()
-      .chainPromise(function(aSource) {
+      .then(function(aSource) {
         return this._threadActor.createValueGrip(
           aSource, this.threadActor.threadLifetimePool);
       }.bind(this))
-      .chainPromise(function (aSourceGrip) {
+      .then(function (aSourceGrip) {
         return {
           from: this.actorID,
           source: aSourceGrip
         };
-      }.bind(this))
-      .trap(function (aError) {
+      }.bind(this), function (aError) {
         return {
           "from": this.actorID,
           "error": "loadSourceError",
           "message": "Could not load the source for " + this._script.url + "."
         };
-      }.bind(this))
-      .chainPromise(function (aPacket) {
-        this.conn.send(aPacket);
       }.bind(this));
   },
 
@@ -1404,7 +1400,7 @@ SourceActor.prototype = {
    * http://www.softwareishard.com/blog/firebug/nsitraceablechannel-intercept-http-traffic/
    */
   _loadSource: function SA__loadSource() {
-    let promise = new Promise();
+    let deferred = defer();
     let url = this._script.url;
     let scheme;
     try {
@@ -1424,16 +1420,16 @@ SourceActor.prototype = {
         try {
           NetUtil.asyncFetch(url, function onFetch(aStream, aStatus) {
             if (!Components.isSuccessCode(aStatus)) {
-              promise.reject(new Error("Request failed"));
+              deferred.reject(new Error("Request failed"));
               return;
             }
 
             let source = NetUtil.readInputStreamToString(aStream, aStream.available());
-            promise.resolve(this._convertToUnicode(source));
+            deferred.resolve(this._convertToUnicode(source));
             aStream.close();
           }.bind(this));
         } catch (ex) {
-          promise.reject(new Error("Request failed"));
+          deferred.reject(new Error("Request failed"));
         }
         break;
 
@@ -1451,7 +1447,7 @@ SourceActor.prototype = {
         let streamListener = {
           onStartRequest: function(aRequest, aContext, aStatusCode) {
             if (!Components.isSuccessCode(aStatusCode)) {
-              promise.reject("Request failed");
+              deferred.reject("Request failed");
             }
           },
           onDataAvailable: function(aRequest, aContext, aStream, aOffset, aCount) {
@@ -1459,12 +1455,12 @@ SourceActor.prototype = {
           },
           onStopRequest: function(aRequest, aContext, aStatusCode) {
             if (!Components.isSuccessCode(aStatusCode)) {
-              promise.reject("Request failed");
+              deferred.reject("Request failed");
               return;
             }
 
-            promise.resolve(this._convertToUnicode(chunks.join(""),
-                                                   channel.contentCharset));
+            deferred.resolve(this._convertToUnicode(chunks.join(""),
+                                                    channel.contentCharset));
           }.bind(this)
         };
 
@@ -1473,7 +1469,7 @@ SourceActor.prototype = {
         break;
     }
 
-    return promise;
+    return deferred.promise;
   }
 
 };
@@ -1664,12 +1660,7 @@ update(ObjectActor.prototype, {
                message: "cannot access the environment of this function." };
     }
 
-    // XXX: the following call of env.form() won't work until bug 747514 lands.
-    // We can't get to the frame that defined this function's environment,
-    // neither here, nor during ObjectActor's construction. Luckily, we don't
-    // use the 'scope' request in the debugger frontend.
-    return { name: this.obj.name || null,
-             scope: envActor.form(this.obj) };
+    return { from: this.actorID, scope: envActor.form() };
   }),
 
   /**
@@ -1851,10 +1842,12 @@ FrameActor.prototype = {
       form.callee = this.threadActor.createValueGrip(this.frame.callee);
     }
 
-    let envActor = this.threadActor
-                       .createEnvironmentActor(this.frame.environment,
-                                               this.frameLifetimePool);
-    form.environment = envActor ? envActor.form(this.frame) : envActor;
+    if (this.frame.environment) {
+      let envActor = this.threadActor
+        .createEnvironmentActor(this.frame.environment,
+                                this.frameLifetimePool);
+      form.environment = envActor.form();
+    }
     form.this = this.threadActor.createValueGrip(this.frame.this);
     form.arguments = this._args();
     if (this.frame.script) {
@@ -1999,51 +1992,39 @@ EnvironmentActor.prototype = {
   actorPrefix: "environment",
 
   /**
-   * Returns an environment form for use in a protocol message. Note that the
-   * requirement of passing the frame as a parameter is only temporary, since
-   * when bug 747514 lands, the environment will have a callee property that
-   * will contain it.
-   *
-   * @param Debugger.Frame aObject
-   *        The stack frame object whose environment bindings are being
-   *        generated.
+   * Return an environment form for use in a protocol message.
    */
-  form: function EA_form(aObject) {
-    // Debugger.Frame might be dead by the time we get here, which will cause
-    // accessing its properties to throw.
-    if (!aObject.live) {
-      return undefined;
+  form: function EA_form() {
+    let form = { actor: this.actorID };
+
+    // What is this environment's type?
+    if (this.obj.type == "declarative") {
+      form.type = this.obj.callee ? "function" : "block";
+    } else {
+      form.type = this.obj.type;
     }
 
-    let parent;
+    // Does this environment have a parent?
     if (this.obj.parent) {
-      let thread = this.threadActor;
-      parent = thread.createEnvironmentActor(this.obj.parent,
-                                             this.registeredPool);
+      form.parent = (this.threadActor
+                     .createEnvironmentActor(this.obj.parent,
+                                             this.registeredPool)
+                     .form());
     }
-    // Deduce the frame that created the parent scope in order to pass it to
-    // parent.form(). TODO: this can be removed after bug 747514 is done.
-    let parentFrame = aObject;
-    if (this.obj.type == "declarative" && aObject.older) {
-      parentFrame = aObject.older;
-    }
-    let form = { actor: this.actorID,
-                 parent: parent ? parent.form(parentFrame) : parent };
 
-    if (this.obj.type == "with") {
-      form.type = "with";
+    // Does this environment reflect the properties of an object as variables?
+    if (this.obj.type == "object" || this.obj.type == "with") {
       form.object = this.threadActor.createValueGrip(this.obj.object);
-    } else if (this.obj.type == "object") {
-      form.type = "object";
-      form.object = this.threadActor.createValueGrip(this.obj.object);
-    } else { // this.obj.type == "declarative"
-      if (aObject.callee) {
-        form.type = "function";
-        form.function = this.threadActor.createValueGrip(aObject.callee);
-      } else {
-        form.type = "block";
-      }
-      form.bindings = this._bindings(aObject);
+    }
+
+    // Is this the environment created for a function call?
+    if (this.obj.callee) {
+      form.function = this.threadActor.createValueGrip(this.obj.callee);
+    }
+
+    // Shall we list this environment's bindings?
+    if (this.obj.type == "declarative") {
+      form.bindings = this._bindings();
     }
 
     return form;
@@ -2051,16 +2032,9 @@ EnvironmentActor.prototype = {
 
   /**
    * Return the identifier bindings object as required by the remote protocol
-   * specification. Note that the requirement of passing the frame as a
-   * parameter is only temporary, since when bug 747514 lands, the environment
-   * will have a callee property that will contain it.
-   *
-   * @param Debugger.Frame aObject [optional]
-   *        The stack frame whose environment bindings are being generated. When
-   *        left unspecified, the bindings do not contain an 'arguments'
-   *        property.
+   * specification.
    */
-  _bindings: function EA_bindings(aObject) {
+  _bindings: function EA_bindings() {
     let bindings = { arguments: [], variables: {} };
 
     // TODO: this part should be removed in favor of the commented-out part
@@ -2071,8 +2045,8 @@ EnvironmentActor.prototype = {
     }
 
     let parameterNames;
-    if (aObject && aObject.callee) {
-      parameterNames = aObject.callee.parameterNames;
+    if (this.obj.callee) {
+      parameterNames = this.obj.callee.parameterNames;
     }
     for each (let name in parameterNames) {
       let arg = {};
@@ -2266,10 +2240,8 @@ update(ChromeDebuggerActor.prototype, {
    */
   globalManager: {
     findGlobals: function CDA_findGlobals() {
-      // Fetch the list of globals from the debugger.
-      for (let g of this.dbg.findAllGlobals()) {
-        this.addDebuggee(g);
-      }
+      // Add every global known to the debugger as debuggee.
+      this.dbg.addAllGlobalsAsDebuggees();
     },
 
     /**

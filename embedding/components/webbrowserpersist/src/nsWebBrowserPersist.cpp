@@ -8,6 +8,7 @@
 #include "nspr.h"
 
 #include "nsIFileStreams.h"       // New Necko file streams
+#include <algorithm>
 
 #ifdef XP_OS2
 #include "nsILocalFileOS2.h"
@@ -73,8 +74,6 @@
 #include "nsIDOMHTMLOptionElement.h"
 #include "nsIDOMHTMLTextAreaElement.h"
 #include "nsIDOMHTMLDocument.h"
-#include "nsIDOMSVGImageElement.h"
-#include "nsIDOMSVGScriptElement.h"
 #ifdef MOZ_MEDIA
 #include "nsIDOMHTMLSourceElement.h"
 #include "nsIDOMHTMLMediaElement.h"
@@ -834,7 +833,7 @@ nsWebBrowserPersist::OnDataAvailable(
         {
             readError = true;
             rv = aIStream->Read(buffer,
-                                NS_MIN(uint32_t(sizeof(buffer)), bytesRemaining),
+                                std::min(uint32_t(sizeof(buffer)), bytesRemaining),
                                 &bytesRead);
             if (NS_SUCCEEDED(rv))
             {
@@ -2700,6 +2699,12 @@ nsresult nsWebBrowserPersist::OnWalkDOMNode(nsIDOMNode *aNode)
         return NS_OK;
     }
 
+    nsCOMPtr<nsIContent> content = do_QueryInterface(aNode);
+    if (!content)
+    {
+        return NS_OK;
+    }
+
     // Test the node to see if it's an image, frame, iframe, css, js
     nsCOMPtr<nsIDOMHTMLImageElement> nodeAsImage = do_QueryInterface(aNode);
     if (nodeAsImage)
@@ -2708,8 +2713,7 @@ nsresult nsWebBrowserPersist::OnWalkDOMNode(nsIDOMNode *aNode)
         return NS_OK;
     }
 
-    nsCOMPtr<nsIDOMSVGImageElement> nodeAsSVGImage = do_QueryInterface(aNode);
-    if (nodeAsSVGImage)
+    if (content->IsSVG(nsGkAtoms::img))
     {
         StoreURIAttributeNS(aNode, "http://www.w3.org/1999/xlink", "href");
         return NS_OK;
@@ -2765,8 +2769,7 @@ nsresult nsWebBrowserPersist::OnWalkDOMNode(nsIDOMNode *aNode)
         return NS_OK;
     }
 
-    nsCOMPtr<nsIDOMSVGScriptElement> nodeAsSVGScript = do_QueryInterface(aNode);
-    if (nodeAsSVGScript)
+    if (content->IsSVG(nsGkAtoms::script))
     {
         StoreURIAttributeNS(aNode, "http://www.w3.org/1999/xlink", "href");
         return NS_OK;
@@ -2991,6 +2994,12 @@ nsWebBrowserPersist::CloneNodeWithFixedUpAttributes(
         }
     }
 
+    nsCOMPtr<nsIContent> content = do_QueryInterface(aNodeIn);
+    if (!content)
+    {
+        return NS_OK;
+    }
+
     // Fix up href and file links in the elements
 
     nsCOMPtr<nsIDOMHTMLAnchorElement> nodeAsAnchor = do_QueryInterface(aNodeIn);
@@ -3103,8 +3112,7 @@ nsWebBrowserPersist::CloneNodeWithFixedUpAttributes(
     }
 #endif // MOZ_MEDIA
 
-    nsCOMPtr<nsIDOMSVGImageElement> nodeAsSVGImage = do_QueryInterface(aNodeIn);
-    if (nodeAsSVGImage)
+    if (content->IsSVG(nsGkAtoms::img))
     {
         rv = GetNodeToFixup(aNodeIn, aNodeOut);
         if (NS_SUCCEEDED(rv) && *aNodeOut)
@@ -3132,8 +3140,7 @@ nsWebBrowserPersist::CloneNodeWithFixedUpAttributes(
         return rv;
     }
 
-    nsCOMPtr<nsIDOMSVGScriptElement> nodeAsSVGScript = do_QueryInterface(aNodeIn);
-    if (nodeAsSVGScript)
+    if (content->IsSVG(nsGkAtoms::script))
     {
         rv = GetNodeToFixup(aNodeIn, aNodeOut);
         if (NS_SUCCEEDED(rv) && *aNodeOut)
@@ -3264,6 +3271,8 @@ nsWebBrowserPersist::CloneNodeWithFixedUpAttributes(
                 case NS_FORM_INPUT_TEL:
                 case NS_FORM_INPUT_URL:
                 case NS_FORM_INPUT_NUMBER:
+                case NS_FORM_INPUT_DATE:
+                case NS_FORM_INPUT_TIME:
                     nodeAsInput->GetValue(valueStr);
                     // Avoid superfluous value="" serialization
                     if (valueStr.IsEmpty())

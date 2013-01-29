@@ -108,6 +108,19 @@ LIBS += $(XPCOM_GLUE_LDOPTS) $(NSPR_LIBS) $(MOZ_JS_LIBS) $(if $(JS_SHARED_LIBRAR
 check::
 	@$(PYTHON) $(topsrcdir)/testing/runcppunittests.py --xre-path=$(DIST)/bin --symbols-path=$(DIST)/crashreporter-symbols $(subst .cpp,$(BIN_SUFFIX),$(CPP_UNIT_TESTS))
 
+cppunittests-remote: DM_TRANS?=adb
+cppunittests-remote:
+	@if [ "${TEST_DEVICE}" != "" -o "$(DM_TRANS)" = "adb" ]; then \
+		$(PYTHON) -u $(topsrcdir)/testing/remotecppunittests.py \
+			--xre-path=$(DEPTH)/dist/bin \
+			--localLib=$(DEPTH)/dist/$(MOZ_APP_NAME) \
+			--dm_trans=$(DM_TRANS) \
+			--deviceIP=${TEST_DEVICE} \
+ 			$(subst .cpp,$(BIN_SUFFIX),$(CPP_UNIT_TESTS)) $(EXTRA_TEST_ARGS); \
+	else \
+		echo "please prepare your host with environment variables for TEST_DEVICE"; \
+	fi
+
 endif # CPP_UNIT_TESTS
 
 .PHONY: check
@@ -1087,6 +1100,10 @@ else
 normalizepath = $(1)
 endif
 
+ifneq (,$(value JAVAFILES)$(value RESFILES))
+  include $(topsrcdir)/config/makefiles/java-build.mk
+endif
+
 _srcdir = $(call normalizepath,$(srcdir))
 ifdef JAVA_SOURCEPATH
 SP = $(subst $(SPACE),$(SEP),$(call normalizepath,$(strip $(JAVA_SOURCEPATH))))
@@ -1201,6 +1218,12 @@ PREF_JS_EXPORTS_PATH := $(FINAL_TARGET)/$(PREF_DIR)
 PREF_JS_EXPORTS_FLAGS := $(PREF_PPFLAGS)
 PP_TARGETS += PREF_JS_EXPORTS
 endif
+endif
+
+# Set a flag that can be used in pref files to disable features if
+# we are not building for Aurora or Nightly.
+ifeq (,$(findstring a,$(GRE_MILESTONE)))
+PREF_PPFLAGS += -DRELEASE_BUILD
 endif
 
 ################################################################################
@@ -1546,11 +1569,13 @@ endif
 
 # If we're using binary nsinstall and it's not built yet, fallback to python nsinstall.
 ifneq (,$(filter $(CONFIG_TOOLS)/nsinstall$(HOST_BIN_SUFFIX),$(install_cmd)))
-nsinstall_is_usable = $(if $(wildcard $(CONFIG_TOOLS)/nsinstall$(HOST_BIN_SUFFIX)),$(eval nsinstall_is_usable := yes)yes)
+ifeq (,$(wildcard $(CONFIG_TOOLS)/nsinstall$(HOST_BIN_SUFFIX)))
+nsinstall_is_usable = $(if $(wildcard $(CONFIG_TOOLS)/nsinstall$(HOST_BIN_SUFFIX)),yes)
 
 define install_cmd_override
 $(1): install_cmd = $$(if $$(nsinstall_is_usable),$$(INSTALL),$$(NSINSTALL_PY)) $$(1)
 endef
+endif
 endif
 
 define install_file_template

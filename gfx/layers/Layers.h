@@ -288,6 +288,12 @@ public:
   Layer* GetPrimaryScrollableLayer();
 
   /**
+   * Returns a list of all descendant layers for which 
+   * GetFrameMetrics().IsScrollable() is true.
+   */
+  void GetScrollableLayers(nsTArray<Layer*>& aArray);
+
+  /**
    * CONSTRUCTION PHASE ONLY
    * Called when a managee has mutated.
    * Subclasses overriding this method must first call their
@@ -483,8 +489,32 @@ public:
    */
   void LogSelf(const char* aPrefix="");
 
-  void StartFrameTimeRecording();
-  void StopFrameTimeRecording(nsTArray<float>& aTimes);
+  /**
+   * Record (and return) frame-intervals and paint-times for frames which were presented
+   *   between calling StartFrameTimeRecording and StopFrameTimeRecording.
+   *
+   * - Uses a cyclic buffer and serves concurrent consumers, so if Stop is called too late
+   *     (elements were overwritten since Start), result is considered invalid and hence empty.
+   * - Buffer is capable of holding 10 seconds @ 60fps (or more if frames were less frequent).
+   *     Can be changed (up to 1 hour) via pref: toolkit.framesRecording.bufferSize.
+   * - Note: the first frame-interval may be longer than expected because last frame
+   *     might have been presented some time before calling StartFrameTimeRecording.
+   */
+
+  /**
+   * Returns a handle which represents current recording start position.
+   */
+  uint32_t StartFrameTimeRecording();
+
+  /**
+   *  Clears, then populates 2 arraye with the recorded frames timing data.
+   *  The arrays will be empty if data was overwritten since aStartIndex was obtained.
+   */
+  void StopFrameTimeRecording(uint32_t         aStartIndex,
+                              nsTArray<float>& aFrameIntervals,
+                              nsTArray<float>& aPaintTimes);
+
+  void SetPaintStartTime(TimeStamp& aTime);
 
   void PostPresent();
 
@@ -494,7 +524,11 @@ public:
   static PRLogModuleInfo* GetLog() { return sLog; }
 
   bool IsCompositingCheap(LayersBackend aBackend)
-  { return LAYERS_BASIC != aBackend; }
+  {
+    // LAYERS_NONE is an error state, but in that case we should try to
+    // avoid loading the compositor!
+    return LAYERS_BASIC != aBackend && LAYERS_NONE != aBackend;
+  }
 
   virtual bool IsCompositingCheap() { return true; }
 
@@ -515,8 +549,25 @@ protected:
   uint64_t mId;
   bool mInTransaction;
 private:
-  TimeStamp mLastFrameTime;
-  nsTArray<float> mFrameTimes;
+  struct FramesTimingRecording
+  {
+    // Stores state and data for frame intervals and paint times recording.
+    // see LayerManager::StartFrameTimeRecording() at Layers.cpp for more details.
+    FramesTimingRecording()
+      : mIsPaused(true)
+      , mNextIndex(0)
+    {}
+    bool mIsPaused;
+    uint32_t mNextIndex;
+    TimeStamp mLastFrameTime;
+    TimeStamp mPaintStartTime;
+    nsTArray<float> mIntervals;
+    nsTArray<float> mPaints;
+    uint32_t mLatestStartIndex;
+    uint32_t mCurrentRunStartIndex;
+  };
+  FramesTimingRecording mRecording;
+
   TimeStamp mTabSwitchStart;
 };
 
@@ -773,6 +824,7 @@ public:
 
   // Call AddAnimation to add a new animation to this layer from layout code.
   // Caller must add segments to the returned animation.
+  // aStart represents the time at the *end* of the delay.
   Animation* AddAnimation(mozilla::TimeStamp aStart, mozilla::TimeDuration aDuration,
                           float aIterations, int aDirection,
                           nsCSSProperty aProperty, const AnimationData& aData);
@@ -1077,15 +1129,42 @@ protected:
   const float GetLocalOpacity();
 
   /**
-   * Computes a tweaked version of aTransform that snaps a point or a rectangle
-   * to pixel boundaries. Snapping is only performed if this layer's
-   * layer manager has enabled snapping (which is the default).
+   * We can snap layer transforms for two reasons:
+   * 1) To avoid unnecessary resampling when a transform is a translation
+   * by a non-integer number of pixels.
+   * Snapping the translation to an integer number of pixels avoids
+   * blurring the layer and can be faster to composite.
+   * 2) When a layer is used to render a rectangular object, we need to
+   * emulate the rendering of rectangular inactive content and snap the
+   * edges of the rectangle to pixel boundaries. This is both to ensure
+   * layer rendering is consistent with inactive content rendering, and to
+   * avoid seams.
+   * This function implements type 1 snapping. If aTransform is a 2D
+   * translation, and this layer's layer manager has enabled snapping
+   * (which is the default), return aTransform with the translation snapped
+   * to nearest pixels. Otherwise just return aTransform. Call this when the
+   * layer does not correspond to a single rectangular content object.
+   * This function does not try to snap if aTransform has a scale, because in
+   * that case resampling is inevitable and there's no point in trying to
+   * avoid it. In fact snapping can cause problems because pixel edges in the
+   * layer's content can be rendered unpredictably (jiggling) as the scale
+   * interacts with the snapping of the translation, especially with animated
+   * transforms.
+   * @param aResidualTransform a transform to apply before the result transform
+   * in order to get the results to completely match aTransform.
+   */
+  gfx3DMatrix SnapTransformTranslation(const gfx3DMatrix& aTransform,
+                                       gfxMatrix* aResidualTransform);
+  /**
+   * See comment for SnapTransformTranslation.
+   * This function implements type 2 snapping. If aTransform is a translation
+   * and/or scale, transform aSnapRect by aTransform, snap to pixel boundaries,
+   * and return the transform that maps aSnapRect to that rect. Otherwise
+   * just return aTransform.
    * @param aSnapRect a rectangle whose edges should be snapped to pixel
-   * boundaries in the destination surface. If the rectangle is empty,
-   * then the snapping process should preserve the scale factors of the
-   * transform matrix
-   * @param aResidualTransform a transform to apply before mEffectiveTransform
-   * in order to get the results to completely match aTransform
+   * boundaries in the destination surface.
+   * @param aResidualTransform a transform to apply before the result transform
+   * in order to get the results to completely match aTransform.
    */
   gfx3DMatrix SnapTransform(const gfx3DMatrix& aTransform,
                             const gfxRect& aSnapRect,
@@ -1177,14 +1256,12 @@ public:
 
   virtual void ComputeEffectiveTransforms(const gfx3DMatrix& aTransformToSurface)
   {
-    // The default implementation just snaps 0,0 to pixels.
     gfx3DMatrix idealTransform = GetLocalTransform()*aTransformToSurface;
     gfxMatrix residual;
-    mEffectiveTransform = SnapTransform(idealTransform, gfxRect(0, 0, 0, 0),
+    mEffectiveTransform = SnapTransformTranslation(idealTransform,
         mAllowResidualTranslation ? &residual : nullptr);
-    // The residual can only be a translation because ThebesLayer snapping
-    // only aligns a single point with the pixel grid; scale factors are always
-    // preserved exactly
+    // The residual can only be a translation because SnapTransformTranslation
+    // only changes the transform if it's a translation
     NS_ASSERTION(!residual.HasNonTranslation(),
                  "Residual transform can only be a translation");
     if (!residual.GetTranslation().WithinEpsilonOf(mResidualTranslation, 1e-3f)) {
@@ -1208,6 +1285,8 @@ public:
    * The residual translation components are always in the range [-0.5, 0.5).
    */
   gfxPoint GetResidualTranslation() const { return mResidualTranslation; }
+
+  static bool UseTiledThebes();
 
 protected:
   ThebesLayer(LayerManager* aManager, void* aImplData)
@@ -1286,8 +1365,20 @@ public:
     if (mPreXScale == aXScale && mPreYScale == aYScale) {
       return;
     }
+
     mPreXScale = aXScale;
     mPreYScale = aYScale;
+    Mutated();
+  }
+
+  void SetInheritedScale(float aXScale, float aYScale)
+  { 
+    if (mInheritedXScale == aXScale && mInheritedYScale == aYScale) {
+      return;
+    }
+
+    mInheritedXScale = aXScale;
+    mInheritedYScale = aYScale;
     Mutated();
   }
 
@@ -1304,6 +1395,8 @@ public:
   const FrameMetrics& GetFrameMetrics() { return mFrameMetrics; }
   float GetPreXScale() { return mPreXScale; }
   float GetPreYScale() { return mPreYScale; }
+  float GetInheritedXScale() { return mInheritedXScale; }
+  float GetInheritedYScale() { return mInheritedYScale; }
 
   MOZ_LAYER_DECL_NAME("ContainerLayer", TYPE_CONTAINER)
 
@@ -1356,6 +1449,8 @@ protected:
       mLastChild(nullptr),
       mPreXScale(1.0f),
       mPreYScale(1.0f),
+      mInheritedXScale(1.0f),
+      mInheritedYScale(1.0f),
       mUseIntermediateSurface(false),
       mSupportsComponentAlphaChildren(false),
       mMayHaveReadbackChild(false)
@@ -1381,6 +1476,10 @@ protected:
   FrameMetrics mFrameMetrics;
   float mPreXScale;
   float mPreYScale;
+  // The resolution scale inherited from the parent layer. This will already
+  // be part of mTransform.
+  float mInheritedXScale;
+  float mInheritedYScale;
   bool mUseIntermediateSurface;
   bool mSupportsComponentAlphaChildren;
   bool mMayHaveReadbackChild;
@@ -1411,9 +1510,8 @@ public:
 
   virtual void ComputeEffectiveTransforms(const gfx3DMatrix& aTransformToSurface)
   {
-    // Snap 0,0 to pixel boundaries, no extra internal transform.
     gfx3DMatrix idealTransform = GetLocalTransform()*aTransformToSurface;
-    mEffectiveTransform = SnapTransform(idealTransform, gfxRect(0, 0, 0, 0), nullptr);
+    mEffectiveTransform = SnapTransformTranslation(idealTransform, nullptr);
     ComputeEffectiveTransformForMaskLayer(aTransformToSurface);
   }
 
@@ -1524,7 +1622,7 @@ public:
     mEffectiveTransform =
         SnapTransform(GetLocalTransform(), gfxRect(0, 0, mBounds.width, mBounds.height),
                       nullptr)*
-        SnapTransform(aTransformToSurface, gfxRect(0, 0, 0, 0), nullptr);
+        SnapTransformTranslation(aTransformToSurface, nullptr);
     ComputeEffectiveTransformForMaskLayer(aTransformToSurface);
   }
 

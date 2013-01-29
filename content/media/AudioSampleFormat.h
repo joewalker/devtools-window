@@ -7,6 +7,7 @@
 #define MOZILLA_AUDIOSAMPLEFORMAT_H_
 
 #include "nsAlgorithm.h"
+#include <algorithm>
 
 namespace mozilla {
 
@@ -74,7 +75,7 @@ template <> inline int16_t
 FloatToAudioSample<int16_t>(float aValue)
 {
   float v = aValue*32768.0f;
-  float clamped = NS_MAX(-32768.0f, NS_MIN(32767.0f, v));
+  float clamped = std::max(-32768.0f, std::min(32767.0f, v));
   return int16_t(clamped);
 }
 
@@ -139,13 +140,27 @@ ScaleAudioSamples(float* aBuffer, int aCount, float aScale)
   }
 }
 
-
 inline void
 ScaleAudioSamples(short* aBuffer, int aCount, float aScale)
 {
   int32_t volume = int32_t((1 << 16) * aScale);
   for (int32_t i = 0; i < aCount; ++i) {
     aBuffer[i] = short((int32_t(aBuffer[i]) * volume) >> 16);
+  }
+}
+
+inline const void*
+AddAudioSampleOffset(const void* aBase, AudioSampleFormat aFormat,
+                     int32_t aOffset)
+{
+  switch (aFormat) {
+  case AUDIO_FORMAT_FLOAT32:
+    return static_cast<const float*>(aBase) + aOffset;
+  case AUDIO_FORMAT_S16:
+    return static_cast<const int16_t*>(aBase) + aOffset;
+  default:
+    NS_ERROR("Unknown format");
+    return nullptr;
   }
 }
 

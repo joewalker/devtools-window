@@ -47,10 +47,21 @@ DEFINES += \
    $(NULL)
 endif
 
+ifdef MOZ_NATIVE_JPEG
+LIBS += \
+  $(MOZ_JPEG_LIBS) \
+  $(NULL)
+endif
 
 ifdef MOZ_NATIVE_LIBVPX
 LIBS += \
   $(MOZ_LIBVPX_LIBS) \
+  $(NULL)
+endif
+
+ifndef MOZ_TREE_PIXMAN
+LIBS += \
+  $(MOZ_PIXMAN_LIBS) \
   $(NULL)
 endif
 
@@ -122,6 +133,7 @@ LOCAL_INCLUDES += \
  -I$(topsrcdir)/media/webrtc/signaling/src/peerconnection \
  -I$(topsrcdir)/media/webrtc/signaling/media-conduit\
  -I$(topsrcdir)/media/webrtc/trunk/third_party/libjingle/source/ \
+ -I$(topsrcdir)/xpcom/base/ \
  $(NULL)
 
 ifneq ($(OS_TARGET),WINNT)

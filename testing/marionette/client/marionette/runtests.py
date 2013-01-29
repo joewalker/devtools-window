@@ -185,7 +185,7 @@ class MarionetteTestRunner(object):
                  es_server=None, rest_server=None, logger=None,
                  testgroup="marionette", noWindow=False, logcat_dir=None,
                  xml_output=None, repeat=0, perf=False, perfserv=None,
-                 gecko_path=None, testvars=None, tree=None, load_early=False):
+                 gecko_path=None, testvars=None, tree=None, device=None):
         self.address = address
         self.emulator = emulator
         self.emulatorBinary = emulatorBinary
@@ -211,11 +211,11 @@ class MarionetteTestRunner(object):
         self.perf = perf
         self.perfserv = perfserv
         self.gecko_path = gecko_path
-        self.testvars = None
+        self.testvars = {}
         self.tree = tree
-        self.load_early = load_early
+        self.device = device
 
-        if testvars is not None:
+        if testvars:
             if not os.path.exists(testvars):
                 raise Exception('--testvars file does not exist')
 
@@ -239,6 +239,7 @@ class MarionetteTestRunner(object):
                 os.mkdir(self.logcat_dir)
 
         # for XML output
+        self.testvars['xml_output'] = self.xml_output
         self.results = []
 
     def reset_test_stats(self):
@@ -296,8 +297,7 @@ class MarionetteTestRunner(object):
                                          baseurl=self.baseurl,
                                          noWindow=self.noWindow,
                                          logcat_dir=self.logcat_dir,
-                                         gecko_path=self.gecko_path,
-                                         load_early=self.load_early)
+                                         gecko_path=self.gecko_path)
         else:
             raise Exception("must specify binary, address or emulator")
 
@@ -365,6 +365,9 @@ class MarionetteTestRunner(object):
                 print e
 
         if self.xml_output:
+            xml_dir = os.path.dirname(os.path.abspath(self.xml_output))
+            if not os.path.exists(xml_dir):
+                os.makedirs(xml_dir)
             with open(self.xml_output, 'w') as f:
                 f.write(self.generate_xml(self.results))
 
@@ -592,6 +595,8 @@ def parse_options():
                       help='directory to store logcat dump files')
     parser.add_option('--address', dest='address', action='store',
                       help='host:port of running Gecko instance to connect to')
+    parser.add_option('--device', dest='device', action='store',
+                      help='serial ID of a device to use for adb / fastboot')
     parser.add_option('--type', dest='type', action='store',
                       default='browser+b2g',
                       help = "The type of test to run, can be a combination "
@@ -647,11 +652,6 @@ def parse_options():
         print "must specify --binary, --emulator or --address"
         parser.exit()
 
-    if options.load_early and not options.emulator:
-        parser.print_usage()
-        print "must specify --load-early on when using --emulator"
-        parser.exit()
-
     # default to storing logcat output for emulator runs
     if options.emulator and not options.logcat_dir:
         options.logcat_dir = 'logcat'
@@ -693,7 +693,7 @@ def startTestRunner(runner_class, options, tests):
                           perfserv=options.perfserv,
                           gecko_path=options.gecko_path,
                           testvars=options.testvars,
-                          load_early=options.load_early)
+                          device=options.device)
     runner.run_tests(tests, testtype=options.type)
     return runner
 

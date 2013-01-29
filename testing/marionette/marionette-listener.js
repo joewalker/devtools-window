@@ -16,7 +16,8 @@ loader.loadSubScript("chrome://marionette/content/marionette-log-obj.js");
 loader.loadSubScript("chrome://marionette/content/marionette-perf.js");
 Cu.import("chrome://marionette/content/marionette-elements.js");
 Cu.import("resource://gre/modules/FileUtils.jsm");
-Cu.import("resource://gre/modules/NetUtil.jsm");  
+Cu.import("resource://gre/modules/NetUtil.jsm");
+Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 let utils = {};
 utils.window = content;
 // Load Event/ChromeUtils for use with JS scripts:
@@ -60,8 +61,6 @@ let checkTimer = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
  * If the actor returns an ID, we start the listeners. Otherwise, nothing happens.
  */
 function registerSelf() {
-  Services.io.manageOfflineStatus = false;
-  Services.io.offline = false;
   let msg = {value: winUtil.outerWindowID, href: content.location.href};
   let register = sendSyncMessage("Marionette:register", msg);
 
@@ -104,6 +103,7 @@ function startListeners() {
   addMessageListenerId("Marionette:refresh", refresh);
   addMessageListenerId("Marionette:findElementContent", findElementContent);
   addMessageListenerId("Marionette:findElementsContent", findElementsContent);
+  addMessageListenerId("Marionette:getActiveElement", getActiveElement);
   addMessageListenerId("Marionette:clickElement", clickElement);
   addMessageListenerId("Marionette:getElementAttribute", getElementAttribute);
   addMessageListenerId("Marionette:getElementText", getElementText);
@@ -190,6 +190,7 @@ function deleteSession(msg) {
   removeMessageListenerId("Marionette:refresh", refresh);
   removeMessageListenerId("Marionette:findElementContent", findElementContent);
   removeMessageListenerId("Marionette:findElementsContent", findElementsContent);
+  removeMessageListenerId("Marionette:getActiveElement", getActiveElement);
   removeMessageListenerId("Marionette:clickElement", clickElement);
   removeMessageListenerId("Marionette:getElementAttribute", getElementAttribute);
   removeMessageListenerId("Marionette:getElementTagName", getElementTagName);
@@ -306,7 +307,9 @@ function createExecuteContentSandbox(aWindow, timeout) {
     }
   });
 
-  sandbox.SpecialPowers = new SpecialPowers(aWindow);
+  XPCOMUtils.defineLazyGetter(sandbox, 'SpecialPowers', function() {
+    return new SpecialPowers(aWindow);
+  });
 
   sandbox.asyncComplete = function sandbox_asyncComplete(value, status) {
     curWindow.removeEventListener("unload", errUnload, false);
@@ -363,7 +366,8 @@ function executeScript(msg, directInject) {
   let script = msg.json.value;
 
   if (msg.json.newSandbox || !sandbox) {
-    sandbox = createExecuteContentSandbox(curWindow, msg.json.timeout);
+    sandbox = createExecuteContentSandbox(curWindow,
+                                          msg.json.timeout);
     if (!sandbox) {
       sendError("Could not create sandbox!", asyncTestCommandId);
       return;
@@ -465,7 +469,8 @@ function executeWithCallback(msg, useFinish) {
   let asyncTestCommandId = msg.json.command_id;
 
   if (msg.json.newSandbox || !sandbox) {
-    sandbox = createExecuteContentSandbox(curWindow, msg.json.timeout);
+    sandbox = createExecuteContentSandbox(curWindow,
+                                          msg.json.timeout);
     if (!sandbox) {
       sendError("Could not create sandbox!");
       return;
@@ -546,23 +551,32 @@ function setSearchTimeout(msg) {
  */
 function goUrl(msg) {
   let command_id = msg.json.command_id;
-  addEventListener("DOMContentLoaded", function onDOMContentLoaded(event) {
-    // Prevent DOMContentLoaded events from frames from invoking this code,
-    // unless the event is coming from the frame associated with the current
-    // window (i.e., someone has used switch_to_frame).
-    if (!event.originalTarget.defaultView.frameElement || 
-        event.originalTarget.defaultView.frameElement == curWindow.frameElement) {
+  // Prevent DOMContentLoaded events from frames from invoking this code,
+  // unless the event is coming from the frame associated with the current
+  // window (i.e., someone has used switch_to_frame).
+  let onDOMContentLoaded = function onDOMContentLoaded(event){
+    if (msg.json.pageTimeout != null){
+      checkTimer.cancel();
+    }
+    if (!event.originalTarget.defaultView.frameElement ||
+      event.originalTarget.defaultView.frameElement == curWindow.frameElement) {
       removeEventListener("DOMContentLoaded", onDOMContentLoaded, false);
-
       let errorRegex = /about:.+(error)|(blocked)\?/;
       if (curWindow.document.readyState == "interactive" && errorRegex.exec(curWindow.document.baseURI)) {
         sendError("Error loading page", 13, null, command_id);
         return;
       }
-
       sendOk(command_id);
     }
-  }, false);
+  };
+  function timerFunc(){
+    sendError("Error loading page", 13, null, command_id);
+    removeEventListener("DOMContentLoaded", onDOMContentLoaded, false);
+  }
+  if (msg.json.pageTimeout != null){
+    checkTimer.initWithCallback(timerFunc, msg.json.pageTimeout, Ci.nsITimer.TYPE_ONE_SHOT);
+  }
+  addEventListener("DOMContentLoaded", onDOMContentLoaded, false);
   curWindow.location = msg.json.value;
 }
 
@@ -646,6 +660,16 @@ function findElementsContent(msg) {
   catch (e) {
     sendError(e.message, e.code, e.stack, command_id);
   }
+}
+
+/**
+ * Find and return the active element on the page
+ */
+function getActiveElement(msg) {
+  let command_id = msg.json.command_id;
+  var element = curWindow.document.activeElement;
+  var id = elementManager.addToKnownElements(element);
+  sendResponse({value: id}, command_id);
 }
 
 /**
@@ -854,11 +878,22 @@ function switchToFrame(msg) {
     checkTimer.initWithCallback(checkLoad, 100, Ci.nsITimer.TYPE_ONE_SHOT);
   }
   let foundFrame = null;
-  let frames = curWindow.document.getElementsByTagName("iframe");
-  //Until Bug 761935 lands, we won't have multiple nested OOP iframes. We will only have one.
-  //parWindow will refer to the iframe above the nested OOP frame.
-  let parWindow = curWindow.QueryInterface(Ci.nsIInterfaceRequestor)
-                     .getInterface(Ci.nsIDOMWindowUtils).outerWindowID;
+  let frames = []; //curWindow.document.getElementsByTagName("iframe");
+  let parWindow = null; //curWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+  // Check of the curWindow reference is dead
+  try {
+    frames = curWindow.document.getElementsByTagName("iframe");
+    //Until Bug 761935 lands, we won't have multiple nested OOP iframes. We will only have one.
+    //parWindow will refer to the iframe above the nested OOP frame.
+    parWindow = curWindow.QueryInterface(Ci.nsIInterfaceRequestor)
+                      .getInterface(Ci.nsIDOMWindowUtils).outerWindowID;
+  } catch (e) {
+    // We probably have a dead compartment so accessing it is going to make Firefox
+    // very upset. Let's now try redirect everything to the top frame even if the 
+    // user has given us a frame since search doesnt look up.
+    msg.json.value = null;
+    msg.json.element = null;
+  }
   if ((msg.json.value == null) && (msg.json.element == null)) {
     curWindow = content;
     if(msg.json.focus == true) {

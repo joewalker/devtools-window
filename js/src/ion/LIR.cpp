@@ -212,6 +212,7 @@ PrintDefinition(FILE *fp, const LDefinition &def)
     fprintf(fp, "]");
 }
 
+#ifdef DEBUG
 static void
 PrintUse(char *buf, size_t size, const LUse *use)
 {
@@ -231,7 +232,6 @@ PrintUse(char *buf, size_t size, const LUse *use)
     }
 }
 
-#ifdef DEBUG
 const char *
 LAllocation::toString() const
 {
@@ -297,15 +297,16 @@ LInstruction::assignSnapshot(LSnapshot *snapshot)
 void
 LInstruction::print(FILE *fp)
 {
-    printName(fp);
-
-    fprintf(fp, " (");
+    fprintf(fp, "{");
     for (size_t i = 0; i < numDefs(); i++) {
         PrintDefinition(fp, *getDef(i));
         if (i != numDefs() - 1)
             fprintf(fp, ", ");
     }
-    fprintf(fp, ")");
+    fprintf(fp, "} <- ");
+
+    printName(fp);
+
 
     printInfo(fp);
 

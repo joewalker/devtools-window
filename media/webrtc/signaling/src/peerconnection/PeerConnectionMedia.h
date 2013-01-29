@@ -49,7 +49,7 @@ class Fake_AudioGenerator {
  public:
 Fake_AudioGenerator(nsDOMMediaStream* aStream) : mStream(aStream), mCount(0) {
     mTimer = do_CreateInstance("@mozilla.org/timer;1");
-    PR_ASSERT(mTimer);
+    MOZ_ASSERT(mTimer);
 
     // Make a track
     mozilla::AudioSegment *segment = new mozilla::AudioSegment();
@@ -63,17 +63,18 @@ Fake_AudioGenerator(nsDOMMediaStream* aStream) : mStream(aStream), mCount(0) {
   static void Callback(nsITimer* timer, void *arg) {
     Fake_AudioGenerator* gen = static_cast<Fake_AudioGenerator*>(arg);
 
-    nsRefPtr<mozilla::SharedBuffer> samples = mozilla::SharedBuffer::Create(1600 * 2 * sizeof(int16_t));
-    for (int i=0; i<1600*2; i++) {
-      reinterpret_cast<int16_t *>(samples->Data())[i] = ((gen->mCount % 8) * 4000) - (7*4000)/2;
+    nsRefPtr<mozilla::SharedBuffer> samples = mozilla::SharedBuffer::Create(1600 * sizeof(int16_t));
+    int16_t* data = static_cast<int16_t*>(samples->Data());
+    for (int i=0; i<1600; i++) {
+      data[i] = ((gen->mCount % 8) * 4000) - (7*4000)/2;
       ++gen->mCount;
     }
 
     mozilla::AudioSegment segment;
     segment.Init(1);
-    segment.AppendFrames(samples.forget(), 1600,
-                         0, 1600, mozilla::AUDIO_FORMAT_S16);
-
+    nsAutoTArray<const int16_t*,1> channelData;
+    channelData.AppendElement(data);
+    segment.AppendFrames(samples.forget(), channelData, 1600);
     gen->mStream->GetStream()->AsSourceStream()->AppendToTrack(1, &segment);
   }
 
@@ -91,7 +92,7 @@ class Fake_VideoGenerator {
     mStream = aStream;
     mCount = 0;
     mTimer = do_CreateInstance("@mozilla.org/timer;1");
-    PR_ASSERT(mTimer);
+    MOZ_ASSERT(mTimer);
 
     // Make a track
     mozilla::VideoSegment *segment = new mozilla::VideoSegment();
@@ -160,7 +161,9 @@ class Fake_VideoGenerator {
 class LocalSourceStreamInfo {
 public:
   LocalSourceStreamInfo(nsDOMMediaStream* aMediaStream)
-    : mMediaStream(aMediaStream) {}
+    : mMediaStream(aMediaStream) {
+      MOZ_ASSERT(aMediaStream);
+    }
   ~LocalSourceStreamInfo() {
     mMediaStream = NULL;
   }
@@ -197,7 +200,9 @@ class RemoteSourceStreamInfo {
  public:
   RemoteSourceStreamInfo(nsDOMMediaStream* aMediaStream) :
     mMediaStream(already_AddRefed<nsDOMMediaStream>(aMediaStream)),
-    mPipelines() {}
+    mPipelines() {
+      MOZ_ASSERT(aMediaStream);
+    }
 
   nsDOMMediaStream* GetMediaStream() {
     return mMediaStream;
@@ -231,7 +236,7 @@ class PeerConnectionMedia : public sigslot::has_slots<> {
     PR_DestroyLock(mLocalSourceStreamsLock);
   }
 
-  nsresult Init();
+  nsresult Init(const std::vector<mozilla::NrIceStunServer>& stun_servers);
 
   // WARNING: This destroys the object!
   void SelfDestruct();

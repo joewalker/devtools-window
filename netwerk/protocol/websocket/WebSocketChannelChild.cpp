@@ -331,6 +331,9 @@ WebSocketChannelChild::AsyncOpen(nsIURI *aURI,
   if (iTabChild) {
     tabChild = static_cast<mozilla::dom::TabChild*>(iTabChild.get());
   }
+  if (MissingRequiredTabChild(tabChild, "websocket")) {
+    return NS_ERROR_ILLEGAL_VALUE;
+  }
 
   URIParams uri;
   SerializeURI(aURI, uri);
@@ -338,9 +341,9 @@ WebSocketChannelChild::AsyncOpen(nsIURI *aURI,
   // Corresponding release in DeallocPWebSocket
   AddIPDLReference();
 
-  gNeckoChild->SendPWebSocketConstructor(this, tabChild);
-  if (!SendAsyncOpen(uri, nsCString(aOrigin), mProtocol, mEncrypted,
-                     IPC::SerializedLoadContext(this)))
+  gNeckoChild->SendPWebSocketConstructor(this, tabChild,
+                                         IPC::SerializedLoadContext(this));
+  if (!SendAsyncOpen(uri, nsCString(aOrigin), mProtocol, mEncrypted))
     return NS_ERROR_UNEXPECTED;
 
   mOriginalURI = aURI;

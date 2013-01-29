@@ -1136,6 +1136,12 @@ MacroAssemblerARM::ma_bl(Label *dest, Assembler::Condition c)
     as_bl(dest, c);
 }
 
+void
+MacroAssemblerARM::ma_blx(Register reg, Assembler::Condition c)
+{
+    as_blx(reg, c);
+}
+
 // VFP/ALU
 void
 MacroAssemblerARM::ma_vadd(FloatRegister src1, FloatRegister src2, FloatRegister dst)
@@ -1483,6 +1489,13 @@ MacroAssemblerARMCompat::addPtr(Register src, Register dest)
 }
 
 void
+MacroAssemblerARMCompat::addPtr(const Address &src, Register dest)
+{
+    load32(src, ScratchRegister);
+    ma_add(ScratchRegister, dest, SetCond);
+}
+
+void
 MacroAssemblerARMCompat::and32(Imm32 imm, const Address &dest)
 {
     load32(dest, ScratchRegister);
@@ -1499,9 +1512,27 @@ MacroAssemblerARMCompat::or32(Imm32 imm, const Address &dest)
 }
 
 void
+MacroAssemblerARMCompat::xorPtr(Imm32 imm, Register dest)
+{
+    ma_eor(imm, dest);
+}
+
+void
 MacroAssemblerARMCompat::orPtr(Imm32 imm, Register dest)
 {
     ma_orr(imm, dest);
+}
+
+void
+MacroAssemblerARMCompat::orPtr(Register src, Register dest)
+{
+    ma_orr(src, dest);
+}
+
+void
+MacroAssemblerARMCompat::andPtr(Imm32 imm, Register dest)
+{
+    ma_and(imm, dest);
 }
 
 void
@@ -1931,6 +1962,13 @@ void
 MacroAssemblerARMCompat::subPtr(Imm32 imm, const Register dest)
 {
     ma_sub(imm, dest);
+}
+
+void
+MacroAssemblerARMCompat::subPtr(const Address &addr, const Register dest)
+{
+    loadPtr(addr, ScratchRegister);
+    ma_sub(ScratchRegister, dest);
 }
 
 void
@@ -2592,7 +2630,7 @@ MacroAssemblerARMCompat::storeTypeTag(ImmTag tag, Register base, Register index,
 
 void
 MacroAssemblerARMCompat::linkExitFrame() {
-    uint8_t *dest = ((uint8_t*)GetIonContext()->compartment->rt) + offsetof(JSRuntime, ionTop);
+    uint8_t *dest = ((uint8_t*)GetIonContext()->compartment->rt) + offsetof(JSRuntime, mainThread.ionTop);
     movePtr(ImmWord(dest), ScratchRegister);
     ma_str(StackPointer, Operand(ScratchRegister, 0));
 }
@@ -2708,10 +2746,13 @@ MacroAssemblerARMCompat::passABIArg(const MoveOperand &from)
     if (from.isDouble()) {
         FloatRegister fr;
         if (GetFloatArgReg(usedIntSlots_, usedFloatSlots_, &fr)) {
-            enoughMemory_ = moveResolver_.addMove(from, MoveOperand(fr), Move::DOUBLE);
+            if (!from.isFloatReg() || from.floatReg() != fr) {
+                enoughMemory_ = moveResolver_.addMove(from, MoveOperand(fr), Move::DOUBLE);
+            }
+            // else nothing to do; the value is in the right register already
         } else {
             // If (and only if) the integer registers have started spilling, do we
-            // need to take the double register's alignment into accoun
+            // need to take the double register's alignment into account
             uint32_t disp = GetFloatArgStackDisp(usedIntSlots_, usedFloatSlots_, &padding_);
             enoughMemory_ = moveResolver_.addMove(from, MoveOperand(sp, disp), Move::DOUBLE);
         }
@@ -2719,13 +2760,16 @@ MacroAssemblerARMCompat::passABIArg(const MoveOperand &from)
     } else {
         Register r;
         if (GetIntArgReg(usedIntSlots_, usedFloatSlots_, &r)) {
-            enoughMemory_ = moveResolver_.addMove(from, MoveOperand(r), Move::GENERAL);
+            if (!from.isGeneralReg() || from.reg() != r) {
+                enoughMemory_ = moveResolver_.addMove(from, MoveOperand(r), Move::GENERAL);
+            }
+            // else nothing to do; the value is in the right register already
         } else {
             uint32_t disp = GetIntArgStackDisp(usedIntSlots_, usedFloatSlots_, &padding_);
             fprintf(stderr, "Float on the stack! (%d)\n", disp);
             enoughMemory_ = moveResolver_.addMove(from, MoveOperand(sp, disp), Move::GENERAL);
         }
-            usedIntSlots_++;
+        usedIntSlots_++;
     }
 
 }
@@ -2752,6 +2796,9 @@ MacroAssemblerARMCompat::passABIArg(const MoveOperand &from)
     if (GetIntArgReg(usedSlots_, 0, &destReg)) {
         if (from.isDouble()) {
             floatArgsInGPR[destReg.code() >> 1] = VFPRegister(from.floatReg());
+            useResolver = false;
+        } else if (from.isGeneralReg() && from.reg() == destReg) {
+            // No need to move anything
             useResolver = false;
         } else {
             dest = MoveOperand(destReg);
@@ -2783,7 +2830,7 @@ void MacroAssemblerARMCompat::checkStackAlignment()
 {
 #ifdef DEBUG
     ma_tst(sp, Imm32(StackAlignment - 1));
-    breakpoint(Equal);
+    breakpoint(NonZero);
 #endif
 }
 
@@ -2976,6 +3023,20 @@ MacroAssemblerARMCompat::toggledJump(Label *label)
     CodeOffsetLabel ret(nextOffset().getOffset());
     ma_b(label, Always, true);
     return ret;
+}
+
+CodeOffsetLabel
+MacroAssemblerARMCompat::toggledCall(IonCode *target, bool enabled)
+{
+    CodeOffsetLabel offset(size());
+    BufferOffset bo = m_buffer.nextOffset();
+    addPendingJump(bo, target->raw(), Relocation::IONCODE);
+    ma_movPatchable(Imm32(uint32_t(target->raw())), ScratchRegister, Always, L_MOVWT);
+    if (enabled)
+        ma_blx(ScratchRegister);
+    else
+        ma_nop();
+    return offset;
 }
 
 void
