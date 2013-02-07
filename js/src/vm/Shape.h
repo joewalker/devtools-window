@@ -245,8 +245,9 @@ class BaseShape : public js::gc::Cell
 
         /*
          * Flags set which describe the referring object. Once set these cannot
-         * be unset, and are transferred from shape to shape as the object's
-         * last property changes.
+         * be unset (except during object densification of sparse indexes), and
+         * are transferred from shape to shape as the object's last property
+         * changes.
          */
 
         DELEGATE           =    0x8,
@@ -440,7 +441,7 @@ typedef HashSet<ReadBarriered<UnownedBaseShape>,
 
 class Shape : public js::gc::Cell
 {
-    friend struct ::JSObject;
+    friend class ::JSObject;
     friend class ::JSFunction;
     friend class js::Bindings;
     friend class js::ObjectImpl;

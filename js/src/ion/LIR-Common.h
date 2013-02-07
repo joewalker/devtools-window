@@ -1118,6 +1118,34 @@ class LCompareS : public LInstructionHelper<1, 2, 1>
     }
 };
 
+// strict-equality between value and string.
+class LCompareStrictS : public LInstructionHelper<1, BOX_PIECES + 1, 2>
+{
+  public:
+    LIR_HEADER(CompareStrictS)
+    LCompareStrictS(const LAllocation &rhs, const LDefinition &temp0,
+                    const LDefinition &temp1) {
+        setOperand(BOX_PIECES, rhs);
+        setTemp(0, temp0);
+        setTemp(1, temp1);
+    }
+
+    static const size_t Lhs = 0;
+
+    const LAllocation *right() {
+        return getOperand(BOX_PIECES);
+    }
+    const LDefinition *temp0() {
+        return getTemp(0);
+    }
+    const LDefinition *temp1() {
+        return getTemp(1);
+    }
+    MCompare *mir() {
+        return mir_->toCompare();
+    }
+};
+
 // Used for strict-equality comparisons where one side is a boolean
 // and the other is a value. Note that CompareI is used to compare
 // two booleans.
@@ -2119,6 +2147,21 @@ class LElements : public LInstructionHelper<1, 1, 0>
     }
 
     const LAllocation *object() {
+        return getOperand(0);
+    }
+};
+
+// If necessary, convert any int32 elements in a vector into doubles.
+class LConvertElementsToDoubles : public LInstructionHelper<0, 1, 0>
+{
+  public:
+    LIR_HEADER(ConvertElementsToDoubles)
+
+    LConvertElementsToDoubles(const LAllocation &elements) {
+        setOperand(0, elements);
+    }
+
+    const LAllocation *elements() {
         return getOperand(0);
     }
 };

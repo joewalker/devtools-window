@@ -224,10 +224,6 @@ static const uint32_t FRAMEBUFFER_LENGTH_PER_CHANNEL = 1024;
 static const uint32_t FRAMEBUFFER_LENGTH_MIN = 512;
 static const uint32_t FRAMEBUFFER_LENGTH_MAX = 16384;
 
-static inline bool IsCurrentThread(nsIThread* aThread) {
-  return NS_GetCurrentThread() == aThread;
-}
-
 // GetCurrentTime is defined in winbase.h as zero argument macro forwarding to
 // GetTickCount() and conflicts with MediaDecoder::GetCurrentTime implementation.
 #ifdef GetCurrentTime
@@ -950,7 +946,7 @@ public:
   nsCOMPtr<MediaDecoderStateMachine> mDecoderStateMachine;
 
   // Media data resource.
-  nsAutoPtr<MediaResource> mResource;
+  nsRefPtr<MediaResource> mResource;
 
   // |ReentrantMonitor| for detecting when the video play state changes. A call
   // to |Wait| on this monitor will block the thread until the next state

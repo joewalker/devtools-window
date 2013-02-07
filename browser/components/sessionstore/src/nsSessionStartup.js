@@ -39,7 +39,7 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/TelemetryStopwatch.jsm");
 Cu.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
-Cu.import("resource://gre/modules/commonjs/promise/core.js");
+Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js");
 
 XPCOMUtils.defineLazyModuleGetter(this, "_SessionFile",
   "resource:///modules/sessionstore/_SessionFile.jsm");
@@ -76,12 +76,6 @@ SessionStartup.prototype = {
     if (PrivateBrowsingUtils.permanentPrivateBrowsing)
       return;
 
-#ifndef MOZ_PER_WINDOW_PRIVATE_BROWSING
-    let pbs = Cc["@mozilla.org/privatebrowsing;1"].
-              getService(Ci.nsIPrivateBrowsingService);
-    if (pbs.lastChangedByCommandLine)
-      return;
-#endif
     _SessionFile.read().then(
       this._onSessionFileRead.bind(this)
     );

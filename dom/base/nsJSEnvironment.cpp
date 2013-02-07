@@ -149,6 +149,8 @@ static PRTime sCCLockedOutTime;
 static JS::GCSliceCallback sPrevGCSliceCallback;
 static js::AnalysisPurgeCallback sPrevAnalysisPurgeCallback;
 
+static bool sHasRunGC;
+
 // The number of currently pending document loads. This count isn't
 // guaranteed to always reflect reality and can't easily as we don't
 // have an easy place to know when a load ends or is interrupted in
@@ -1001,9 +1003,6 @@ nsJSContext::JSOptionChangedCallback(const char *pref, void *data)
                                             js_pccounts_content_str);
   bool useMethodJITAlways = Preferences::GetBool(js_methodjit_always_str);
   bool useTypeInference = !chromeWindow && contentWindow && Preferences::GetBool(js_typeinfer_str);
-  bool useXML = Preferences::GetBool(chromeWindow || !contentWindow ?
-                                     "javascript.options.xml.chrome" :
-                                     "javascript.options.xml.content");
   bool useHardening = Preferences::GetBool(js_jit_hardening_str);
   bool useIon = Preferences::GetBool(js_ion_content_str);
   bool parallelIonCompilation = Preferences::GetBool(js_ion_parallel_compilation_str);
@@ -1016,7 +1015,6 @@ nsJSContext::JSOptionChangedCallback(const char *pref, void *data)
       usePCCounts = false;
       useTypeInference = false;
       useMethodJITAlways = true;
-      useXML = false;
       useHardening = false;
       useIon = false;
     }
@@ -1047,11 +1045,6 @@ nsJSContext::JSOptionChangedCallback(const char *pref, void *data)
   else
     newDefaultJSOptions &= ~JSOPTION_ION;
 
-  if (useXML)
-    newDefaultJSOptions |= JSOPTION_ALLOW_XML;
-  else
-    newDefaultJSOptions &= ~JSOPTION_ALLOW_XML;
-
 #ifdef DEBUG
   // In debug builds, warnings are enabled in chrome context if
   // javascript.options.strict.debug is true
@@ -1068,8 +1061,7 @@ nsJSContext::JSOptionChangedCallback(const char *pref, void *data)
   else
     newDefaultJSOptions &= ~JSOPTION_WERROR;
 
-  ::JS_SetOptions(context->mContext,
-                  newDefaultJSOptions & (JSRUNOPTION_MASK | JSOPTION_ALLOW_XML));
+  ::JS_SetOptions(context->mContext, newDefaultJSOptions & JSRUNOPTION_MASK);
 
   ::JS_SetParallelCompilationEnabled(context->mContext, parallelIonCompilation);
 
@@ -1105,7 +1097,7 @@ nsJSContext::nsJSContext(JSRuntime *aRuntime, bool aGCOnDestruction,
 
   ++sContextCount;
 
-  mDefaultJSOptions = JSOPTION_PRIVATE_IS_NSISUPPORTS | JSOPTION_ALLOW_XML;
+  mDefaultJSOptions = JSOPTION_PRIVATE_IS_NSISUPPORTS;
 
   mContext = ::JS_NewContext(aRuntime, gStackSize);
   if (mContext) {
@@ -1247,8 +1239,15 @@ nsJSContext::EvaluateString(const nsAString& aScript,
 {
   SAMPLE_LABEL("JS", "EvaluateString");
   MOZ_ASSERT_IF(aOptions.versionSet, aOptions.version != JSVERSION_UNKNOWN);
+  MOZ_ASSERT_IF(aCoerceToString, aRetValue);
   NS_ENSURE_TRUE(mIsInitialized, NS_ERROR_NOT_INITIALIZED);
-  *aRetValue = JSVAL_VOID;
+  // Unfortunately, the JS engine actually compiles scripts with a return value
+  // in a different, less efficient way.  Furthermore, it can't JIT them in many
+  // cases.  So we need to be explicitly told whether the caller cares about the
+  // return value.  Callers use null to indicate they don't care.
+  if (aRetValue) {
+    *aRetValue = JSVAL_VOID;
+  }
 
   if (!mScriptsEnabled) {
     return NS_OK;
@@ -1283,7 +1282,7 @@ nsJSContext::EvaluateString(const nsAString& aScript,
     ok = JS::Evaluate(mContext, rootedScope, aOptions,
                       PromiseFlatString(aScript).get(),
                       aScript.Length(), aRetValue);
-    if (ok && !aRetValue->isUndefined() && aCoerceToString) {
+    if (ok && aCoerceToString && !aRetValue->isUndefined()) {
       JSString* str = JS_ValueToString(mContext, *aRetValue);
       ok = !!str;
       *aRetValue = ok ? JS::StringValue(str) : JS::UndefinedValue();
@@ -1292,7 +1291,9 @@ nsJSContext::EvaluateString(const nsAString& aScript,
   }
 
   if (!ok) {
-    *aRetValue = JS::UndefinedValue();
+    if (aRetValue) {
+      *aRetValue = JS::UndefinedValue();
+    }
     // Tell XPConnect about any pending exceptions. This is needed
     // to avoid dropping JS exceptions in case we got here through
     // nested calls through XPConnect.
@@ -1304,7 +1305,7 @@ nsJSContext::EvaluateString(const nsAString& aScript,
   ScriptEvaluated(true);
 
   // Wrap the return value into whatever compartment mContext was in.
-  if (!JS_WrapValue(mContext, aRetValue))
+  if (aRetValue && !JS_WrapValue(mContext, aRetValue))
     return NS_ERROR_OUT_OF_MEMORY;
   return NS_OK;
 }
@@ -3071,7 +3072,7 @@ nsJSContext::PokeShrinkGCBuffers()
 void
 nsJSContext::MaybePokeCC()
 {
-  if (sCCTimer || sShuttingDown) {
+  if (sCCTimer || sShuttingDown || !sHasRunGC) {
     return;
   }
 
@@ -3230,6 +3231,7 @@ DOMGCSliceCallback(JSRuntime *aRt, JS::GCProgress aProgress, const JS::GCDescrip
     sCCollectedWaitingForGC = 0;
     sCleanupsSinceLastGC = 0;
     sNeedsFullCC = true;
+    sHasRunGC = true;
     nsJSContext::MaybePokeCC();
 
     if (aDesc.isCompartment) {
@@ -3349,6 +3351,7 @@ nsJSRuntime::Startup()
   sCCLockedOut = false;
   sCCLockedOutTime = 0;
   sLastCCEndTime = 0;
+  sHasRunGC = false;
   sPendingLoadCount = 0;
   sLoadingInProgress = false;
   sCCollectedWaitingForGC = 0;

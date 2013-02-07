@@ -693,7 +693,7 @@ let Buf = {
     // right away!
     let parcel = this.outgoingBytes.subarray(0, this.outgoingIndex);
     if (DEBUG) debug("Outgoing parcel: " + Array.slice(parcel));
-    postRILMessage(parcel);
+    postRILMessage(CLIENT_ID, parcel);
     this.outgoingIndex = PARCEL_SIZE_SIZE;
   },
 
@@ -793,7 +793,7 @@ let RIL = {
     this.iccInfoPrivate = {};
 
     /**
-     * ICC information, such as MSISDN, IMSI, ...etc.
+     * ICC information, such as MSISDN, MCC, MNC, SPN...etc.
      */
     this.iccInfo = {};
 
@@ -2608,6 +2608,13 @@ let RIL = {
           destinationId: STK_DEVICE_ID_SIM
         };
         break;
+      case STK_EVENT_TYPE_LANGUAGE_SELECTION:
+        command.deviceId = {
+          sourceId: STK_DEVICE_ID_ME,
+          destinationId: STK_DEVICE_ID_SIM
+        };
+        command.language = command.event.language;
+        break;
     }
     this.sendICCEnvelopeCommand(command);
   },
@@ -2729,6 +2736,11 @@ let RIL = {
         ComprehensionTlvHelper.writeTimerValueTlv(options.timerValue, true);
     }
 
+    // Language
+    if (options.language) {
+      ComprehensionTlvHelper.writeLanguageTlv(options.language);
+    }
+
     // Calculate and write BER length to 2nd mark
     Buf.stopCalOutgoingSize();
 
@@ -2823,6 +2835,8 @@ let RIL = {
         newCardState = GECKO_CARDSTATE_READY;
         break;
       case CARD_APPSTATE_UNKNOWN:
+        newCardState = GECKO_CARDSTATE_UNKNOWN;
+        break;
       case CARD_APPSTATE_DETECTED:
       default:
         newCardState = GECKO_CARDSTATE_NOT_READY;
@@ -4341,7 +4355,14 @@ RIL[REQUEST_GET_IMSI] = function REQUEST_GET_IMSI(length, options) {
     return;
   }
 
-  this.iccInfo.imsi = Buf.readString();
+  this.iccInfoPrivate.imsi = Buf.readString();
+  if (DEBUG) {
+    debug("IMSI: " + this.iccInfoPrivate.imsi);
+  }
+
+  options.rilMessageType = "iccimsi";
+  options.imsi = this.iccInfoPrivate.imsi;
+  this.sendDOMMessage(options);
 };
 RIL[REQUEST_HANGUP] = function REQUEST_HANGUP(length, options) {
   if (options.rilRequestError) {
@@ -8730,10 +8751,12 @@ let ICCIOHelper = {
     // description.
     let errorMsg = "ICC I/O Error code " +
                    RIL_ERROR_TO_GECKO_ERROR[options.rilRequestError] +
-                   "EF id = " + options.fileId.toString(16) +
-                   " command = " + options.command.toString(16) +
-                   "(" + options.sw1.toString(16) +
-                   "/" + options.sw2.toString(16) + ")";
+                   " EF id = " + options.fileId.toString(16) +
+                   " command = " + options.command.toString(16);
+    if (options.sw1 && options.sw2) {
+      errorMsg += "(" + options.sw1.toString(16) +
+                  "/" + options.sw2.toString(16) + ")";
+    }
     error(errorMsg);
   },
 };
@@ -8835,22 +8858,23 @@ let ICCRecordHelper = {
       let length = Buf.readUint32();
       // Each octet is encoded into two chars.
       let len = length / 2;
-      RIL.iccInfo.ad = GsmPDUHelper.readHexOctetArray(len);
+      let ad = GsmPDUHelper.readHexOctetArray(len);
       Buf.readStringDelimiter(length);
 
       if (DEBUG) {
         let str = "";
-        for (let i = 0; i < RIL.iccInfo.ad.length; i++) {
-          str += RIL.iccInfo.ad[i] + ", ";
+        for (let i = 0; i < ad.length; i++) {
+          str += ad[i] + ", ";
         }
         debug("AD: " + str);
       }
 
-      if (RIL.iccInfo.imsi) {
+      let imsi = RIL.iccInfoPrivate.imsi;
+      if (imsi) {
         // MCC is the first 3 digits of IMSI.
-        RIL.iccInfo.mcc = parseInt(RIL.iccInfo.imsi.substr(0,3));
+        RIL.iccInfo.mcc = parseInt(imsi.substr(0,3));
         // The 4th byte of the response is the length of MNC.
-        RIL.iccInfo.mnc = parseInt(RIL.iccInfo.imsi.substr(3, RIL.iccInfo.ad[3]));
+        RIL.iccInfo.mnc = parseInt(imsi.substr(3, ad[3]));
         if (DEBUG) debug("MCC: " + RIL.iccInfo.mcc + " MNC: " + RIL.iccInfo.mnc);
         ICCUtilsHelper.handleICCInfoChange();
       }
@@ -8899,13 +8923,13 @@ let ICCRecordHelper = {
       let length = Buf.readUint32();
       // Each octet is encoded into two chars.
       let len = length / 2;
-      RIL.iccInfo.sst = GsmPDUHelper.readHexOctetArray(len);
+      let sst = GsmPDUHelper.readHexOctetArray(len);
       Buf.readStringDelimiter(length);
-
+      RIL.iccInfoPrivate.sst = sst;
       if (DEBUG) {
         let str = "";
-        for (let i = 0; i < RIL.iccInfo.sst.length; i++) {
-          str += RIL.iccInfo.sst[i] + ", ";
+        for (let i = 0; i < sst.length; i++) {
+          str += sst[i] + ", ";
         }
         debug("SST: " + str);
       }
@@ -9670,7 +9694,7 @@ let ICCUtilsHelper = {
    * @return true if the service is enabled, false otherwise.
    */
   isICCServiceAvailable: function isICCServiceAvailable(geckoService) {
-    let serviceTable = RIL.iccInfo.sst;
+    let serviceTable = RIL.iccInfoPrivate.sst;
     let index, bitmask;
     if (RIL.appType == CARD_APPTYPE_SIM) {
       /**
@@ -9934,7 +9958,7 @@ let ICCContactHelper = {
 if (!this.debug) {
   // Debugging stub that goes nowhere.
   this.debug = function debug(message) {
-    dump("RIL Worker: " + message + "\n");
+    dump("RIL Worker[" + CLIENT_ID + "]: " + message + "\n");
   };
 }
 

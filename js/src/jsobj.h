@@ -237,7 +237,6 @@ extern Class StringClass;
 extern Class StrictArgumentsObjectClass;
 extern Class WeakMapClass;
 extern Class WithClass;
-extern Class XMLFilterClass;
 
 class ArgumentsObject;
 class ArrayBufferObject;
@@ -367,6 +366,7 @@ class JSObject : public js::ObjectImpl
 
     bool setFlag(JSContext *cx, /*BaseShape::Flag*/ uint32_t flag,
                  GenerateShape generateShape = GENERATE_NONE);
+    bool clearFlag(JSContext *cx, /*BaseShape::Flag*/ uint32_t flag);
 
   public:
     inline bool nativeEmpty() const;
@@ -589,6 +589,7 @@ class JSObject : public js::ObjectImpl
     inline void ensureDenseInitializedLength(JSContext *cx, unsigned index, unsigned extra);
     inline void setDenseElement(unsigned idx, const js::Value &val);
     inline void initDenseElement(unsigned idx, const js::Value &val);
+    inline void setDenseElementMaybeConvertDouble(unsigned idx, const js::Value &val);
     static inline void setDenseElementWithType(JSContext *cx, js::HandleObject obj,
                                                unsigned idx, const js::Value &val);
     static inline void initDenseElementWithType(JSContext *cx, js::HandleObject obj,
@@ -600,6 +601,8 @@ class JSObject : public js::ObjectImpl
     inline void initDenseElements(unsigned dstStart, const js::Value *src, unsigned count);
     inline void moveDenseElements(unsigned dstStart, unsigned srcStart, unsigned count);
     inline void moveDenseElementsUnbarriered(unsigned dstStart, unsigned srcStart, unsigned count);
+    inline bool shouldConvertDoubleElements();
+    inline void setShouldConvertDoubleElements();
 
     /* Packed information for this object's elements. */
     inline void markDenseElementsNotPacked(JSContext *cx);
@@ -624,11 +627,26 @@ class JSObject : public js::ObjectImpl
     /* Convert all dense elements to sparse properties. */
     static bool sparsifyDenseElements(JSContext *cx, js::HandleObject obj);
 
+    /* Small objects are dense, no matter what. */
+    static const unsigned MIN_SPARSE_INDEX = 1000;
+
+    /*
+     * Element storage for an object will be sparse if fewer than 1/8 indexes
+     * are filled in.
+     */
+    static const unsigned SPARSE_DENSITY_RATIO = 8;
+
     /*
      * Check if after growing the object's elements will be too sparse.
      * newElementsHint is an estimated number of elements to be added.
      */
     bool willBeSparseElements(unsigned requiredCapacity, unsigned newElementsHint);
+
+    /*
+     * After adding a sparse index to obj, see if it should be converted to use
+     * dense elements.
+     */
+    static EnsureDenseResult maybeDensifySparseElements(JSContext *cx, js::HandleObject obj);
 
     /* Array specific accessors. */
     inline uint32_t getArrayLength() const;
@@ -679,45 +697,6 @@ class JSObject : public js::ObjectImpl
      */
 
     static const uint32_t ITER_CLASS_NFIXED_SLOTS = 1;
-
-    /*
-     * XML-related getters and setters.
-     */
-
-    /*
-     * Slots for XML-related classes are as follows:
-     * - NamespaceClass.base reserves the *_NAME_* and *_NAMESPACE_* slots.
-     * - QNameClass.base, AttributeNameClass, AnyNameClass reserve
-     *   the *_NAME_* and *_QNAME_* slots.
-     * - Others (XMLClass, js_XMLFilterClass) don't reserve any slots.
-     */
-  private:
-    static const uint32_t JSSLOT_NAME_PREFIX          = 0;   // shared
-    static const uint32_t JSSLOT_NAME_URI             = 1;   // shared
-
-    static const uint32_t JSSLOT_NAMESPACE_DECLARED   = 2;
-
-    static const uint32_t JSSLOT_QNAME_LOCAL_NAME     = 2;
-
-  public:
-    static const uint32_t NAMESPACE_CLASS_RESERVED_SLOTS = 3;
-    static const uint32_t QNAME_CLASS_RESERVED_SLOTS     = 3;
-
-    inline JSLinearString *getNamePrefix() const;
-    inline jsval getNamePrefixVal() const;
-    inline void setNamePrefix(JSLinearString *prefix);
-    inline void clearNamePrefix();
-
-    inline JSLinearString *getNameURI() const;
-    inline jsval getNameURIVal() const;
-    inline void setNameURI(JSLinearString *uri);
-
-    inline jsval getNamespaceDeclared() const;
-    inline void setNamespaceDeclared(jsval decl);
-
-    inline JSAtom *getQNameLocalName() const;
-    inline jsval getQNameLocalNameVal() const;
-    inline void setQNameLocalName(JSAtom *name);
 
     /*
      * Back to generic stuff.
@@ -1007,12 +986,6 @@ class JSObject : public js::ObjectImpl
     inline bool isStopIteration() const;
     inline bool isTypedArray() const;
     inline bool isWeakMap() const;
-#if JS_HAS_XML_SUPPORT
-    inline bool isNamespace() const;
-    inline bool isQName() const;
-    inline bool isXML() const;
-    inline bool isXMLId() const;
-#endif
 
     /* Subtypes of ScopeObject. */
     inline bool isBlock() const;
@@ -1328,7 +1301,7 @@ js_NativeGet(JSContext *cx, js::Handle<JSObject*> obj, js::Handle<JSObject*> pob
 
 extern JSBool
 js_NativeSet(JSContext *cx, js::Handle<JSObject*> obj, js::Handle<JSObject*> receiver,
-             js::Handle<js::Shape*> shape, bool added, bool strict, js::MutableHandleValue vp);
+             js::Handle<js::Shape*> shape, bool strict, js::MutableHandleValue vp);
 
 namespace js {
 

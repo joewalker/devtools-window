@@ -151,6 +151,10 @@ function getSimpleMeasurements() {
   if (shutdownDuration)
     ret.shutdownDuration = shutdownDuration;
 
+  let failedProfileLockCount = Telemetry.failedProfileLockCount;
+  if (failedProfileLockCount)
+    ret.failedProfileLockCount = failedProfileLockCount;
+
   return ret;
 }
 
@@ -742,9 +746,6 @@ TelemetryPing.prototype = {
       Telemetry.canRecord = false;
       return;
     }
-#ifndef MOZ_PER_WINDOW_PRIVATE_BROWSING
-    Services.obs.addObserver(this, "private-browsing", false);
-#endif
     Services.obs.addObserver(this, "profile-before-change", false);
     Services.obs.addObserver(this, "sessionstore-windows-restored", false);
     Services.obs.addObserver(this, "quit-application-granted", false);
@@ -969,9 +970,6 @@ TelemetryPing.prototype = {
       this._hasXulWindowVisibleObserver = false;
     }
     Services.obs.removeObserver(this, "profile-before-change");
-#ifndef MOZ_PER_WINDOW_PRIVATE_BROWSING
-    Services.obs.removeObserver(this, "private-browsing");
-#endif
     Services.obs.removeObserver(this, "quit-application-granted");
   },
 
@@ -1039,16 +1037,6 @@ TelemetryPing.prototype = {
         this.gatherMemory();
       }
       break;
-#ifndef MOZ_PER_WINDOW_PRIVATE_BROWSING
-    case "private-browsing":
-      Telemetry.canRecord = aData == "exit";
-      if (aData == "enter") {
-        this.detachObservers()
-      } else {
-        this.attachObservers()
-      }
-      break;
-#endif
     case "xul-window-visible":
       Services.obs.removeObserver(this, "xul-window-visible");
       this._hasXulWindowVisibleObserver = false;   

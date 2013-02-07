@@ -108,9 +108,6 @@ MapAllocToTraceKind(AllocKind kind)
         JSTRACE_SHAPE,      /* FINALIZE_SHAPE */
         JSTRACE_BASE_SHAPE, /* FINALIZE_BASE_SHAPE */
         JSTRACE_TYPE_OBJECT,/* FINALIZE_TYPE_OBJECT */
-#if JS_HAS_XML_SUPPORT      /* FINALIZE_XML */
-        JSTRACE_XML,
-#endif
         JSTRACE_STRING,     /* FINALIZE_SHORT_STRING */
         JSTRACE_STRING,     /* FINALIZE_STRING */
         JSTRACE_STRING,     /* FINALIZE_EXTERNAL_STRING */
@@ -120,6 +117,7 @@ MapAllocToTraceKind(AllocKind kind)
     return map[kind];
 }
 
+#ifdef JSGC_GENERATIONAL
 static inline bool
 IsNurseryAllocable(AllocKind kind)
 {
@@ -141,9 +139,6 @@ IsNurseryAllocable(AllocKind kind)
         false,     /* FINALIZE_SHAPE */
         false,     /* FINALIZE_BASE_SHAPE */
         false,     /* FINALIZE_TYPE_OBJECT */
-#if JS_HAS_XML_SUPPORT
-        false,     /* FINALIZE_XML */
-#endif
         true,      /* FINALIZE_SHORT_STRING */
         true,      /* FINALIZE_STRING */
         false,     /* FINALIZE_EXTERNAL_STRING */
@@ -152,6 +147,7 @@ IsNurseryAllocable(AllocKind kind)
     JS_STATIC_ASSERT(JS_ARRAY_LENGTH(map) == FINALIZE_LIMIT);
     return map[kind];
 }
+#endif
 
 static inline bool
 IsBackgroundFinalized(AllocKind kind)
@@ -174,9 +170,6 @@ IsBackgroundFinalized(AllocKind kind)
         false,     /* FINALIZE_SHAPE */
         false,     /* FINALIZE_BASE_SHAPE */
         false,     /* FINALIZE_TYPE_OBJECT */
-#if JS_HAS_XML_SUPPORT
-        false,     /* FINALIZE_XML */
-#endif
         true,      /* FINALIZE_SHORT_STRING */
         true,      /* FINALIZE_STRING */
         false,     /* FINALIZE_EXTERNAL_STRING */
@@ -487,6 +480,13 @@ struct GCPtrHasher
 
 typedef HashMap<void *, uint32_t, GCPtrHasher, SystemAllocPolicy> GCLocks;
 
+typedef enum JSGCRootType {
+    JS_GC_ROOT_VALUE_PTR,
+    JS_GC_ROOT_STRING_PTR,
+    JS_GC_ROOT_OBJECT_PTR,
+    JS_GC_ROOT_SCRIPT_PTR
+} JSGCRootType;
+
 struct RootInfo {
     RootInfo() {}
     RootInfo(const char *name, JSGCRootType type) : name(name), type(type) {}
@@ -499,6 +499,21 @@ typedef js::HashMap<void *,
                     js::DefaultHasher<void *>,
                     js::SystemAllocPolicy> RootedValueMap;
 
+extern JSBool
+AddValueRoot(JSContext *cx, js::Value *vp, const char *name);
+
+extern JSBool
+AddValueRootRT(JSRuntime *rt, js::Value *vp, const char *name);
+
+extern JSBool
+AddStringRoot(JSContext *cx, JSString **rp, const char *name);
+
+extern JSBool
+AddObjectRoot(JSContext *cx, JSObject **rp, const char *name);
+
+extern JSBool
+AddScriptRoot(JSContext *cx, JSScript **rp, const char *name);
+
 } /* namespace js */
 
 extern JSBool
@@ -507,12 +522,6 @@ js_InitGC(JSRuntime *rt, uint32_t maxbytes);
 extern void
 js_FinishGC(JSRuntime *rt);
 
-extern JSBool
-js_AddRoot(JSContext *cx, js::Value *vp, const char *name);
-
-extern JSBool
-js_AddGCThingRoot(JSContext *cx, void **rp, const char *name);
-
 /* Table of pointers with count valid members. */
 typedef struct JSPtrTable {
     size_t      count;
@@ -520,10 +529,10 @@ typedef struct JSPtrTable {
 } JSPtrTable;
 
 extern JSBool
-js_LockGCThingRT(JSRuntime *rt, void *thing);
+js_LockThing(JSRuntime *rt, void *thing);
 
 extern void
-js_UnlockGCThingRT(JSRuntime *rt, void *thing);
+js_UnlockThing(JSRuntime *rt, void *thing);
 
 namespace js {
 
@@ -986,13 +995,6 @@ struct GCMarker : public JSTracer {
         pushTaggedPtr(TypeTag, type);
     }
 
-#if JS_HAS_XML_SUPPORT
-    void pushXML(JSXML *xml) {
-        pushTaggedPtr(XmlTag, xml);
-    }
-
-#endif
-
     void pushIonCode(ion::IonCode *code) {
         pushTaggedPtr(IonCodeTag, code);
     }
@@ -1097,7 +1099,7 @@ struct GCMarker : public JSTracer {
 
     void appendGrayRoot(void *thing, JSGCTraceKind kind);
 
-    /* The color is only applied to objects, functions and xml. */
+    /* The color is only applied to objects and functions. */
     uint32_t color;
 
     mozilla::DebugOnly<bool> started;
@@ -1179,8 +1181,10 @@ const int ZealAllocValue = 2;
 const int ZealFrameGCValue = 3;
 const int ZealVerifierPreValue = 4;
 const int ZealFrameVerifierPreValue = 5;
-const int ZealStackRootingSafeValue = 6;
-const int ZealStackRootingValue = 7;
+// These two values used to be distinct.  They no longer are, but both were
+// kept to avoid breaking fuzz tests.  Avoid using ZealStackRootingValue__2.
+const int ZealStackRootingValue = 6;
+const int ZealStackRootingValue__2 = 7;
 const int ZealIncrementalRootsThenFinish = 8;
 const int ZealIncrementalMarkAllThenFinish = 9;
 const int ZealIncrementalMultipleSlices = 10;

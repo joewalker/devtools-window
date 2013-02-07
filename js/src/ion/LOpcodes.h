@@ -62,6 +62,7 @@
     _(CompareD)                     \
     _(CompareDAndBranch)            \
     _(CompareS)                     \
+    _(CompareStrictS)               \
     _(CompareB)                     \
     _(CompareBAndBranch)            \
     _(CompareV)                     \
@@ -111,6 +112,7 @@
     _(ImplicitThis)                 \
     _(Slots)                        \
     _(Elements)                     \
+    _(ConvertElementsToDoubles)     \
     _(LoadSlotV)                    \
     _(LoadSlotT)                    \
     _(StoreSlotV)                   \

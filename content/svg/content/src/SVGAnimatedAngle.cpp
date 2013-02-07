@@ -7,6 +7,7 @@
 #include "SVGAngle.h"
 #include "nsSVGAngle.h"
 #include "mozilla/dom/SVGAnimatedAngleBinding.h"
+#include "nsContentUtils.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -30,16 +31,12 @@ SVGAnimatedAngle::WrapObject(JSContext* aCx, JSObject* aScope, bool* aTriedToWra
 already_AddRefed<SVGAngle>
 SVGAnimatedAngle::BaseVal()
 {
-  nsRefPtr<SVGAngle> angle;
-  mVal->ToDOMBaseVal(getter_AddRefs(angle), mSVGElement);
-  return angle.forget();
+  return mVal->ToDOMBaseVal(mSVGElement);
 }
 
 already_AddRefed<SVGAngle>
 SVGAnimatedAngle::AnimVal()
 {
-  nsRefPtr<SVGAngle> angle;
-  mVal->ToDOMAnimVal(getter_AddRefs(angle), mSVGElement);
-  return angle.forget();
+  return mVal->ToDOMAnimVal(mSVGElement);
 }
 

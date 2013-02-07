@@ -534,7 +534,7 @@ JS_GetFunctionNative(JSContext *cx, JSFunction *fun)
 JS_PUBLIC_API(JSPrincipals *)
 JS_GetScriptPrincipals(JSScript *script)
 {
-    return script->principals;
+    return script->principals();
 }
 
 JS_PUBLIC_API(JSPrincipals *)
@@ -694,10 +694,10 @@ JS_GetPropertyDescArray(JSContext *cx, JSObject *obj_, JSPropertyDescArray *pda)
         for (i = 0; i < props.length(); ++i) {
             pd[i].id = JSVAL_NULL;
             pd[i].value = JSVAL_NULL;
-            if (!js_AddRoot(cx, &pd[i].id, NULL))
+            if (!AddValueRoot(cx, &pd[i].id, NULL))
                 goto bad;
             pd[i].id = IdToValue(props[i]);
-            if (!js_AddRoot(cx, &pd[i].value, NULL))
+            if (!AddValueRoot(cx, &pd[i].value, NULL))
                 goto bad;
             if (!Proxy::get(cx, obj, obj, props.handleAt(i), MutableHandleValue::fromMarkedLocation(&pd[i].value)))
                 goto bad;
@@ -737,14 +737,14 @@ JS_GetPropertyDescArray(JSContext *cx, JSObject *obj_, JSPropertyDescArray *pda)
             pd[i].id = JSVAL_NULL;
             pd[i].value = JSVAL_NULL;
             pd[i].alias = JSVAL_NULL;
-            if (!js_AddRoot(cx, &pd[i].id, NULL))
+            if (!AddValueRoot(cx, &pd[i].id, NULL))
                 goto bad;
-            if (!js_AddRoot(cx, &pd[i].value, NULL))
+            if (!AddValueRoot(cx, &pd[i].value, NULL))
                 goto bad;
             shape = const_cast<Shape *>(&r.front());
             if (!GetPropertyDesc(cx, obj, shape, &pd[i]))
                 goto bad;
-            if ((pd[i].flags & JSPD_ALIAS) && !js_AddRoot(cx, &pd[i].alias, NULL))
+            if ((pd[i].flags & JSPD_ALIAS) && !AddValueRoot(cx, &pd[i].alias, NULL))
                 goto bad;
             if (++i == obj->propertyCount())
                 break;
@@ -902,7 +902,7 @@ JS_GetScriptTotalSize(JSContext *cx, JSScript *script)
     if (script->hasTrynotes())
         nbytes += sizeof(TryNoteArray) + script->trynotes()->length * sizeof(JSTryNote);
 
-    principals = script->principals;
+    principals = script->principals();
     if (principals) {
         JS_ASSERT(principals->refcount);
         pbytes = sizeof *principals;

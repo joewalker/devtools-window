@@ -196,10 +196,11 @@ class AliasSet {
         DynamicSlot       = 1 << 2, // A member of obj->slots.
         FixedSlot         = 1 << 3, // A member of obj->fixedSlots().
         TypedArrayElement = 1 << 4, // A typed array element.
-        Last              = TypedArrayElement,
+        DOMProperty       = 1 << 5, // A DOM property
+        Last              = DOMProperty,
         Any               = Last | (Last - 1),
 
-        NumCategories     = 5,
+        NumCategories     = 6,
 
         // Indicates load or store.
         Store_            = 1 << 31
@@ -699,6 +700,26 @@ class MConstant : public MNullaryInstruction
 
     AliasSet getAliasSet() const {
         return AliasSet::None();
+    }
+
+    void analyzeTruncateBackward();
+
+    // Returns true if constant is integer between -2^33 & 2^33,
+    // Max cap could be 2^53, if not for the 20 additions hack.
+    bool isBigIntOutput() {
+        if (value_.isInt32())
+            return true;
+        if (value_.isDouble()) {
+            double value = value_.toDouble();
+            int64_t valint = value;
+            int64_t max = 1LL<<33;
+            if (double(valint) != value)
+                return false;
+            if (valint < 0)
+                valint = -valint;
+            return valint < max;
+        }
+        return false;
     }
 
     void computeRange();
@@ -1488,6 +1509,15 @@ class MCompare
         // String compared to String
         Compare_String,
 
+        // Undefined compared to String
+        // Null      compared to String
+        // Boolean   compared to String
+        // Int32     compared to String
+        // Double    compared to String
+        // Object    compared to String
+        // Value     compared to String
+        Compare_StrictString,
+
         // Object compared to Object
         Compare_Object,
 
@@ -1892,7 +1922,8 @@ class MPassArg : public MUnaryInstruction
 // Converts a primitive (either typed or untyped) to a double. If the input is
 // not primitive at runtime, a bailout occurs.
 class MToDouble
-  : public MUnaryInstruction
+  : public MUnaryInstruction,
+    public ToDoublePolicy
 {
     MToDouble(MDefinition *def)
       : MUnaryInstruction(def)
@@ -1906,6 +1937,10 @@ class MToDouble
     static MToDouble *New(MDefinition *def)
     {
         return new MToDouble(def);
+    }
+
+    TypePolicy *typePolicy() {
+        return this;
     }
 
     MDefinition *foldsTo(bool useValueNumbers);
@@ -2652,11 +2687,11 @@ class MAdd : public MBinaryArithInstruction
     // This is an add, so the return value is from only
     // integer sources if we know we return an int32
     // or it has been explicitly marked as being a large int.
-    virtual bool isBigIntOutput() {
+    bool isBigIntOutput() {
         return (type() == MIRType_Int32) || isBigInt_;
     }
     // An add will produce a big int if both of its sources are big ints.
-    virtual void recalculateBigInt() {
+    void recalculateBigInt() {
         isBigInt_ = (lhs()->isBigIntOutput() && rhs()->isBigIntOutput());
     }
 };
@@ -3500,6 +3535,43 @@ class MConstantElements : public MNullaryInstruction
     }
 };
 
+// Passes through an object's elements, after ensuring it is entirely doubles.
+class MConvertElementsToDoubles
+  : public MUnaryInstruction
+{
+    MConvertElementsToDoubles(MDefinition *elements)
+      : MUnaryInstruction(elements)
+    {
+        setGuard();
+        setMovable();
+        setResultType(MIRType_Elements);
+    }
+
+  public:
+    INSTRUCTION_HEADER(ConvertElementsToDoubles)
+
+    static MConvertElementsToDoubles *New(MDefinition *elements) {
+        return new MConvertElementsToDoubles(elements);
+    }
+
+    MDefinition *elements() const {
+        return getOperand(0);
+    }
+    bool congruentTo(MDefinition *const &ins) const {
+        return congruentIfOperandsEqual(ins);
+    }
+    AliasSet getAliasSet() const {
+        // This instruction can read and write to the elements' contents.
+        // However, it is alright to hoist this from loops which explicitly
+        // read or write to the elements: such reads and writes will use double
+        // values and can be reordered freely wrt this conversion, except that
+        // definite double loads must follow the conversion. The latter
+        // property is ensured by chaining this instruction with the elements
+        // themselves, in the same manner as MBoundsCheck.
+        return AliasSet::None();
+    }
+};
+
 // Load a dense array's initialized length from an elements vector.
 class MInitializedLength
   : public MUnaryInstruction
@@ -3792,10 +3864,12 @@ class MLoadElement
     public SingleObjectPolicy
 {
     bool needsHoleCheck_;
+    bool loadDoubles_;
 
-    MLoadElement(MDefinition *elements, MDefinition *index, bool needsHoleCheck)
+    MLoadElement(MDefinition *elements, MDefinition *index, bool needsHoleCheck, bool loadDoubles)
       : MBinaryInstruction(elements, index),
-        needsHoleCheck_(needsHoleCheck)
+        needsHoleCheck_(needsHoleCheck),
+        loadDoubles_(loadDoubles)
     {
         setResultType(MIRType_Value);
         setMovable();
@@ -3806,8 +3880,9 @@ class MLoadElement
   public:
     INSTRUCTION_HEADER(LoadElement)
 
-    static MLoadElement *New(MDefinition *elements, MDefinition *index, bool needsHoleCheck) {
-        return new MLoadElement(elements, index, needsHoleCheck);
+    static MLoadElement *New(MDefinition *elements, MDefinition *index,
+                             bool needsHoleCheck, bool loadDoubles) {
+        return new MLoadElement(elements, index, needsHoleCheck, loadDoubles);
     }
 
     TypePolicy *typePolicy() {
@@ -3821,6 +3896,9 @@ class MLoadElement
     }
     bool needsHoleCheck() const {
         return needsHoleCheck_;
+    }
+    bool loadDoubles() const {
+        return loadDoubles_;
     }
     bool fallible() const {
         return needsHoleCheck();
@@ -5394,7 +5472,7 @@ class MGetDOMProperty
         setOperand(1, guard);
 
         // We are movable iff the jitinfo says we can be.
-        if (jitinfo->isConstant)
+        if (jitinfo->isPure)
             setMovable();
 
         setResultType(MIRType_Value);
@@ -5422,6 +5500,9 @@ class MGetDOMProperty
     bool isDomConstant() const {
         return info_->isConstant;
     }
+    bool isDomPure() const {
+        return info_->isPure;
+    }
     MDefinition *object() {
         return getOperand(0);
     }
@@ -5431,7 +5512,7 @@ class MGetDOMProperty
     }
 
     bool congruentTo(MDefinition *const &ins) const {
-        if (!isDomConstant())
+        if (!isDomPure())
             return false;
 
         if (!ins->isGetDOMProperty())
@@ -5449,6 +5530,10 @@ class MGetDOMProperty
         // conflict with anything
         if (isDomConstant())
             return AliasSet::None();
+        // Pure DOM attributes can only alias things that alias the world or
+        // explicitly alias DOM properties.
+        if (isDomPure())
+            return AliasSet::Load(AliasSet::DOMProperty);
         return AliasSet::Store(AliasSet::Any);
     }
 

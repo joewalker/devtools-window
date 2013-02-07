@@ -360,6 +360,14 @@ TypeInferenceOracle::elementReadIsString(UnrootedScript script, jsbytecode *pc)
 }
 
 bool
+TypeInferenceOracle::elementReadShouldAlwaysLoadDoubles(UnrootedScript script, jsbytecode *pc)
+{
+    StackTypeSet *types = script->analysis()->poppedTypes(pc, 1);
+    types::StackTypeSet::DoubleConversion conversion = types->convertDoubleElements(cx);
+    return conversion == StackTypeSet::AlwaysConvertToDoubles;
+}
+
+bool
 TypeInferenceOracle::elementReadHasExtraIndexedProperty(UnrootedScript script, jsbytecode *pc)
 {
     StackTypeSet *obj = script->analysis()->poppedTypes(pc, 1);
@@ -405,7 +413,10 @@ TypeInferenceOracle::elementWriteIsDenseNative(HandleScript script, jsbytecode *
         return false;
 
     Class *clasp = obj->getKnownClass();
-    return clasp && clasp->isNative();
+    if (!clasp || !clasp->isNative())
+        return false;
+
+    return obj->convertDoubleElements(cx) != StackTypeSet::AmbiguousDoubleConversion;
 }
 
 bool
@@ -424,6 +435,15 @@ TypeInferenceOracle::elementWriteIsTypedArray(RawScript script, jsbytecode *pc, 
         return false;
 
     return true;
+}
+
+bool
+TypeInferenceOracle::elementWriteNeedsDoubleConversion(UnrootedScript script, jsbytecode *pc)
+{
+    StackTypeSet *types = script->analysis()->poppedTypes(pc, 2);
+    types::StackTypeSet::DoubleConversion conversion = types->convertDoubleElements(cx);
+    return conversion == StackTypeSet::AlwaysConvertToDoubles ||
+           conversion == StackTypeSet::MaybeConvertToDoubles;
 }
 
 bool
@@ -481,6 +501,14 @@ TypeInferenceOracle::elementWrite(UnrootedScript script, jsbytecode *pc)
     }
 
     return elementType;
+}
+
+bool
+TypeInferenceOracle::arrayResultShouldHaveDoubleConversion(UnrootedScript script, jsbytecode *pc)
+{
+    types::StackTypeSet::DoubleConversion conversion =
+        script->analysis()->pushedTypes(pc, 0)->convertDoubleElements(cx);
+    return conversion == types::StackTypeSet::AlwaysConvertToDoubles;
 }
 
 bool
@@ -561,10 +589,25 @@ TypeInferenceOracle::canEnterInlinedFunction(HandleScript caller, jsbytecode *pc
 {
     AssertCanGC();
     RootedScript targetScript(cx, target->nonLazyScript());
-    if (!targetScript->hasAnalysis() || !targetScript->analysis()->ranInference())
+
+    // Always permit the empty script.
+    if (targetScript->length == 1)
+        return true;
+
+    if (!targetScript->hasAnalysis() ||
+        !targetScript->analysis()->ranInference() ||
+        !targetScript->analysis()->ranSSA())
+    {
         return false;
+    }
 
     if (!targetScript->analysis()->ionInlineable())
+        return false;
+
+    if (targetScript->needsArgsObj())
+        return false;
+
+    if (!targetScript->compileAndGo)
         return false;
 
     if (targetScript->analysis()->usesScopeChain())

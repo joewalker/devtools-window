@@ -234,6 +234,10 @@ pref("browser.shell.checkDefaultBrowser", true);
 pref("browser.startup.page",                1);
 pref("browser.startup.homepage",            "chrome://branding/locale/browserconfig.properties");
 
+pref("browser.slowStartup.notificationDisabled", false);
+pref("browser.slowStartup.timeThreshold", 60000);
+pref("browser.slowStartup.maxSamples", 5);
+
 // This url, if changed, MUST continue to point to an https url. Pulling arbitrary content to inject into
 // this page over http opens us up to a man-in-the-middle attack that we'd rather not face. If you are a downstream
 // repackager of this code using an alternate snippet url, please keep your users safe
@@ -521,9 +525,10 @@ pref("browser.gesture.pinch.out.shift", "");
 pref("browser.gesture.pinch.in.shift", "");
 #endif
 pref("browser.gesture.twist.latched", false);
-pref("browser.gesture.twist.threshold", 25);
-pref("browser.gesture.twist.right", "");
-pref("browser.gesture.twist.left", "");
+pref("browser.gesture.twist.threshold", 0);
+pref("browser.gesture.twist.right", "cmd_gestureRotateRight");
+pref("browser.gesture.twist.left", "cmd_gestureRotateLeft");
+pref("browser.gesture.twist.end", "cmd_gestureRotateEnd");
 pref("browser.gesture.tap", "cmd_fullZoomReset");
 
 // 0: Nothing happens
@@ -757,6 +762,7 @@ pref("urlclassifier.max-complete-age", 2700);
 #endif
 
 pref("browser.geolocation.warning.infoURL", "http://www.mozilla.com/%LOCALE%/firefox/geolocation/");
+pref("browser.mixedcontent.warning.infoURL", "http://support.mozilla.org/1/%APP%/%VERSION%/%OS%/%LOCALE%/mixed-content/");
 
 pref("browser.EULA.version", 3);
 pref("browser.rights.version", 3);
@@ -877,11 +883,6 @@ pref("security.alternate_certificate_error_page", "certerror");
 
 // Whether to start the private browsing mode at application startup
 pref("browser.privatebrowsing.autostart", false);
-
-#ifndef MOZ_PER_WINDOW_PRIVATE_BROWSING
-// Whether we should skip prompting before starting the private browsing mode
-pref("browser.privatebrowsing.dont_prompt_on_enter", false);
-#endif
 
 // Don't try to alter this pref, it'll be reset the next time you use the
 // bookmarking dialog

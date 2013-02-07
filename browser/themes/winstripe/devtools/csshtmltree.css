@@ -126,7 +126,7 @@
   background-color: -moz-dialog;
 }
 
-.onlyuserstyles {
+.includebrowserstyles {
   cursor: pointer;
   font-size: 11px;
 }
@@ -270,6 +270,10 @@
 
 .ruleview-property {
   border-left: 2px solid transparent;
+}
+
+.ruleview-property  > * {
+  vertical-align: middle;
 }
 
 .ruleview-property[dirty] {

@@ -71,7 +71,9 @@ void VideoFrameContainer::Reset()
 {
   ClearCurrentFrame(true);
   Invalidate();
-  mPaintDelay = TimeDuration();
+  mIntrinsicSize = gfxIntSize(-1, -1);
+  mPaintDelay = mozilla::TimeDuration();
+  mPaintTarget = mozilla::TimeStamp();
   mImageContainer->ResetPaintCount();
 }
 
@@ -84,9 +86,9 @@ void VideoFrameContainer::ClearCurrentFrame(bool aResetSize)
   nsRefPtr<Image> kungFuDeathGrip;
   kungFuDeathGrip = mImageContainer->LockCurrentImage();
   mImageContainer->UnlockCurrentImage();
-  mImageSizeChanged = aResetSize;
 
   mImageContainer->SetCurrentImage(nullptr);
+  mImageSizeChanged = aResetSize;
 
   // We removed the current image so we will have to invalidate once
   // again to setup the ImageContainer <-> Compositor pair.

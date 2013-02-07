@@ -18,11 +18,6 @@ let SocialUI = {
     Services.obs.addObserver(this, "social:recommend-info-changed", false);
     Services.obs.addObserver(this, "social:frameworker-error", false);
     Services.obs.addObserver(this, "social:provider-set", false);
-#ifndef MOZ_PER_WINDOW_PRIVATE_BROWSING
-    // this observer is necessary so things are also correctly updated
-    // when per-window PB isn't active
-    Services.obs.addObserver(this, "private-browsing", false);
-#endif
 
     Services.prefs.addObserver("social.sidebar.open", this, false);
     Services.prefs.addObserver("social.toast-notifications.enabled", this, false);
@@ -46,9 +41,6 @@ let SocialUI = {
     Services.obs.removeObserver(this, "social:recommend-info-changed");
     Services.obs.removeObserver(this, "social:frameworker-error");
     Services.obs.removeObserver(this, "social:provider-set");
-#ifndef MOZ_PER_WINDOW_PRIVATE_BROWSING
-    Services.obs.removeObserver(this, "private-browsing");
-#endif
 
     Services.prefs.removeObserver("social.sidebar.open", this);
     Services.prefs.removeObserver("social.toast-notifications.enabled", this);
@@ -140,14 +132,6 @@ let SocialUI = {
             SocialToolbar.updateButton();
           }
           break;
-
-#ifndef MOZ_PER_WINDOW_PRIVATE_BROWSING
-        case "private-browsing":
-          this._updateEnabledState();
-          this._updateActiveUI();
-          SocialToolbar.init();
-          break;
-#endif
       }
     } catch (e) {
       Components.utils.reportError(e + "\n" + e.stack);
@@ -173,29 +157,26 @@ let SocialUI = {
   _updateActiveUI: function SocialUI_updateActiveUI() {
     // The "active" UI isn't dependent on there being a provider, just on
     // social being "active" (but also chromeless/PB)
-    let enabled = Social.active && !this._chromeless
-#ifdef MOZ_PER_WINDOW_PRIVATE_BROWSING
-                  && !PrivateBrowsingUtils.isWindowPrivate(window)
-#endif
-        ;
+    let enabled = Social.active && !this._chromeless &&
+                  !PrivateBrowsingUtils.isWindowPrivate(window);
     let broadcaster = document.getElementById("socialActiveBroadcaster");
     broadcaster.hidden = !enabled;
 
-    if (!Social.provider)
-      return;
-
     let toggleCommand = document.getElementById("Social:Toggle");
-    // We only need to update the command itself - all our menu items use it.
-    let label = gNavigatorBundle.getFormattedString(Social.provider.enabled ?
-                                                      "social.turnOff.label" :
-                                                      "social.turnOn.label",
-                                                    [Social.provider.name]);
-    let accesskey = gNavigatorBundle.getString(Social.provider.enabled ?
-                                                 "social.turnOff.accesskey" :
-                                                 "social.turnOn.accesskey");
-    toggleCommand.setAttribute("label", label);
-    toggleCommand.setAttribute("accesskey", accesskey);
     toggleCommand.setAttribute("hidden", enabled ? "false" : "true");
+
+    if (enabled) {
+      // We only need to update the command itself - all our menu items use it.
+      let label = gNavigatorBundle.getFormattedString(Social.provider.enabled ?
+                                                        "social.turnOff.label" :
+                                                        "social.turnOn.label",
+                                                      [Social.provider.name]);
+      let accesskey = gNavigatorBundle.getString(Social.provider.enabled ?
+                                                   "social.turnOff.accesskey" :
+                                                   "social.turnOn.accesskey");
+      toggleCommand.setAttribute("label", label);
+      toggleCommand.setAttribute("accesskey", accesskey);
+    }
   },
 
   _updateMenuItems: function () {
@@ -328,11 +309,7 @@ let SocialUI = {
 
   get enabled() {
     // Returns whether social is enabled *for this window*.
-    if (this._chromeless
-#ifdef MOZ_PER_WINDOW_PRIVATE_BROWSING
-        || PrivateBrowsingUtils.isWindowPrivate(window)
-#endif
-       )
+    if (this._chromeless || PrivateBrowsingUtils.isWindowPrivate(window))
       return false;
     return !!(Social.active && Social.provider && Social.provider.enabled);
   },
@@ -742,13 +719,8 @@ var SocialToolbar = {
   // Called once, after window load, when the Social.provider object is
   // initialized.
   init: function SocialToolbar_init() {
-    let brandShortName = document.getElementById("bundle_brand").getString("brandShortName");
-    let label = gNavigatorBundle.getFormattedString("social.remove.label",
-                                                    [brandShortName]);
-    let accesskey = gNavigatorBundle.getString("social.remove.accesskey");
-
+    let accesskey = gNavigatorBundle.getString("social.removeProvider.accesskey");
     let removeCommand = document.getElementById("Social:Remove");
-    removeCommand.setAttribute("label", label);
     removeCommand.setAttribute("accesskey", accesskey);
 
     this.updateProvider();
@@ -757,13 +729,18 @@ var SocialToolbar = {
 
   // Called when the Social.provider changes
   updateProvider: function () {
-    if (!SocialUI.enabled)
-      return;
-    this.button.style.listStyleImage = "url(" + Social.provider.iconURL + ")";
-    this.button.setAttribute("label", Social.provider.name);
-    this.button.setAttribute("tooltiptext", Social.provider.name);
+    if (Social.provider) {
+      let label = gNavigatorBundle.getFormattedString("social.removeProvider.label",
+                                                      [Social.provider.name]);
+      let removeCommand = document.getElementById("Social:Remove");
+      removeCommand.setAttribute("label", label);
+      this.button.setAttribute("label", Social.provider.name);
+      this.button.setAttribute("tooltiptext", Social.provider.name);
+      this.button.style.listStyleImage = "url(" + Social.provider.iconURL + ")";
+
+      this.updateProfile();
+    }
     this.updateButton();
-    this.updateProfile();
     this.populateProviderMenus();
   },
 
@@ -820,10 +797,8 @@ var SocialToolbar = {
   updateButton: function SocialToolbar_updateButton() {
     this.updateButtonHiddenState();
     let provider = Social.provider;
-    let icons = provider.ambientNotificationIcons;
-    let iconNames = Object.keys(icons);
     let panel = document.getElementById("social-notification-panel");
-    panel.hidden = false;
+    panel.hidden = !SocialUI.enabled;
 
     let command = document.getElementById("Social:ToggleNotifications");
     command.setAttribute("checked", Services.prefs.getBoolPref("social.toast-notifications.enabled"));
@@ -840,6 +815,8 @@ var SocialToolbar = {
       Services.prefs.clearUserPref(CACHE_PREF_NAME);
       return;
     }
+    let icons = provider.ambientNotificationIcons;
+    let iconNames = Object.keys(icons);
     if (Social.provider.profile === undefined) {
       // provider has not told us about the login state yet - see if we have
       // a cached version for this provider.
@@ -1043,7 +1020,7 @@ var SocialToolbar = {
       menu.removeChild(providerMenuSep.previousSibling);
     }
     // only show a selection if enabled and there is more than one
-    if (!SocialUI.enabled || Social.providers.length < 2) {
+    if (!SocialUI.enabled || providers.length < 2) {
       providerMenuSep.hidden = true;
       return;
     }

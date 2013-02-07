@@ -157,9 +157,6 @@ BrowserGlue.prototype = {
   // nsIObserver implementation 
   observe: function BG_observe(subject, topic, data) {
     switch (topic) {
-      case "xpcom-shutdown":
-        this._dispose();
-        break;
       case "prefservice:after-app-defaults":
         this._onAppDefaults();
         break;
@@ -239,7 +236,7 @@ BrowserGlue.prototype = {
           this._isPlacesShutdownObserver = false;
         }
         // places-shutdown is fired when the profile is about to disappear.
-        this._onProfileShutdown();
+        this._onPlacesShutdown();
         break;
       case "idle":
         if (this._idleService.idleTime > BOOKMARKS_BACKUP_IDLE_TIME * 1000)
@@ -290,13 +287,15 @@ BrowserGlue.prototype = {
           }
         }
         break;
+      case "profile-before-change":
+        this._onProfileShutdown();
+        break;
     }
   }, 
 
   // initialization (called on application startup) 
   _init: function BG__init() {
     let os = Services.obs;
-    os.addObserver(this, "xpcom-shutdown", false);
     os.addObserver(this, "prefservice:after-app-defaults", false);
     os.addObserver(this, "final-ui-startup", false);
     os.addObserver(this, "browser-delayed-startup-finished", false);
@@ -322,12 +321,12 @@ BrowserGlue.prototype = {
     this._isPlacesShutdownObserver = true;
     os.addObserver(this, "defaultURIFixup-using-keyword-pref", false);
     os.addObserver(this, "handle-xul-text-link", false);
+    os.addObserver(this, "profile-before-change", false);
   },
 
   // cleanup (called on application shutdown)
   _dispose: function BG__dispose() {
     let os = Services.obs;
-    os.removeObserver(this, "xpcom-shutdown");
     os.removeObserver(this, "prefservice:after-app-defaults");
     os.removeObserver(this, "final-ui-startup");
     os.removeObserver(this, "sessionstore-windows-restored");
@@ -353,10 +352,7 @@ BrowserGlue.prototype = {
       os.removeObserver(this, "places-shutdown");
     os.removeObserver(this, "defaultURIFixup-using-keyword-pref");
     os.removeObserver(this, "handle-xul-text-link");
-    UserAgentOverrides.uninit();
-    webappsUI.uninit();
-    SignInToWebsiteUX.uninit();
-    webrtcUI.uninit();
+    os.removeObserver(this, "profile-before-change");
   },
 
   _onAppDefaults: function BG__onAppDefaults() {
@@ -410,6 +406,64 @@ BrowserGlue.prototype = {
     }
   },
 
+  _trackSlowStartup: function () {
+    if (Services.prefs.getBoolPref("browser.slowStartup.notificationDisabled"))
+      return;
+
+    let currentTime = Date.now() - Services.startup.getStartupInfo().process;
+    let averageTime = 0;
+    let samples = 0;
+    try {
+      averageTime = Services.prefs.getIntPref("browser.slowStartup.averageTime");
+      samples = Services.prefs.getIntPref("browser.slowStartup.samples");
+    } catch (e) { }
+
+    averageTime = (averageTime * samples + currentTime) / ++samples;
+
+    if (samples >= Services.prefs.getIntPref("browser.slowStartup.maxSamples")) {
+      if (averageTime > Services.prefs.getIntPref("browser.slowStartup.timeThreshold"))
+        this._showSlowStartupNotification();
+      averageTime = 0;
+      samples = 0;
+    }
+
+    Services.prefs.setIntPref("browser.slowStartup.averageTime", averageTime);
+    Services.prefs.setIntPref("browser.slowStartup.samples", samples);
+  },
+
+  _showSlowStartupNotification: function () {
+    let win = this.getMostRecentBrowserWindow();
+    if (!win)
+      return;
+
+    let productName = Services.strings
+                              .createBundle("chrome://branding/locale/brand.properties")
+                              .GetStringFromName("brandFullName");
+    let message = win.gNavigatorBundle.getFormattedString("slowStartup.message", [productName]);
+
+    let buttons = [
+      {
+        label:     win.gNavigatorBundle.getString("slowStartup.helpButton.label"),
+        accessKey: win.gNavigatorBundle.getString("slowStartup.helpButton.accesskey"),
+        callback: function () {
+          win.openUILinkIn("https://support.mozilla.org/kb/firefox-takes-long-time-start-up", "tab");
+        }
+      },
+      {
+        label:     win.gNavigatorBundle.getString("slowStartup.disableNotificationButton.label"),
+        accessKey: win.gNavigatorBundle.getString("slowStartup.disableNotificationButton.accesskey"),
+        callback: function () {
+          Services.prefs.setBoolPref("browser.slowStartup.notificationDisabled", true);
+        }
+      }
+    ];
+
+    let nb = win.document.getElementById("global-notificationbox");
+    nb.appendNotification(message, "slow-startup",
+                          "chrome://browser/skin/slowStartup-16.png",
+                          nb.PRIORITY_INFO_LOW, buttons);
+  },
+
   // the first browser window has finished initializing
   _onFirstWindowLoaded: function BG__onFirstWindowLoaded() {
 #ifdef XP_WIN
@@ -422,14 +476,22 @@ BrowserGlue.prototype = {
       temp.WinTaskbarJumpList.startup();
     }
 #endif
+
+    this._trackSlowStartup();
   },
 
-  // profile shutdown handler (contains profile cleanup routines)
+  /**
+   * Profile shutdown handler (contains profile cleanup routines).
+   * All components depending on Places should be shut down in
+   * _onPlacesShutdown() and not here.
+   */
   _onProfileShutdown: function BG__onProfileShutdown() {
-    this._shutdownPlaces();
-    this._sanitizer.onShutdown();
-    PageThumbs.uninit();
     BrowserNewTabPreloader.uninit();
+    UserAgentOverrides.uninit();
+    webappsUI.uninit();
+    SignInToWebsiteUX.uninit();
+    webrtcUI.uninit();
+    this._dispose();
   },
 
   // All initial windows have opened.
@@ -1028,15 +1090,17 @@ BrowserGlue.prototype = {
    * Places shut-down tasks
    * - back up bookmarks if needed.
    * - export bookmarks as HTML, if so configured.
-   *
-   * Note: quit-application-granted notification is received twice
-   *       so replace this method with a no-op when first called.
+   * - finalize components depending on Places.
    */
-  _shutdownPlaces: function BG__shutdownPlaces() {
+  _onPlacesShutdown: function BG__onPlacesShutdown() {
+    this._sanitizer.onShutdown();
+    PageThumbs.uninit();
+
     if (this._isIdleObserver) {
       this._idleService.removeIdleObserver(this, BOOKMARKS_BACKUP_IDLE_TIME);
       this._isIdleObserver = false;
     }
+
     this._backupBookmarks();
 
     // Backup bookmarks to bookmarks.html to support apps that depend

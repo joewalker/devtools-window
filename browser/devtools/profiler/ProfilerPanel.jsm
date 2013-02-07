@@ -7,7 +7,8 @@
 const Cu = Components.utils;
 
 Cu.import("resource:///modules/devtools/ProfilerController.jsm");
-Cu.import("resource://gre/modules/commonjs/promise/core.js");
+Cu.import("resource:///modules/devtools/ProfilerHelpers.jsm");
+Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
@@ -178,7 +179,7 @@ function ProfilerPanel(frame, toolbox) {
   this.window = frame.window;
   this.document = frame.document;
   this.target = toolbox.target;
-  this.controller = new ProfilerController();
+  this.controller = new ProfilerController(this.target);
 
   this.profiles = new Map();
   this._uid = 0;
@@ -249,12 +250,11 @@ ProfilerPanel.prototype = {
     item.setAttribute("id", "profile-" + uid);
     item.setAttribute("data-uid", uid);
     item.addEventListener("click", function (ev) {
-      let uid = parseInt(ev.target.getAttribute("data-uid"), 10);
       this.switchToProfile(this.profiles.get(uid));
     }.bind(this), false);
 
     wrap.className = "profile-name";
-    wrap.textContent = "Profile " + uid;
+    wrap.textContent = L10N.getFormatStr("profiler.profileName", [uid]);
 
     item.appendChild(wrap);
     list.appendChild(item);

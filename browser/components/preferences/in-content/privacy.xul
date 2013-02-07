@@ -61,16 +61,8 @@
   <preference id="browser.privatebrowsing.autostart"
               name="browser.privatebrowsing.autostart"
               onchange="gPrivacyPane.updatePrivacyMicroControls();"
-#ifdef MOZ_PER_WINDOW_PRIVATE_BROWSING
-              instantApply="true"
-#endif
-              type="bool"/>
-#ifndef MOZ_PER_WINDOW_PRIVATE_BROWSING
-  <preference id="browser.privatebrowsing.keep_current_session"
-              name="browser.privatebrowsing.keep_current_session"
               instantApply="true"
               type="bool"/>
-#endif
 
 </preferences>
 
@@ -94,8 +86,8 @@
             accesskey="&dntTrackingNopref.accesskey;" />
   </radiogroup>
   <label class="text-link" id="doNotTrackInfo"
-          onclick="event.stopPropagation();gPrivacyPane.openTrackingInfoSite();"
-          value="&doNotTrackInfo.label;"/>
+         href="https://www.mozilla.org/dnt"
+         value="&doNotTrackInfo.label;"/>
 </groupbox>
 
 <!-- History -->

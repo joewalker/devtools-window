@@ -127,20 +127,6 @@ var gPrivacyPane = {
   },
 
   /**
-   * Open up the DNT "learn more" link.
-   */
-  openTrackingInfoSite: function PPP_openTrackingInfoSite()
-  {
-    let thisDocEl = document.documentElement,
-        openerDocEl = window.opener && window.opener.document.documentElement,
-        url = "https://www.mozilla.org/dnt";
-    if (thisDocEl.id == "BrowserPreferences" && !thisDocEl.instantApply)
-      openUILinkIn(url, "window");
-    else
-      openUILinkIn(url, "tab");
-  },
-
-  /**
    * Update the Tracking preferences based on controls.
    */
   setTrackingPrefs: function PPP_setTrackingPrefs()
@@ -279,7 +265,6 @@ var gPrivacyPane = {
 
     observe: function PPP_observe(aSubject, aTopic, aData)
     {
-#ifdef MOZ_PER_WINDOW_PRIVATE_BROWSING
       if (!gPrivacyPane._shouldPromptForRestart) {
         // We're performing a revert. Just let it happen.
         gPrivacyPane._shouldPromptForRestart = true;
@@ -321,23 +306,6 @@ var gPrivacyPane = {
         let rememberHistoryCheckbox = document.getElementById("rememberHistory");
         rememberHistory.checked = pref.value;
       }
-#else
-      // Toggle the private browsing mode without switching the session
-      let prefValue = document.getElementById("browser.privatebrowsing.autostart").value;
-      let keepCurrentSession = document.getElementById("browser.privatebrowsing.keep_current_session");
-      keepCurrentSession.value = true;
-
-      let privateBrowsingService = Components.classes["@mozilla.org/privatebrowsing;1"].
-        getService(Components.interfaces.nsIPrivateBrowsingService);
-
-      // If activating from within the private browsing mode, reset the
-      // private session
-      if (prefValue && privateBrowsingService.privateBrowsingEnabled)
-        privateBrowsingService.privateBrowsingEnabled = false;
-      privateBrowsingService.privateBrowsingEnabled = prefValue;
-
-      keepCurrentSession.reset();
-#endif
     }
   },
 

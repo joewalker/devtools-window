@@ -1,7 +1,7 @@
 "use strict";
 
 Components.utils.import("resource://gre/modules/osfile.jsm");
-Components.utils.import("resource://gre/modules/commonjs/promise/core.js");
+Components.utils.import("resource://gre/modules/commonjs/sdk/core/promise.js");
 Components.utils.import("resource://gre/modules/Task.jsm");
 
 // The following are used to compare against a well-tested reference
@@ -557,6 +557,12 @@ let test_iter = maketest("iter", function iter(test) {
     test.isnot(allFiles1[0].path, null, "Files have a path");
     yield iterator.close();
     test.info("Closed iterator");
+
+    test.info("Double closing DirectoryIterator");
+    iterator = new OS.File.DirectoryIterator(currentDir);
+    yield iterator.close();
+    yield iterator.close(); //double closing |DirectoryIterator|
+    test.ok(true, "|DirectoryIterator| was closed twice successfully");
 
     let allFiles2 = [];
     let i = 0;

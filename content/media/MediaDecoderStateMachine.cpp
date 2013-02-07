@@ -506,7 +506,8 @@ void MediaDecoderStateMachine::SendStreamAudio(AudioData* aAudio,
                                                DecodedStreamData* aStream,
                                                AudioSegment* aOutput)
 {
-  NS_ASSERTION(OnDecodeThread(), "Should be on decode thread.");
+  NS_ASSERTION(OnDecodeThread() ||
+               OnStateMachineThread(), "Should be on decode thread or state machine thread");
   mDecoder->GetReentrantMonitor().AssertCurrentThreadIn();
 
   if (aAudio->mTime <= aStream->mLastAudioPacketTime) {
@@ -515,9 +516,6 @@ void MediaDecoderStateMachine::SendStreamAudio(AudioData* aAudio,
   }
   aStream->mLastAudioPacketTime = aAudio->mTime;
   aStream->mLastAudioPacketEndTime = aAudio->GetEnd();
-
-  NS_ASSERTION(aOutput->GetChannels() == int32_t(aAudio->mChannels),
-               "Wrong number of channels");
 
   // This logic has to mimic AudioLoop closely to make sure we write
   // the exact same silences
@@ -531,7 +529,6 @@ void MediaDecoderStateMachine::SendStreamAudio(AudioData* aAudio,
     LOG(PR_LOG_DEBUG, ("%p Decoder writing %d frames of silence to MediaStream",
                        mDecoder.get(), int32_t(frameOffset.value() - audioWrittenOffset.value())));
     AudioSegment silence;
-    silence.InitFrom(*aOutput);
     silence.InsertNullDataAtStart(frameOffset.value() - audioWrittenOffset.value());
     aStream->mAudioFramesWritten += silence.GetDuration();
     aOutput->AppendFrom(&silence);
@@ -603,7 +600,6 @@ void MediaDecoderStateMachine::SendStreamData()
   if (!stream->mStreamInitialized) {
     if (mInfo.mHasAudio) {
       AudioSegment* audio = new AudioSegment();
-      audio->Init(mInfo.mAudioChannels);
       mediaStream->AddTrack(TRACK_AUDIO, mInfo.mAudioRate, 0, audio);
     }
     if (mInfo.mHasVideo) {
@@ -619,7 +615,6 @@ void MediaDecoderStateMachine::SendStreamData()
     // is captured, only the decoder thread pops from the queue (see below).
     mReader->AudioQueue().GetElementsAfter(stream->mLastAudioPacketTime, &audio);
     AudioSegment output;
-    output.Init(mInfo.mAudioChannels);
     for (uint32_t i = 0; i < audio.Length(); ++i) {
       SendStreamAudio(audio[i], stream, &output);
     }
@@ -1210,7 +1205,7 @@ uint32_t MediaDecoderStateMachine::PlaySilence(uint32_t aFrames,
 }
 
 uint32_t MediaDecoderStateMachine::PlayFromAudioQueue(uint64_t aFrameOffset,
-                                                          uint32_t aChannels)
+                                                      uint32_t aChannels)
 {
   NS_ASSERTION(OnAudioThread(), "Only call on audio thread.");
   NS_ASSERTION(!mAudioStream->IsPaused(), "Don't play when paused");
@@ -1218,7 +1213,6 @@ uint32_t MediaDecoderStateMachine::PlayFromAudioQueue(uint64_t aFrameOffset,
   {
     ReentrantMonitorAutoEnter mon(mDecoder->GetReentrantMonitor());
     NS_WARN_IF_FALSE(IsPlaying(), "Should be playing");
-    NS_ASSERTION(!mAudioCaptured, "Audio cannot be captured here!");
     // Awaken the decode loop if it's waiting for space to free up in the
     // audio queue.
     mDecoder->GetReentrantMonitor().NotifyAll();

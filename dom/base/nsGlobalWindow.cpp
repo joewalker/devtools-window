@@ -1435,7 +1435,7 @@ DOMCI_DATA(Window, nsGlobalWindow)
 // QueryInterface implementation for nsGlobalWindow
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsGlobalWindow)
   // Make sure this matches the cast in nsGlobalWindow::FromWrapper()
-  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIScriptGlobalObject)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsIDOMEventTarget)
   NS_INTERFACE_MAP_ENTRY(nsIDOMWindow)
 #ifdef MOZ_B2G
   NS_INTERFACE_MAP_ENTRY(nsIDOMWindowB2G)
@@ -1454,6 +1454,7 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsGlobalWindow)
   NS_INTERFACE_MAP_ENTRY(nsIScriptGlobalObject)
   NS_INTERFACE_MAP_ENTRY(nsIScriptObjectPrincipal)
   NS_INTERFACE_MAP_ENTRY(nsIDOMEventTarget)
+  NS_INTERFACE_MAP_ENTRY(mozilla::dom::EventTarget)
   NS_INTERFACE_MAP_ENTRY(nsPIDOMWindow)
   NS_INTERFACE_MAP_ENTRY(nsIDOMStorageIndexedDB)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
@@ -1905,23 +1906,13 @@ nsGlobalWindow::CreateOuterObject(nsGlobalWindow* aNewInner)
 {
   JSContext* cx = mContext->GetNativeContext();
 
-  bool isChrome = IsChromeWindow();
-  if (isChrome) {
-    // Always enable E4X for XUL and other chrome content -- there is no
-    // need to preserve the <!-- script hiding hack from JS-in-HTML daze
-    // (introduced in 1995 for graceful script degradation in Netscape 1,
-    // Mosaic, and other pre-JS browsers).
-    JS_SetOptions(cx, JS_GetOptions(cx) | JSOPTION_MOAR_XML);
-  }
-
   JSObject* outer = NewOuterWindowProxy(cx, aNewInner->FastGetGlobalJSObject(),
-                                        isChrome);
+                                        IsChromeWindow());
   if (!outer) {
     return NS_ERROR_FAILURE;
   }
 
-  js::SetProxyExtra(outer, 0,
-    js::PrivateValue(static_cast<nsIScriptGlobalObject*>(this)));
+  js::SetProxyExtra(outer, 0, js::PrivateValue(ToSupports(this)));
 
   return SetOuterObject(cx, outer);
 }
@@ -1968,7 +1959,7 @@ CreateNativeGlobalForInner(JSContext* aCx,
 
   nsRefPtr<nsIXPConnectJSObjectHolder> jsholder;
   nsresult rv = xpc->InitClassesWithNewWrappedGlobal(
-    aCx, static_cast<nsIScriptGlobalObject*>(aNewInner),
+    aCx, ToSupports(aNewInner),
     aPrincipal, 0, getter_AddRefs(jsholder));
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -2239,8 +2230,7 @@ nsGlobalWindow::SetNewDocument(nsIDocument* aDocument,
         return NS_ERROR_FAILURE;
       }
 
-      nsIScriptGlobalObject *global = static_cast<nsIScriptGlobalObject*>(this);
-      js::SetProxyExtra(outerObject, 0, js::PrivateValue(global));
+      js::SetProxyExtra(outerObject, 0, js::PrivateValue(ToSupports(this)));
 
       mJSObject = outerObject;
       SetWrapper(mJSObject);
@@ -7199,7 +7189,7 @@ nsGlobalWindow::NotifyDOMWindowDestroyed(nsGlobalWindow* aWindow) {
     services::GetObserverService();
   if (observerService) {
     observerService->
-      NotifyObservers(static_cast<nsIScriptGlobalObject*>(aWindow),
+      NotifyObservers(ToSupports(aWindow),
                       DOM_WINDOW_DESTROYED_TOPIC, nullptr);
   }
 }
@@ -7286,7 +7276,7 @@ nsGlobalWindow::NotifyDOMWindowFrozen(nsGlobalWindow* aWindow) {
       services::GetObserverService();
     if (observerService) {
       observerService->
-        NotifyObservers(static_cast<nsIScriptGlobalObject*>(aWindow),
+        NotifyObservers(ToSupports(aWindow),
                         DOM_WINDOW_FROZEN_TOPIC, nullptr);
     }
   }
@@ -7300,7 +7290,7 @@ nsGlobalWindow::NotifyDOMWindowThawed(nsGlobalWindow* aWindow) {
       services::GetObserverService();
     if (observerService) {
       observerService->
-        NotifyObservers(static_cast<nsIScriptGlobalObject*>(aWindow),
+        NotifyObservers(ToSupports(aWindow),
                         DOM_WINDOW_THAWED_TOPIC, nullptr);
     }
   }
@@ -10003,9 +9993,8 @@ nsGlobalWindow::RunTimeoutHandler(nsTimeout* aTimeout,
     JS::CompileOptions options(aScx->GetNativeContext());
     options.setFileAndLine(filename, lineNo)
            .setVersion(JSVERSION_DEFAULT);
-    JS::Value ignored;
     aScx->EvaluateString(nsDependentString(script), *FastGetGlobalJSObject(),
-                         options, /*aCoerceToString = */ false, &ignored);
+                         options, /*aCoerceToString = */ false, nullptr);
   } else {
     nsCOMPtr<nsIVariant> dummy;
     nsCOMPtr<nsISupports> me(static_cast<nsIDOMWindow *>(this));

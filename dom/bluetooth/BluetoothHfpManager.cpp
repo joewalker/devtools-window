@@ -667,11 +667,11 @@ BluetoothHfpManager::HandleShutdown()
 
 // Virtual function of class SocketConsumer
 void
-BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
+BluetoothHfpManager::ReceiveSocketData(nsAutoPtr<UnixSocketRawData>& aMessage)
 {
   MOZ_ASSERT(NS_IsMainThread());
 
-  nsAutoCString msg((const char*)aMessage->mData.get());
+  nsAutoCString msg((const char*)aMessage->mData.get(), aMessage->mSize);
   msg.StripWhitespace();
 
   nsTArray<nsCString> atCommandValues;
@@ -679,7 +679,7 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
   // For more information, please refer to 4.34.1 "Bluetooth Defined AT
   // Capabilities" in Bluetooth hands-free profile 1.6
   if (msg.Find("AT+BRSF=") != -1) {
-    SendCommand("+BRSF: ", 33);
+    SendCommand("+BRSF: ", 97);
   } else if (msg.Find("AT+CIND=?") != -1) {
     // Asking for CIND range
     SendCommand("+CIND: ", 0);
@@ -852,6 +852,15 @@ BluetoothHfpManager::ReceiveSocketData(UnixSocketRawData* aMessage)
     NotifyDialer(NS_LITERAL_STRING("CHUP"));
   } else if (msg.Find("ATD>") != -1) {
     // Currently, we don't support memory dialing in Dialer app
+    SendLine("ERROR");
+    return;
+  } else if ((msg.Find("AT+XAPL=") != -1) ||
+             (msg.Find("AT+XEVENT=") != -1)) {
+    // FIXME: Bug 838089
+    // These are vendor commands used on some special headsets. Eventually we
+    // should reply with ERROR to all unknown incoming commands. However,
+    // in order not to cause interoperability issues for b2g18 branch, only
+    // filtering these two commands should be fine for now.
     SendLine("ERROR");
     return;
   } else if (msg.Find("AT+CLCC") != -1) {

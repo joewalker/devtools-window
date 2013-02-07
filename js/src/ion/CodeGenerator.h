@@ -76,6 +76,7 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitSlots(LSlots *lir);
     bool visitStoreSlotV(LStoreSlotV *store);
     bool visitElements(LElements *lir);
+    bool visitConvertElementsToDoubles(LConvertElementsToDoubles *lir);
     bool visitTypeBarrier(LTypeBarrier *lir);
     bool visitMonitorTypes(LMonitorTypes *lir);
     bool visitCallNative(LCallNative *call);
@@ -127,7 +128,10 @@ class CodeGenerator : public CodeGeneratorSpecific
     bool visitModD(LModD *ins);
     bool visitMinMaxI(LMinMaxI *lir);
     bool visitBinaryV(LBinaryV *lir);
+    bool emitCompareS(LInstruction *lir, JSOp op, Register left, Register right,
+                      Register output, Register temp);
     bool visitCompareS(LCompareS *lir);
+    bool visitCompareStrictS(LCompareStrictS *lir);
     bool visitCompareVM(LCompareVM *lir);
     bool visitIsNullOrLikeUndefined(LIsNullOrLikeUndefined *lir);
     bool visitIsNullOrLikeUndefinedAndBranch(LIsNullOrLikeUndefinedAndBranch *lir);

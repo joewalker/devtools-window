@@ -11,6 +11,7 @@
 #include "jscntxt.h"
 #include "jscompartment.h"
 #include "jsfriendapi.h"
+#include "jsgc.h"
 #include "jswrapper.h"
 #include "jsweakmap.h"
 #include "jswatchpoint.h"
@@ -500,15 +501,6 @@ js::SetPreserveWrapperCallback(JSRuntime *rt, PreserveWrapperCallback callback)
  * sufficient data has been harvested.
  */
 
-// Defined in jsxml.cpp.
-extern size_t sE4XObjectsCreated;
-
-JS_FRIEND_API(size_t)
-JS_GetE4XObjectsCreated(JSContext *)
-{
-    return sE4XObjectsCreated;
-}
-
 namespace js {
 // Defined in vm/GlobalObject.cpp.
 extern size_t sSetProtoCalled;
@@ -717,13 +709,6 @@ js::GetContextStructuredCloneCallbacks(JSContext *cx)
     return cx->runtime->structuredCloneCallbacks;
 }
 
-JS_FRIEND_API(JSVersion)
-js::VersionSetMoarXML(JSVersion version, bool enable)
-{
-    return enable ? JSVersion(uint32_t(version) | VersionFlags::MOAR_XML)
-                  : JSVersion(uint32_t(version) & ~VersionFlags::MOAR_XML);
-}
-
 JS_FRIEND_API(bool)
 js::CanCallContextDebugHandler(JSContext *cx)
 {
@@ -871,27 +856,41 @@ JS::IsIncrementalBarrierNeeded(JSContext *cx)
 }
 
 JS_FRIEND_API(void)
-JS::IncrementalReferenceBarrier(void *ptr)
+JS::IncrementalObjectBarrier(JSObject *obj)
+{
+    if (!obj)
+        return;
+
+    JS_ASSERT(!obj->compartment()->rt->isHeapBusy());
+
+    AutoMarkInDeadCompartment amn(obj->compartment());
+
+    JSObject::writeBarrierPre(obj);
+}
+
+JS_FRIEND_API(void)
+JS::IncrementalReferenceBarrier(void *ptr, JSGCTraceKind kind)
 {
     if (!ptr)
         return;
 
     gc::Cell *cell = static_cast<gc::Cell *>(ptr);
-    JS_ASSERT(!cell->compartment()->rt->isHeapBusy());
+    JSCompartment *comp = cell->compartment();
 
-    AutoMarkInDeadCompartment amn(cell->compartment());
+    JS_ASSERT(!comp->rt->isHeapBusy());
 
-    uint32_t kind = gc::GetGCThingTraceKind(ptr);
+    AutoMarkInDeadCompartment amn(comp);
+
     if (kind == JSTRACE_OBJECT)
-        JSObject::writeBarrierPre(reinterpret_cast<RawObject>(ptr));
+        JSObject::writeBarrierPre(static_cast<JSObject*>(cell));
     else if (kind == JSTRACE_STRING)
-        JSString::writeBarrierPre(reinterpret_cast<RawString>(ptr));
+        JSString::writeBarrierPre(static_cast<JSString*>(cell));
     else if (kind == JSTRACE_SCRIPT)
-        JSScript::writeBarrierPre(reinterpret_cast<RawScript>(ptr));
+        JSScript::writeBarrierPre(static_cast<JSScript*>(cell));
     else if (kind == JSTRACE_SHAPE)
-        Shape::writeBarrierPre(reinterpret_cast<RawShape>(ptr));
+        Shape::writeBarrierPre(static_cast<Shape*>(cell));
     else if (kind == JSTRACE_BASE_SHAPE)
-        BaseShape::writeBarrierPre(reinterpret_cast<RawBaseShape>(ptr));
+        BaseShape::writeBarrierPre(static_cast<BaseShape*>(cell));
     else if (kind == JSTRACE_TYPE_OBJECT)
         types::TypeObject::writeBarrierPre((types::TypeObject *) ptr);
     else
@@ -993,7 +992,7 @@ js::AutoCTypesActivityCallback::AutoCTypesActivityCallback(JSContext *cx,
                                                            js::CTypesActivityType beginType,
                                                            js::CTypesActivityType endType
                                                            MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
-  : cx(cx), callback(cx->runtime->ctypesActivityCallback), beginType(beginType), endType(endType)
+  : cx(cx), callback(cx->runtime->ctypesActivityCallback), endType(endType)
 {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
 

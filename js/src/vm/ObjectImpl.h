@@ -48,9 +48,8 @@ CastAsStrictPropertyOp(JSObject *object)
  * property storage, typed array data, and so on).  All other properties are
  * stored using shapes and shape trees.  Keys for these properties are either
  * PropertyNames (that is, atomized strings whose contents are not unsigned
- * 32-bit integers) or SpecialIds (object values for E4X and a couple other
- * things, see jsid for details); the union of these types, used in individual
- * shapes, is PropertyId.
+ * 32-bit integers) or SpecialIds (see jsid for details); the union of these
+ * types, used in individual shapes, is PropertyId.
  */
 class PropertyId
 {
@@ -289,10 +288,10 @@ struct PropDesc {
     bool checkGetter(JSContext *cx);
     bool checkSetter(JSContext *cx);
 
-    bool unwrapDebuggerObjectsInto(JSContext *cx, Debugger *dbg, JSObject *obj,
+    bool unwrapDebuggerObjectsInto(JSContext *cx, Debugger *dbg, HandleObject obj,
                                    PropDesc *unwrapped) const;
 
-    bool wrapInto(JSContext *cx, JSObject *obj, const jsid &id, jsid *wrappedId,
+    bool wrapInto(JSContext *cx, HandleObject obj, const jsid &id, jsid *wrappedId,
                   PropDesc *wrappedDesc) const;
 
     class AutoRooter : private AutoGCRooter
@@ -917,7 +916,7 @@ class ArrayBufferObject;
  */
 class ObjectElements
 {
-    friend struct ::JSObject;
+    friend class ::JSObject;
     friend class ObjectImpl;
     friend class ArrayBufferObject;
 
@@ -935,8 +934,8 @@ class ObjectElements
     /* 'length' property of array objects, unused for other objects. */
     uint32_t length;
 
-    /* :XXX: bug 586842 store state about sparse slots. */
-    uint32_t unused;
+    /* If non-zero, integer elements should be converted to doubles. */
+    uint32_t convertDoubleElements;
 
     void staticAsserts() {
         MOZ_STATIC_ASSERT(sizeof(ObjectElements) == VALUES_PER_HEADER * sizeof(Value),
@@ -946,7 +945,7 @@ class ObjectElements
   public:
 
     ObjectElements(uint32_t capacity, uint32_t length)
-      : capacity(capacity), initializedLength(0), length(length)
+      : capacity(capacity), initializedLength(0), length(length), convertDoubleElements(0)
     {}
 
     HeapSlot *elements() { return (HeapSlot *)(uintptr_t(this) + sizeof(ObjectElements)); }
@@ -963,6 +962,11 @@ class ObjectElements
     static int offsetOfLength() {
         return (int)offsetof(ObjectElements, length) - (int)sizeof(ObjectElements);
     }
+    static int offsetOfConvertDoubleElements() {
+        return (int)offsetof(ObjectElements, convertDoubleElements) - (int)sizeof(ObjectElements);
+    }
+
+    static bool ConvertElementsToDoubles(JSContext *cx, uintptr_t elements);
 
     static const size_t VALUES_PER_HEADER = 2;
 };

@@ -17,11 +17,13 @@ webidl_files = \
   AudioNode.webidl \
   AudioParam.webidl \
   AudioSourceNode.webidl \
+  BatteryManager.webidl \
   BiquadFilterNode.webidl \
   Blob.webidl \
   CanvasRenderingContext2D.webidl \
   CaretPosition.webidl \
   CDATASection.webidl \
+  CFStateChangeEvent.webidl \
   CharacterData.webidl \
   ClientRectList.webidl \
   Comment.webidl \
@@ -40,6 +42,7 @@ webidl_files = \
   DOMStringMap.webidl \
   DOMTokenList.webidl \
   DOMTransaction.webidl \
+  DummyBinding.webidl \
   DynamicsCompressorNode.webidl \
   Element.webidl \
   EventHandler.webidl \
@@ -55,6 +58,7 @@ webidl_files = \
   GainNode.webidl \
   HTMLAnchorElement.webidl \
   HTMLBodyElement.webidl \
+  HTMLBRElement.webidl \
   HTMLCollection.webidl \
   HTMLDataListElement.webidl \
   HTMLDivElement.webidl \
@@ -74,6 +78,7 @@ webidl_files = \
   HTMLPropertiesCollection.webidl \
   HTMLScriptElement.webidl \
   HTMLSpanElement.webidl \
+  HTMLStyleElement.webidl \
   HTMLTableCaptionElement.webidl \
   HTMLTableCellElement.webidl \
   HTMLTableColElement.webidl \
@@ -83,6 +88,7 @@ webidl_files = \
   HTMLTitleElement.webidl \
   HTMLUListElement.webidl \
   ImageData.webidl \
+  LinkStyle.webidl \
   Location.webidl \
   MutationObserver.webidl \
   Node.webidl \
@@ -97,6 +103,7 @@ webidl_files = \
   ProcessingInstruction.webidl \
   Rect.webidl \
   RGBColor.webidl \
+  RTCIceServer.webidl \
   Screen.webidl \
   SVGAElement.webidl \
   SVGAltGlyphElement.webidl \
@@ -129,7 +136,7 @@ webidl_files = \
   SVGLengthList.webidl \
   SVGLinearGradientElement.webidl \
   SVGLineElement.webidl \
-  SVGLocatableElement.webidl \
+  SVGMarkerElement.webidl \
   SVGMaskElement.webidl \
   SVGMatrix.webidl \
   SVGMetadataElement.webidl \
@@ -160,7 +167,6 @@ webidl_files = \
   SVGTextPositioningElement.webidl \
   SVGTitleElement.webidl \
   SVGTransform.webidl \
-  SVGTransformableElement.webidl \
   SVGTransformList.webidl \
   SVGTSpanElement.webidl \
   SVGUnitTypes.webidl \
@@ -175,11 +181,14 @@ webidl_files = \
   ValidityState.webidl \
   WebSocket.webidl \
   UndoManager.webidl \
+  USSDReceivedEvent.webidl \
   XMLHttpRequest.webidl \
   XMLHttpRequestEventTarget.webidl \
   XMLHttpRequestUpload.webidl \
   XMLSerializer.webidl \
+  XMLStylesheetProcessingInstruction.webidl \
   XPathEvaluator.webidl \
+  XULElement.webidl \
   $(NULL)
 
 ifdef MOZ_WEBGL
@@ -191,14 +200,6 @@ endif
 ifdef MOZ_WEBRTC
 webidl_files += \
   MediaStreamList.webidl \
-  RTCIceServer.webidl \
-  $(NULL)
-endif
-
-ifdef MOZ_B2G_RIL
-webidl_files += \
-  USSDReceivedEvent.webidl \
-  CFStateChangeEvent.webidl \
   $(NULL)
 endif
 

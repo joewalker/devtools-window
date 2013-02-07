@@ -158,8 +158,6 @@ BaseShape::adoptUnowned(UnrootedUnownedBaseShape other)
      * unowned base shape of a new last property.
      */
     JS_ASSERT(isOwned());
-    mozilla::DebugOnly<uint32_t> flags = getObjectFlags();
-    JS_ASSERT((flags & other->getObjectFlags()) == flags);
 
     uint32_t span = slotSpan();
     ShapeTable *table = &this->table();
@@ -321,7 +319,7 @@ Shape::set(JSContext* cx, HandleObject obj, HandleObject receiver, bool strict, 
         return false;
 
     /*
-     * |with (it) color;| ends up here, as do XML filter-expressions.
+     * |with (it) color='red';| ends up here.
      * Avoid exposing the With object to native setters.
      */
     if (obj->isWith()) {
