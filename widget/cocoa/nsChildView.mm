@@ -134,6 +134,10 @@ uint32_t nsChildView::sLastInputEventCount = 0;
 
 - (void)drawRect:(NSRect)aRect inContext:(CGContextRef)aContext alternate:(BOOL)aIsAlternate;
 
+- (BOOL)isUsingOpenGL;
+- (void)drawUsingOpenGL;
+- (void)drawUsingOpenGLCallback;
+
 // Called using performSelector:withObject:afterDelay:0 to release
 // aWidgetArray (and its contents) the next time through the run loop.
 - (void)releaseWidgets:(NSArray*)aWidgetArray;
@@ -796,6 +800,13 @@ NS_IMETHODIMP nsChildView::GetClientBounds(nsIntRect &aRect)
   return NS_OK;
 }
 
+NS_IMETHODIMP nsChildView::GetScreenBounds(nsIntRect &aRect)
+{
+  GetBounds(aRect);
+  aRect.MoveTo(WidgetToScreenOffset());
+  return NS_OK;
+}
+
 double
 nsChildView::GetDefaultScaleInternal()
 {
@@ -1189,13 +1200,16 @@ nsresult nsChildView::SynthesizeNativeMouseEvent(nsIntPoint aPoint,
 {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NSRESULT;
 
+  NSPoint pt =
+    nsCocoaUtils::DevPixelsToCocoaPoints(aPoint, BackingScaleFactor());
+
   // Move the mouse cursor to the requested position and reconnect it to the mouse.
-  CGWarpMouseCursorPosition(CGPointMake(aPoint.x, aPoint.y));
+  CGWarpMouseCursorPosition(NSPointToCGPoint(pt));
   CGAssociateMouseAndMouseCursorPosition(true);
 
   // aPoint is given with the origin on the top left, but convertScreenToBase
   // expects a point in a coordinate system that has its origin on the bottom left.
-  NSPoint screenPoint = NSMakePoint(aPoint.x, [[NSScreen mainScreen] frame].size.height - aPoint.y);
+  NSPoint screenPoint = NSMakePoint(pt.x, nsCocoaUtils::FlippedScreenY(pt.y));
   NSPoint windowPoint = [[mView window] convertScreenToBase:screenPoint];
 
   NSEvent* event = [NSEvent mouseEventWithType:aNativeMessage
@@ -1396,11 +1410,11 @@ nsChildView::ComputeShouldAccelerate(bool aDefault)
 }
 
 bool
-nsChildView::UseOffMainThreadCompositing()
+nsChildView::ShouldUseOffMainThreadCompositing()
 {
   // OMTC doesn't work with Basic Layers on OS X right now. Once it works, we'll
   // still want to disable it for certain kinds of windows (e.g. popups).
-  return nsBaseWidget::UseOffMainThreadCompositing() &&
+  return nsBaseWidget::ShouldUseOffMainThreadCompositing() &&
          ComputeShouldAccelerate(mUseLayersAcceleration);
 }
 
@@ -1487,18 +1501,34 @@ bool nsChildView::DispatchWindowEvent(nsGUIEvent &event)
   return ConvertStatus(status);
 }
 
-bool nsChildView::PaintWindow(nsIntRegion aRegion, bool aIsAlternate)
+nsIWidget*
+nsChildView::GetWidgetForListenerEvents()
 {
-  nsCOMPtr<nsIWidget> widget = this;
-
   // If there is no listener, use the parent popup's listener if that exists.
   if (!mWidgetListener && mParentWidget) {
     nsWindowType type;
     mParentWidget->GetWindowType(type);
     if (type == eWindowType_popup) {
-      widget = mParentWidget;
+      return mParentWidget;
     }
   }
+
+  return this;
+}
+
+void nsChildView::WillPaintWindow()
+{
+  nsCOMPtr<nsIWidget> widget = GetWidgetForListenerEvents();
+
+  nsIWidgetListener* listener = widget->GetWidgetListener();
+  if (listener) {
+    listener->WillPaintWindow(widget);
+  }
+}
+
+bool nsChildView::PaintWindow(nsIntRegion aRegion, bool aIsAlternate)
+{
+  nsCOMPtr<nsIWidget> widget = GetWidgetForListenerEvents();
 
   nsIWidgetListener* listener = widget->GetWidgetListener();
   if (!listener)
@@ -1637,14 +1667,29 @@ bool nsChildView::HasPendingInputEvent()
 
 #pragma mark -
 
-// Force Input Method Editor to commit the uncommitted input
-// Note that this and other IME methods don't necessarily
-// get called on the same ChildView that input is going through.
-NS_IMETHODIMP nsChildView::ResetInputState()
+NS_IMETHODIMP
+nsChildView::NotifyIME(NotificationToIME aNotification)
 {
-  NS_ENSURE_TRUE(mTextInputHandler, NS_ERROR_NOT_AVAILABLE);
-  mTextInputHandler->CommitIMEComposition();
-  return NS_OK;
+  switch (aNotification) {
+    case REQUEST_TO_COMMIT_COMPOSITION:
+      NS_ENSURE_TRUE(mTextInputHandler, NS_ERROR_NOT_AVAILABLE);
+      mTextInputHandler->CommitIMEComposition();
+      return NS_OK;
+    case REQUEST_TO_CANCEL_COMPOSITION:
+      NS_ENSURE_TRUE(mTextInputHandler, NS_ERROR_NOT_AVAILABLE);
+      mTextInputHandler->CancelIMEComposition();
+      return NS_OK;
+    case NOTIFY_IME_OF_FOCUS:
+      NS_ENSURE_TRUE(mTextInputHandler, NS_ERROR_NOT_AVAILABLE);
+      mTextInputHandler->OnFocusChangeInGecko(true);
+      return NS_OK;
+    case NOTIFY_IME_OF_BLUR:
+      NS_ENSURE_TRUE(mTextInputHandler, NS_ERROR_NOT_AVAILABLE);
+      mTextInputHandler->OnFocusChangeInGecko(false);
+      return NS_OK;
+    default:
+      return NS_ERROR_NOT_IMPLEMENTED;
+  }
 }
 
 NS_IMETHODIMP_(void)
@@ -1702,14 +1747,6 @@ nsChildView::GetInputContext()
   return mInputContext;
 }
 
-// Destruct and don't commit the IME composition string.
-NS_IMETHODIMP nsChildView::CancelIMEComposition()
-{
-  NS_ENSURE_TRUE(mTextInputHandler, NS_ERROR_NOT_AVAILABLE);
-  mTextInputHandler->CancelIMEComposition();
-  return NS_OK;
-}
-
 NS_IMETHODIMP nsChildView::GetToggledKeyState(uint32_t aKeyCode,
                                               bool* aLEDState)
 {
@@ -1733,13 +1770,6 @@ NS_IMETHODIMP nsChildView::GetToggledKeyState(uint32_t aKeyCode,
   return NS_OK;
 
   NS_OBJC_END_TRY_ABORT_BLOCK_NSRESULT;
-}
-
-NS_IMETHODIMP nsChildView::OnIMEFocusChange(bool aFocus)
-{
-  NS_ENSURE_TRUE(mTextInputHandler, NS_ERROR_NOT_AVAILABLE);
-  mTextInputHandler->OnFocusChangeInGecko(aFocus);
-  return NS_OK;
 }
 
 NSView<mozView>* nsChildView::GetEditorView()
@@ -1990,6 +2020,20 @@ NSEvent* gLastDragMouseDownEvent = nil;
   }
 }
 
++ (void)registerViewForDraggedTypes:(NSView*)aView
+{
+  [aView registerForDraggedTypes:[NSArray arrayWithObjects:NSFilenamesPboardType,
+                                                           NSStringPboardType,
+                                                           NSHTMLPboardType,
+                                                           NSURLPboardType,
+                                                           NSFilesPromisePboardType,
+                                                           kWildcardPboardType,
+                                                           kCorePboardType_url,
+                                                           kCorePboardType_urld,
+                                                           kCorePboardType_urln,
+                                                           nil]];
+}
+
 // initWithFrame:geckoChild:
 - (id)initWithFrame:(NSRect)inFrame geckoChild:(nsChildView*)inChild
 {
@@ -2037,17 +2081,8 @@ NSEvent* gLastDragMouseDownEvent = nil;
   }
   
   // register for things we'll take from other applications
-  PR_LOG(sCocoaLog, PR_LOG_ALWAYS, ("ChildView initWithFrame: registering drag types\n"));
-  [self registerForDraggedTypes:[NSArray arrayWithObjects:NSFilenamesPboardType,
-                                                          NSStringPboardType,
-                                                          NSHTMLPboardType,
-                                                          NSURLPboardType,
-                                                          NSFilesPromisePboardType,
-                                                          kWildcardPboardType,
-                                                          kCorePboardType_url,
-                                                          kCorePboardType_urld,
-                                                          kCorePboardType_urln,
-                                                          nil]];
+  [ChildView registerViewForDraggedTypes:self];
+
   [[NSNotificationCenter defaultCenter] addObserver:self
                                            selector:@selector(windowBecameMain:)
                                                name:NSWindowDidBecomeMainNotification
@@ -2251,7 +2286,23 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
 - (void)setNeedsDisplayInRect:(NSRect)aRect
 {
-  [super setNeedsDisplayInRect:aRect];
+  if (![[self window] isVisible])
+    return;
+
+  if ([self isUsingOpenGL]) {
+    // Draw the frame outside of setNeedsDisplayInRect to prevent us from
+    // needing to access the normal window buffer surface unnecessarily, so we
+    // waste less time synchronizing the two surfaces. (These synchronizations
+    // show up in a profiler as CGSDeviceLock / _CGSLockWindow /
+    // _CGSSynchronizeWindowBackingStore.) It also means that Cocoa doesn't
+    // have any potentially expensive invalid rect management for us.
+    if (!mWaitingForPaint) {
+      mWaitingForPaint = YES;
+      [self performSelector:@selector(drawUsingOpenGLCallback) withObject:nil afterDelay:0];
+    }
+  } else {
+    [super setNeedsDisplayInRect:aRect];
+  }
 
   if ([[self window] isKindOfClass:[ToolbarWindow class]]) {
     ToolbarWindow* window = (ToolbarWindow*)[self window];
@@ -2417,7 +2468,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
 - (BOOL)mouseDownCanMoveWindow
 {
-  return NO;
+  return [[self window] isMovableByWindowBackground];
 }
 
 - (void)lockFocus
@@ -2500,7 +2551,6 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
 - (void)drawRect:(NSRect)aRect inContext:(CGContextRef)aContext alternate:(BOOL)aIsAlternate
 {
-  SAMPLE_LABEL("widget", "ChildView::drawRect");
   if (!mGeckoChild || !mGeckoChild->IsVisible())
     return;
 
@@ -2520,8 +2570,21 @@ NSEvent* gLastDragMouseDownEvent = nil;
   CGAffineTransform xform = CGContextGetCTM(aContext);
   fprintf (stderr, "  xform in: [%f %f %f %f %f %f]\n", xform.a, xform.b, xform.c, xform.d, xform.tx, xform.ty);
 #endif
-  nsIntRegion region;
 
+  if ([self isUsingOpenGL]) {
+    // We usually don't get here for Gecko-initiated repaints. Instead, those
+    // eventually call drawUsingOpenGL, and don't go through drawRect.
+    // Paints that come through here are triggered by something that Cocoa
+    // controls, for example by window resizing or window focus changes.
+
+    // Do GL composition and return.
+    [self drawUsingOpenGL];
+    return;
+  }
+
+  SAMPLE_LABEL("widget", "ChildView::drawRect");
+
+  nsIntRegion region;
   nsIntRect boundingRect = mGeckoChild->CocoaPointsToDevPixels(aRect);
   const NSRect *rects;
   NSInteger count, i;
@@ -2535,33 +2598,6 @@ NSEvent* gLastDragMouseDownEvent = nil;
     region.And(region, boundingRect);
   } else {
     region = boundingRect;
-  }
-
-  LayerManager *layerManager = mGeckoChild->GetLayerManager(nullptr);
-  if (layerManager->GetBackendType() == mozilla::layers::LAYERS_OPENGL) {
-    NSOpenGLContext *glContext;
-
-    LayerManagerOGL *manager = static_cast<LayerManagerOGL*>(layerManager);
-    manager->SetClippingRegion(region);
-    glContext = (NSOpenGLContext *)manager->GetNSOpenGLContext();
-
-    if (!mGLContext) {
-      [self setGLContext:glContext];
-    }
-
-    [glContext setView:self];
-    [glContext update];
-
-    mGeckoChild->PaintWindow(region, aIsAlternate);
-
-    // Force OpenGL to refresh the very first time we draw. This works around a
-    // Mac OS X bug that stops windows updating on OS X when we use OpenGL.
-    if (!mDidForceRefreshOpenGL) {
-      [self performSelector:@selector(forceRefreshOpenGL) withObject:nil afterDelay:0];
-      mDidForceRefreshOpenGL = YES;
-    }
-
-    return;
   }
 
   // Create Cairo objects.
@@ -2605,8 +2641,9 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
   // Force OpenGL to refresh the very first time we draw. This works around a
   // Mac OS X bug that stops windows updating on OS X when we use OpenGL.
-  if (painted && !mDidForceRefreshOpenGL &&
-      layerManager->AsShadowManager() && mUsingOMTCompositor) {
+  LayerManager *layerManager = mGeckoChild->GetLayerManager(nullptr);
+  if (mUsingOMTCompositor && painted && !mDidForceRefreshOpenGL &&
+      layerManager->AsShadowManager()) {
     if (!mDidForceRefreshOpenGL) {
       [self performSelector:@selector(forceRefreshOpenGL) withObject:nil afterDelay:0];
       mDidForceRefreshOpenGL = YES;
@@ -2638,6 +2675,57 @@ NSEvent* gLastDragMouseDownEvent = nil;
   CGContextSetLineWidth(aContext, 4.0);
   CGContextStrokeRect(aContext, NSRectToCGRect(aRect));
 #endif
+}
+
+- (BOOL)isUsingOpenGL
+{
+  if (!mGeckoChild || ![self window])
+    return NO;
+
+  return mGeckoChild->GetLayerManager(nullptr)->GetBackendType() == mozilla::layers::LAYERS_OPENGL;
+}
+
+- (void)drawUsingOpenGL
+{
+  SAMPLE_LABEL("widget", "ChildView::drawUsingOpenGL");
+
+  if (![self isUsingOpenGL] || !mGeckoChild->IsVisible())
+    return;
+
+  mWaitingForPaint = NO;
+
+  nsIntRect geckoBounds;
+  mGeckoChild->GetBounds(geckoBounds);
+  nsIntRegion region(geckoBounds);
+
+  LayerManagerOGL *manager = static_cast<LayerManagerOGL*>(mGeckoChild->GetLayerManager(nullptr));
+  manager->SetClippingRegion(region);
+  NSOpenGLContext *glContext = (NSOpenGLContext *)manager->GetNSOpenGLContext();
+
+  if (!mGLContext) {
+    [self setGLContext:glContext];
+  }
+
+  [glContext setView:self];
+  [glContext update];
+
+  mGeckoChild->PaintWindow(region, false);
+
+  // Force OpenGL to refresh the very first time we draw. This works around a
+  // Mac OS X bug that stops windows updating on OS X when we use OpenGL.
+  if (!mDidForceRefreshOpenGL) {
+    [self performSelector:@selector(forceRefreshOpenGL) withObject:nil afterDelay:0];
+    mDidForceRefreshOpenGL = YES;
+  }
+}
+
+// Called asynchronously after setNeedsDisplay in order to avoid entering the
+// normal drawing machinery.
+- (void)drawUsingOpenGLCallback
+{
+  if (mWaitingForPaint) {
+    [self drawUsingOpenGL];
+  }
 }
 
 - (void)releaseWidgets:(NSArray*)aWidgetArray
@@ -2681,10 +2769,7 @@ NSEvent* gLastDragMouseDownEvent = nil;
                  afterDelay:0];
     }
 
-    nsIWidgetListener* listener = mGeckoChild->GetWidgetListener();
-    if (listener) {
-      listener->WillPaintWindow(mGeckoChild);
-    }
+    mGeckoChild->WillPaintWindow();
   }
   [super viewWillDraw];
 }
@@ -2782,8 +2867,9 @@ NSEvent* gLastDragMouseDownEvent = nil;
       // check to see if scroll events should roll up the popup
       if ([theEvent type] == NSScrollWheel) {
         shouldRollup = rollupListener->ShouldRollupOnMouseWheelEvent();
-        // always consume scroll events that aren't over the popup
-        consumeEvent = YES;
+        // consume scroll events that aren't over the popup
+        // unless the popup is an arrow panel
+        consumeEvent = rollupListener->ShouldConsumeOnMouseWheelEvent();
       }
 
       // if we're dealing with menus, we probably have submenus and
@@ -3386,6 +3472,25 @@ NSEvent* gLastDragMouseDownEvent = nil;
 
   nsEventStatus status; // ignored
   mGeckoChild->DispatchEvent(&event, status);
+}
+
+- (void)updateWindowDraggableStateOnMouseMove:(NSEvent*)theEvent
+{
+  if (!theEvent || !mGeckoChild) {
+    return;
+  }
+
+  nsCocoaWindow* windowWidget = mGeckoChild->GetXULWindowWidget();
+  if (!windowWidget) {
+    return;
+  }
+
+  // We assume later on that sending a hit test event won't cause widget destruction.
+  nsMouseEvent hitTestEvent(true, NS_MOUSE_MOZHITTEST, mGeckoChild, nsMouseEvent::eReal);
+  [self convertCocoaMouseEvent:theEvent toGeckoEvent:&hitTestEvent];
+  bool result = mGeckoChild->DispatchWindowEvent(hitTestEvent);
+
+  [windowWidget->GetCocoaWindow() setMovableByWindowBackground:result];
 }
 
 - (void)handleMouseMoved:(NSEvent*)theEvent
@@ -4911,6 +5016,11 @@ ChildViewMouseTracker::ViewForEvent(NSEvent* aEvent)
 
   NSPoint windowEventLocation = nsCocoaUtils::EventLocationForWindow(aEvent, window);
   NSView* view = [[[window contentView] superview] hitTest:windowEventLocation];
+
+  while([view conformsToProtocol:@protocol(EventRedirection)]) {
+    view = [(id<EventRedirection>)view targetView];
+  }
+
   if (![view isKindOfClass:[ChildView class]])
     return nil;
 
@@ -5009,7 +5119,7 @@ ChildViewMouseTracker::WindowAcceptsEvent(NSWindow* aWindow, NSEvent* aEvent,
   NSWindow *ourWindow = [self window];
   NSView *contentView = [ourWindow contentView];
   if ([ourWindow isKindOfClass:[ToolbarWindow class]] && (self == contentView))
-    return NO;
+    return [ourWindow isMovableByWindowBackground];
   return [self nsChildView_NSView_mouseDownCanMoveWindow];
 }
 

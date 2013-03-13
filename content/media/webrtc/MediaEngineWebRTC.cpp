@@ -10,6 +10,9 @@
 #error "This file must be #included before any IPDL-generated files or other files that #include prlog.h"
 #endif
 
+#include "nsIPrefService.h"
+#include "nsIPrefBranch.h"
+
 #include "CSFLog.h"
 #include "prenv.h"
 
@@ -129,7 +132,7 @@ MediaEngineWebRTC::EnumerateVideoDevices(nsTArray<nsRefPtr<MediaEngineVideoSourc
     if (uniqueId[0] == '\0') {
       // In case a device doesn't set uniqueId!
       strncpy(uniqueId, deviceName, sizeof(uniqueId));
-	  uniqueId[sizeof(uniqueId)-1] = '\0'; // strncpy isn't safe
+      uniqueId[sizeof(uniqueId)-1] = '\0'; // strncpy isn't safe
     }
 
     nsRefPtr<MediaEngineWebRTCVideoSource> vSource;

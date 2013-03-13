@@ -161,15 +161,18 @@ BluetoothAdapter::BluetoothAdapter(nsPIDOMWindow* aWindow,
   for (uint32_t i = 0; i < values.Length(); ++i) {
     SetPropertyByValue(values[i]);
   }
+
+  BluetoothService* bs = BluetoothService::Get();
+  NS_ENSURE_TRUE_VOID(bs);
+  bs->RegisterBluetoothSignalHandler(mPath, this);
 }
 
 BluetoothAdapter::~BluetoothAdapter()
 {
   BluetoothService* bs = BluetoothService::Get();
   // We can be null on shutdown, where this might happen
-  if (bs) {
-    bs->UnregisterBluetoothSignalHandler(mPath, this);
-  }
+  NS_ENSURE_TRUE_VOID(bs);
+  bs->UnregisterBluetoothSignalHandler(mPath, this);
   Unroot();
 }
 
@@ -226,7 +229,9 @@ BluetoothAdapter::SetPropertyByValue(const BluetoothNamedValue& aValue)
     nsIScriptContext* sc = GetContextForEventHandlers(&rv);
     NS_ENSURE_SUCCESS_VOID(rv);
 
-    if (!SetJsObject(sc->GetNativeContext(), value, mJsUuids)) {
+    if (NS_FAILED(nsTArrayToJSArray(sc->GetNativeContext(),
+                                    mUuids,
+                                    &mJsUuids))) {
       NS_WARNING("Cannot set JS UUIDs object!");
       return;
     }
@@ -237,7 +242,9 @@ BluetoothAdapter::SetPropertyByValue(const BluetoothNamedValue& aValue)
     nsIScriptContext* sc = GetContextForEventHandlers(&rv);
     NS_ENSURE_SUCCESS_VOID(rv);
 
-    if (!SetJsObject(sc->GetNativeContext(), value, mJsDeviceAddresses)) {
+    if (NS_FAILED(nsTArrayToJSArray(sc->GetNativeContext(),
+                                    mDeviceAddresses,
+                                    &mJsDeviceAddresses))) {
       NS_WARNING("Cannot set JS Devices object!");
       return;
     }
@@ -259,12 +266,7 @@ BluetoothAdapter::Create(nsPIDOMWindow* aWindow, const BluetoothValue& aValue)
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aWindow);
 
-  BluetoothService* bs = BluetoothService::Get();
-  NS_ENSURE_TRUE(bs, nullptr);
-
   nsRefPtr<BluetoothAdapter> adapter = new BluetoothAdapter(aWindow, aValue);
-  bs->RegisterBluetoothSignalHandler(adapter->GetPath(), adapter);
-
   return adapter.forget();
 }
 
@@ -279,7 +281,7 @@ BluetoothAdapter::Notify(const BluetoothSignal& aData)
   if (aData.name().EqualsLiteral("DeviceFound")) {
     nsRefPtr<BluetoothDevice> device = BluetoothDevice::Create(GetOwner(), mPath, aData.value());
     nsCOMPtr<nsIDOMEvent> event;
-    NS_NewDOMBluetoothDeviceEvent(getter_AddRefs(event), nullptr, nullptr);
+    NS_NewDOMBluetoothDeviceEvent(getter_AddRefs(event), this, nullptr, nullptr);
 
     nsCOMPtr<nsIDOMBluetoothDeviceEvent> e = do_QueryInterface(event);
     e->InitBluetoothDeviceEvent(NS_LITERAL_STRING("devicefound"),
@@ -289,7 +291,7 @@ BluetoothAdapter::Notify(const BluetoothSignal& aData)
     const nsAString& deviceAddress = aData.value().get_nsString();
 
     nsCOMPtr<nsIDOMEvent> event;
-    NS_NewDOMBluetoothDeviceAddressEvent(getter_AddRefs(event), nullptr, nullptr);
+    NS_NewDOMBluetoothDeviceAddressEvent(getter_AddRefs(event), this, nullptr, nullptr);
 
     nsCOMPtr<nsIDOMBluetoothDeviceAddressEvent> e = do_QueryInterface(event);
     e->InitBluetoothDeviceAddressEvent(NS_LITERAL_STRING("devicedisappeared"),
@@ -303,7 +305,7 @@ BluetoothAdapter::Notify(const BluetoothSignal& aData)
                                                                GetPath(),
                                                                aData.value());
     nsCOMPtr<nsIDOMEvent> event;
-    NS_NewDOMBluetoothDeviceEvent(getter_AddRefs(event), nullptr, nullptr);
+    NS_NewDOMBluetoothDeviceEvent(getter_AddRefs(event), this, nullptr, nullptr);
 
     nsCOMPtr<nsIDOMBluetoothDeviceEvent> e = do_QueryInterface(event);
     e->InitBluetoothDeviceEvent(NS_LITERAL_STRING("devicecreated"),
@@ -576,7 +578,7 @@ BluetoothAdapter::SetPinCode(const nsAString& aDeviceAddress,
   }
 
   req.forget(aRequest);
-  return NS_OK;  
+  return NS_OK;
 }
 
 nsresult
@@ -599,7 +601,7 @@ BluetoothAdapter::SetPasskey(const nsAString& aDeviceAddress, uint32_t aPasskey,
   }
 
   req.forget(aRequest);
-  return NS_OK;  
+  return NS_OK;
 }
 
 nsresult
@@ -625,7 +627,7 @@ BluetoothAdapter::SetPairingConfirmation(const nsAString& aDeviceAddress,
   }
 
   req.forget(aRequest);
-  return NS_OK;  
+  return NS_OK;
 }
 
 nsresult
@@ -648,7 +650,7 @@ BluetoothAdapter::SetAuthorization(const nsAString& aDeviceAddress, bool aAllow,
   }
 
   req.forget(aRequest);
-  return NS_OK;  
+  return NS_OK;
 }
 
 NS_IMETHODIMP

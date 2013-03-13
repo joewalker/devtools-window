@@ -450,9 +450,8 @@ nsXULTreeBuilder::SetSelection(nsITreeSelection* aSelection)
 }
 
 NS_IMETHODIMP
-nsXULTreeBuilder::GetRowProperties(int32_t aIndex, nsISupportsArray* aProperties)
+nsXULTreeBuilder::GetRowProperties(int32_t aIndex, nsAString& aProps)
 {
-    NS_ENSURE_ARG_POINTER(aProperties);
     NS_PRECONDITION(aIndex >= 0 && aIndex < mRows.Count(), "bad row");
     if (aIndex < 0 || aIndex >= mRows.Count())
         return NS_ERROR_INVALID_ARG;
@@ -464,10 +463,7 @@ nsXULTreeBuilder::GetRowProperties(int32_t aIndex, nsISupportsArray* aProperties
         row->GetAttr(kNameSpaceID_None, nsGkAtoms::properties, raw);
 
         if (!raw.IsEmpty()) {
-            nsAutoString cooked;
-            SubstituteText(mRows[aIndex]->mMatch->mResult, raw, cooked);
-
-            nsTreeUtils::TokenizeProperties(cooked, aProperties);
+            SubstituteText(mRows[aIndex]->mMatch->mResult, raw, aProps);
         }
     }
 
@@ -475,10 +471,10 @@ nsXULTreeBuilder::GetRowProperties(int32_t aIndex, nsISupportsArray* aProperties
 }
 
 NS_IMETHODIMP
-nsXULTreeBuilder::GetCellProperties(int32_t aRow, nsITreeColumn* aCol, nsISupportsArray* aProperties)
+nsXULTreeBuilder::GetCellProperties(int32_t aRow, nsITreeColumn* aCol,
+                                    nsAString& aProps)
 {
     NS_ENSURE_ARG_POINTER(aCol);
-    NS_ENSURE_ARG_POINTER(aProperties);
     NS_PRECONDITION(aRow >= 0 && aRow < mRows.Count(), "bad row");
     if (aRow < 0 || aRow >= mRows.Count())
         return NS_ERROR_INVALID_ARG;
@@ -490,10 +486,7 @@ nsXULTreeBuilder::GetCellProperties(int32_t aRow, nsITreeColumn* aCol, nsISuppor
         cell->GetAttr(kNameSpaceID_None, nsGkAtoms::properties, raw);
 
         if (!raw.IsEmpty()) {
-            nsAutoString cooked;
-            SubstituteText(mRows[aRow]->mMatch->mResult, raw, cooked);
-
-            nsTreeUtils::TokenizeProperties(cooked, aProperties);
+            SubstituteText(mRows[aRow]->mMatch->mResult, raw, aProps);
         }
     }
 
@@ -501,11 +494,9 @@ nsXULTreeBuilder::GetCellProperties(int32_t aRow, nsITreeColumn* aCol, nsISuppor
 }
 
 NS_IMETHODIMP
-nsXULTreeBuilder::GetColumnProperties(nsITreeColumn* aCol,
-                                      nsISupportsArray* aProperties)
+nsXULTreeBuilder::GetColumnProperties(nsITreeColumn* aCol, nsAString& aProps)
 {
     NS_ENSURE_ARG_POINTER(aCol);
-    NS_ENSURE_ARG_POINTER(aProperties);
     // XXX sortactive fu
     return NS_OK;
 }
@@ -1596,8 +1587,7 @@ nsXULTreeBuilder::OpenSubtreeForQuerySet(nsTreeRows::Subtree* aSubtree,
         }
 
         nsTemplateMatch *newmatch =
-            nsTemplateMatch::Create(mPool, aQuerySet->Priority(),
-                                    nextresult, nullptr);
+            nsTemplateMatch::Create(aQuerySet->Priority(), nextresult, nullptr);
         if (!newmatch)
             return NS_ERROR_OUT_OF_MEMORY;
 
@@ -1610,7 +1600,7 @@ nsXULTreeBuilder::OpenSubtreeForQuerySet(nsTreeRows::Subtree* aSubtree,
                     nsCOMPtr<nsIRDFResource> parentid;
                     rv = GetResultResource(iter->mMatch->mResult, getter_AddRefs(parentid));
                     if (NS_FAILED(rv)) {
-                        nsTemplateMatch::Destroy(mPool, newmatch, false);
+                        nsTemplateMatch::Destroy(newmatch, false);
                         return rv;
                     }
 
@@ -1623,7 +1613,7 @@ nsXULTreeBuilder::OpenSubtreeForQuerySet(nsTreeRows::Subtree* aSubtree,
 
             if (cyclic) {
                 NS_WARNING("tree cannot handle cyclic graphs");
-                nsTemplateMatch::Destroy(mPool, newmatch, false);
+                nsTemplateMatch::Destroy(newmatch, false);
                 continue;
             }
 
@@ -1632,7 +1622,7 @@ nsXULTreeBuilder::OpenSubtreeForQuerySet(nsTreeRows::Subtree* aSubtree,
             rv = DetermineMatchedRule(nullptr, nextresult, aQuerySet,
                                       &matchedrule, &ruleindex);
             if (NS_FAILED(rv)) {
-                nsTemplateMatch::Destroy(mPool, newmatch, false);
+                nsTemplateMatch::Destroy(newmatch, false);
                 return rv;
             }
 
@@ -1640,7 +1630,7 @@ nsXULTreeBuilder::OpenSubtreeForQuerySet(nsTreeRows::Subtree* aSubtree,
                 rv = newmatch->RuleMatched(aQuerySet, matchedrule, ruleindex,
                                            nextresult);
                 if (NS_FAILED(rv)) {
-                    nsTemplateMatch::Destroy(mPool, newmatch, false);
+                    nsTemplateMatch::Destroy(newmatch, false);
                     return rv;
                 }
 
@@ -1721,7 +1711,7 @@ nsXULTreeBuilder::RemoveMatchesFor(nsTreeRows::Subtree& subtree)
         if (mMatchMap.Get(id, &existingmatch)) {
             while (existingmatch) {
                 nsTemplateMatch* nextmatch = existingmatch->mNext;
-                nsTemplateMatch::Destroy(mPool, existingmatch, true);
+                nsTemplateMatch::Destroy(existingmatch, true);
                 existingmatch = nextmatch;
             }
 

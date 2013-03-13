@@ -4,6 +4,8 @@
 
 package org.mozilla.gecko;
 
+import org.mozilla.gecko.widget.TwoWayView;
+
 import android.content.Context;
 import android.text.TextUtils;
 import android.util.AttributeSet;
@@ -67,6 +69,11 @@ public class RemoteTabs extends ExpandableListView
     }
 
     @Override
+    public boolean shouldExpand() {
+        return true;
+    }
+
+    @Override
     public boolean onGroupClick(ExpandableListView parent, View view, int position, long id) {
         // By default, the group collapses/expands. Consume the event.
         return true;
@@ -88,10 +95,8 @@ public class RemoteTabs extends ExpandableListView
     @Override
     public void onQueryTabsComplete(List<TabsAccessor.RemoteTab> remoteTabsList) {
         ArrayList<TabsAccessor.RemoteTab> remoteTabs = new ArrayList<TabsAccessor.RemoteTab> (remoteTabsList);
-        if (remoteTabs == null || remoteTabs.size() == 0) {
-            autoHidePanel();
+        if (remoteTabs == null || remoteTabs.size() == 0)
             return;
-        }
         
         ArrayList <HashMap <String, String>> clients = new ArrayList <HashMap <String, String>>();
 

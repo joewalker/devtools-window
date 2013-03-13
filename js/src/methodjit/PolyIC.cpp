@@ -115,16 +115,15 @@ class PICStubCompiler : public BaseCompiler
   protected:
     void spew(const char *event, const char *op) {
 #ifdef JS_METHODJIT_SPEW
-        AutoAssertNoGC nogc;
         JaegerSpew(JSpew_PICs, "%s %s: %s (%s: %d)\n",
-                   type, event, op, f.script()->filename, CurrentLine(cx));
+                   type, event, op, f.script()->filename(), CurrentLine(cx));
 #endif
     }
 };
 
 static bool
 GeneratePrototypeGuards(JSContext *cx, Vector<JSC::MacroAssembler::Jump,8> &mismatches, Assembler &masm,
-                        JSObject *obj, JSObject *holder,
+                        JSObject *obj, HandleObject holder,
                         JSC::MacroAssembler::RegisterID objReg,
                         JSC::MacroAssembler::RegisterID scratchReg)
 {
@@ -142,7 +141,7 @@ GeneratePrototypeGuards(JSContext *cx, Vector<JSC::MacroAssembler::Jump,8> &mism
             return false;
     }
 
-    JSObject *pobj = obj->getTaggedProto().toObjectOrNull();
+    RootedObject pobj(cx, obj->getTaggedProto().toObjectOrNull());
     while (pobj != holder) {
         if (pobj->hasUncacheableProto()) {
             Jump j;
@@ -193,7 +192,7 @@ class SetPropCompiler : public PICStubCompiler
         repatcher.relink(pic.slowPathCall, target);
     }
 
-    LookupStatus patchInline(UnrootedShape shape)
+    LookupStatus patchInline(RawShape shape)
     {
         JS_ASSERT(!pic.inlinePathPatched);
         JaegerSpew(JSpew_PICs, "patch setprop inline at %p\n", pic.fastPathStart.executableAddress());
@@ -253,7 +252,7 @@ class SetPropCompiler : public PICStubCompiler
             repatcher.relink(label.jumpAtOffset(secondGuardOffset), cs);
     }
 
-    LookupStatus generateStub(UnrootedShape initialShape, UnrootedShape shape, bool adding)
+    LookupStatus generateStub(HandleShape initialShape, HandleShape shape, bool adding)
     {
         if (hadGC())
             return Lookup_Uncacheable;
@@ -309,7 +308,8 @@ class SetPropCompiler : public PICStubCompiler
             JS_ASSERT(shape->hasSlot());
             pic.shapeRegHasBaseShape = false;
 
-            if (!GeneratePrototypeGuards(cx, otherGuards, masm, obj, NULL,
+            RootedObject holder(cx, NULL);
+            if (!GeneratePrototypeGuards(cx, otherGuards, masm, obj, holder,
                                          pic.objReg, pic.shapeReg)) {
                 return error();
             }
@@ -594,7 +594,8 @@ class SetPropCompiler : public PICStubCompiler
             return patchInline(shape);
         }
 
-        return generateStub(obj->lastProperty(), shape, false);
+        RootedShape initialShape(cx, obj->lastProperty());
+        return generateStub(initialShape, shape, false);
     }
 };
 
@@ -727,7 +728,6 @@ struct GetPropHelper {
     }
 
     LookupStatus testForGet() {
-        AutoAssertNoGC nogc;
         if (!shape->hasDefaultGetter()) {
             if (shape->hasGetterValue()) {
                 JSObject *getterObj = shape->getterObject();
@@ -768,7 +768,7 @@ namespace js {
 namespace mjit {
 
 inline void
-MarkNotIdempotent(UnrootedScript script, jsbytecode *pc)
+MarkNotIdempotent(RawScript script, jsbytecode *pc)
 {
     if (!script->hasAnalysis())
         return;
@@ -894,8 +894,6 @@ class GetPropCompiler : public PICStubCompiler
 
     LookupStatus generateStringPropertyStub()
     {
-        AssertCanGC();
-
         if (!f.fp()->script()->compileAndGo)
             return disable("String.prototype without compile-and-go global");
 
@@ -1012,7 +1010,7 @@ class GetPropCompiler : public PICStubCompiler
         return Lookup_Cacheable;
     }
 
-    LookupStatus patchInline(JSObject *holder, UnrootedShape shape)
+    LookupStatus patchInline(JSObject *holder, RawShape shape)
     {
         spew("patch", "inline");
         Repatcher repatcher(f.chunk());
@@ -1047,11 +1045,9 @@ class GetPropCompiler : public PICStubCompiler
     }
 
     /* For JSPropertyOp getters. */
-    void generateGetterStub(Assembler &masm, UnrootedShape shape, jsid userid,
+    void generateGetterStub(Assembler &masm, RawShape shape, jsid userid,
                             Label start, Vector<Jump, 8> &shapeMismatches)
     {
-        AutoAssertNoGC nogc;
-
         /*
          * Getter hook needs to be called from the stub. The state is fully
          * synced and no registers are live except the result registers.
@@ -1159,12 +1155,10 @@ class GetPropCompiler : public PICStubCompiler
     }
 
     /* For getters backed by a JSNative. */
-    void generateNativeGetterStub(Assembler &masm, UnrootedShape shape,
+    void generateNativeGetterStub(Assembler &masm, RawShape shape,
                                   Label start, Vector<Jump, 8> &shapeMismatches)
     {
-        AutoAssertNoGC nogc;
-
-        /*
+       /*
          * Getter hook needs to be called from the stub. The state is fully
          * synced and no registers are live except the result registers.
          */
@@ -1252,9 +1246,8 @@ class GetPropCompiler : public PICStubCompiler
         linkerEpilogue(linker, start, shapeMismatches);
     }
 
-    LookupStatus generateStub(JSObject *holder, HandleShape shape)
+    LookupStatus generateStub(HandleObject holder, HandleShape shape)
     {
-        AssertCanGC();
         Vector<Jump, 8> shapeMismatches(cx);
 
         MJITInstrumentation sps(&f.cx->runtime->spsProfiler);
@@ -1678,7 +1671,7 @@ class ScopeNameCompiler : public PICStubCompiler
         JS_ASSERT(obj == getprop.holder);
         JS_ASSERT(getprop.holder != &scopeChain->global());
 
-        UnrootedShape shape = getprop.shape;
+        RawShape shape = getprop.shape;
         if (!shape->hasDefaultGetter())
             return disable("unhandled callobj sprop getter");
 
@@ -2169,10 +2162,9 @@ void
 BaseIC::spew(VMFrame &f, const char *event, const char *message)
 {
 #ifdef JS_METHODJIT_SPEW
-    AutoAssertNoGC nogc;
     JaegerSpew(JSpew_PICs, "%s %s: %s (%s: %d)\n",
                js_CodeName[JSOp(*f.pc())], event, message,
-               f.cx->fp()->script()->filename, CurrentLine(f.cx));
+               f.cx->fp()->script()->filename(), CurrentLine(f.cx));
 #endif
 }
 
@@ -2180,8 +2172,6 @@ BaseIC::spew(VMFrame &f, const char *event, const char *message)
 inline uint32_t
 frameCountersOffset(VMFrame &f)
 {
-    AutoAssertNoGC nogc;
-
     JSContext *cx = f.cx;
 
     uint32_t offset = 0;
@@ -2194,7 +2184,7 @@ frameCountersOffset(VMFrame &f)
     }
 
     jsbytecode *pc;
-    UnrootedScript script = cx->stack.currentScript(&pc);
+    RawScript script = cx->stack.currentScript(&pc);
     offset += pc - script->code;
 
     return offset;
@@ -2370,7 +2360,7 @@ GetElementIC::attachGetProp(VMFrame &f, HandleObject obj, HandleValue v, HandleP
 
     // Guard on the prototype, if applicable.
     MaybeJump protoGuard;
-    JSObject *holder = getprop.holder;
+    RootedObject holder(cx, getprop.holder);
     RegisterID holderReg = objReg;
     if (obj != holder) {
         if (!GeneratePrototypeGuards(cx, otherGuards, masm, obj, holder, objReg, typeReg))
@@ -2416,7 +2406,7 @@ GetElementIC::attachGetProp(VMFrame &f, HandleObject obj, HandleValue v, HandleP
     Latin1CharsZ latin1 = LossyTwoByteCharsToNewLatin1CharsZ(cx, v.toString()->ensureLinear(cx)->range());
     JaegerSpew(JSpew_PICs, "generated %s stub at %p for atom %p (\"%s\") shape %p (%s: %d)\n",
                js_CodeName[JSOp(*f.pc())], cs.executableAddress(), (void*)name, latin1.get(),
-               (void*)holder->lastProperty(), cx->fp()->script()->filename,
+               (void*)holder->lastProperty(), cx->fp()->script()->filename(),
                CurrentLine(cx));
     JS_free(latin1);
 #endif

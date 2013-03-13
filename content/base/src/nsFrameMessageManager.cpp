@@ -651,7 +651,7 @@ nsFrameMessageManager::ReceiveMessage(nsISupports* aTarget,
           continue;
         }
         nsCxPusher pusher;
-        NS_ENSURE_STATE(pusher.Push(ctx, false));
+        pusher.Push(ctx);
 
         JSAutoRequest ar(ctx);
         JSAutoCompartment ac(ctx, object);
@@ -1084,7 +1084,7 @@ nsFrameScriptExecutor::TryCacheLoadAndCompileScript(const nsAString& aURL,
         options.setNoScriptRval(true)
                .setFileAndLine(url.get(), 1)
                .setPrincipals(nsJSPrincipals::get(mPrincipal));
-        js::RootedObject empty(mCx, NULL);
+        JS::RootedObject empty(mCx, NULL);
         JSScript* script = JS::Compile(mCx, empty, options,
                                        dataString.get(), dataString.Length());
 
@@ -1111,7 +1111,8 @@ nsFrameScriptExecutor::TryCacheLoadAndCompileScript(const nsAString& aURL,
 }
 
 bool
-nsFrameScriptExecutor::InitTabChildGlobalInternal(nsISupports* aScope)
+nsFrameScriptExecutor::InitTabChildGlobalInternal(nsISupports* aScope,
+                                                  const nsACString& aID)
 {
   
   nsCOMPtr<nsIJSRuntimeService> runtimeSvc = 
@@ -1133,8 +1134,6 @@ nsFrameScriptExecutor::InitTabChildGlobalInternal(nsISupports* aScope)
   JS_SetVersion(cx, JSVERSION_LATEST);
   JS_SetErrorReporter(cx, ContentScriptErrorReporter);
 
-  xpc_LocalizeContext(cx);
-
   JSAutoRequest ar(cx);
   nsIXPConnect* xpc = nsContentUtils::XPConnect();
   const uint32_t flags = nsIXPConnect::INIT_JS_STANDARD_CLASSES;
@@ -1153,6 +1152,11 @@ nsFrameScriptExecutor::InitTabChildGlobalInternal(nsISupports* aScope)
   NS_ENSURE_SUCCESS(rv, false);
 
   JS_SetGlobalObject(cx, global);
+
+  // Set the location information for the new global, so that tools like
+  // about:memory may use that information.
+  xpc::SetLocationForGlobal(global, aID);
+
   DidCreateCx();
   return true;
 }

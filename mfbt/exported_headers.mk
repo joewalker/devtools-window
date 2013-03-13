@@ -24,6 +24,7 @@ EXPORTS_mozilla += \
   Likely.h \
   LinkedList.h \
   MathAlgorithms.h \
+  MemoryChecking.h \
   MSStdInt.h \
   NullPtr.h \
   Range.h \

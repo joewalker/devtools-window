@@ -76,18 +76,13 @@ public class testBookmark extends PixelTest  {
         blockForGeckoReady();
 
         // Open the bookmark list and check the root folder view
-        ListView bookmarksList = getBookmarksList();
+        ListView bookmarksList = getBookmarksList(ABOUT_HOME_URL, 4);
 
-        // Wait for bookmark to appear in list
-        mSolo.waitForText(ABOUT_HOME_URL);
-
-        mAsserter.ok(bookmarksList != null, "checking that bookmarks list exists", "bookmarks list exists");
+        mAsserter.ok(bookmarksList != null, "checking that bookmarks list exists", "bookmarks list exists and has 4 children (the default bookmarks)");
 
         // No folders should be visible if no desktop bookmarks exist
-        mAsserter.is(bookmarksList.getAdapter().getCount(), 4,
-            "bookmarks list has 4 children (the default bookmarks)");
-
-        for (int i = 0; i < bookmarksList.getChildCount(); i++) {
+        int count = bookmarksList.getAdapter().getCount();
+        for (int i = 0; i < count; i++) {
             Cursor c = (Cursor)bookmarksList.getItemAtPosition(i);
             String url = c.getString(c.getColumnIndexOrThrow("url"));
             mAsserter.ok(Arrays.binarySearch(defaultBookmarks, url) > -1,
@@ -95,7 +90,7 @@ public class testBookmark extends PixelTest  {
         }
 
         insertOneBookmark();
-        mSolo.waitForText(BOOKMARK_TITLE);
+        waitForText(BOOKMARK_TITLE);
 
         mAsserter.is(bookmarksList.getAdapter().getCount(), 5,
             "bookmarks list has 5 children (the default bookmarks and the new one)");
@@ -103,6 +98,7 @@ public class testBookmark extends PixelTest  {
         // Click on the bookmark we created and wait for the bookmarked page to load
         Actions.RepeatedEventExpecter paintExpecter = mActions.expectPaint();
         View child = bookmarksList.getChildAt(1);
+        mAsserter.ok(child != null, "list item can be retrieved", child != null ? child.toString() : "null!");
         mSolo.clickOnView(child);
         paintExpecter.blockUntilClear(PAINT_CLEAR_DELAY);
 
@@ -112,6 +108,7 @@ public class testBookmark extends PixelTest  {
 
     private boolean waitForBookmarked(final boolean isBookmarked) {
         waitForTest(new BooleanTest() {
+            @Override
             public boolean test() {
                 try {
                    return isBookmarked == (Boolean)mIsBookmarked.invoke(null, getActivity().getContentResolver(), BOOKMARK_URL);
@@ -158,7 +155,7 @@ public class testBookmark extends PixelTest  {
     private void toggleBookmark() {
         getInstrumentation().waitForIdleSync();
         mActions.sendSpecialKey(Actions.SpecialKey.MENU);
-        mSolo.waitForText("Bookmark");
+        waitForText("Bookmark");
         mSolo.clickOnText("Bookmark");
     }
 

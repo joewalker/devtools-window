@@ -47,6 +47,7 @@ extern uint8_t gLayerManagerLayerBuilder;
 namespace mozilla {
 
 class FrameLayerBuilder;
+class WebGLContext;
 
 namespace gl {
 class GLContext;
@@ -843,6 +844,16 @@ public:
    */
   void SetFixedPositionAnchor(const gfxPoint& aAnchor) { mAnchor = aAnchor; }
 
+  /**
+   * CONSTRUCTION PHASE ONLY
+   * If a layer represents a fixed position element or elements that are on
+   * a document that has had fixed position element margins set on it, these
+   * will be mirrored here. This allows for asynchronous animation of the
+   * margins by reconciling the difference between this value and a value that
+   * is updated more frequently.
+   */
+  void SetFixedPositionMargins(const gfx::Margin& aMargins) { mMargins = aMargins; }
+
   // These getters can be used anytime.
   float GetOpacity() { return mOpacity; }
   const nsIntRect* GetClipRect() { return mUseClipRect ? &mClipRect : nullptr; }
@@ -859,8 +870,11 @@ public:
   float GetPostYScale() { return mPostYScale; }
   bool GetIsFixedPosition() { return mIsFixedPosition; }
   gfxPoint GetFixedPositionAnchor() { return mAnchor; }
+  const gfx::Margin& GetFixedPositionMargins() { return mMargins; }
   Layer* GetMaskLayer() { return mMaskLayer; }
 
+  // Note that all lengths in animation data are either in CSS pixels or app
+  // units and must be converted to device pixels by the compositor.
   AnimationArray& GetAnimations() { return mAnimations; }
   InfallibleTArray<AnimData>& GetAnimationData() { return mAnimationData; }
 
@@ -1205,6 +1219,7 @@ protected:
   bool mUseTileSourceRect;
   bool mIsFixedPosition;
   gfxPoint mAnchor;
+  gfx::Margin mMargins;
   DebugOnly<uint32_t> mDebugColorIndex;
   // If this layer is used for OMTA, then this counter is used to ensure we
   // stay in sync with the animation manager
@@ -1538,22 +1553,25 @@ class THEBES_API CanvasLayer : public Layer {
 public:
   struct Data {
     Data()
-      : mSurface(nullptr), mGLContext(nullptr)
-      , mDrawTarget(nullptr), mGLBufferIsPremultiplied(false)
+      : mSurface(nullptr)
+      , mDrawTarget(nullptr)
+      , mGLContext(nullptr)
+      , mSize(0,0)
+      , mIsGLAlphaPremult(false)
     { }
 
-    /* One of these two must be specified, but never both */
+    // One of these two must be specified for Canvas2D, but never both
     gfxASurface* mSurface;  // a gfx Surface for the canvas contents
-    mozilla::gl::GLContext* mGLContext; // a GL PBuffer Context
     mozilla::gfx::DrawTarget *mDrawTarget; // a DrawTarget for the canvas contents
 
-    /* The size of the canvas content */
+    // Or this, for GL.
+    mozilla::gl::GLContext* mGLContext;
+
+    // The size of the canvas content
     nsIntSize mSize;
 
-    /* Whether the GLContext contains premultiplied alpha
-     * values in the framebuffer or not.  Defaults to FALSE.
-     */
-    bool mGLBufferIsPremultiplied;
+    // Whether mGLContext contains data that is alpha-premultiplied.
+    bool mIsGLAlphaPremult;
   };
 
   /**
@@ -1593,13 +1611,32 @@ public:
   }
 
   /**
+   * Register a callback to be called at the start of each transaction.
+   */
+  typedef void PreTransactionCallback(void* closureData);
+  void SetPreTransactionCallback(PreTransactionCallback* callback, void* closureData)
+  {
+    mPreTransCallback = callback;
+    mPreTransCallbackData = closureData;
+  }
+
+protected:
+  void FirePreTransactionCallback()
+  {
+    if (mPreTransCallback) {
+      mPreTransCallback(mPreTransCallbackData);
+    }
+  }
+
+public:
+  /**
    * Register a callback to be called at the end of each transaction.
    */
   typedef void (* DidTransactionCallback)(void* aClosureData);
   void SetDidTransactionCallback(DidTransactionCallback aCallback, void* aClosureData)
   {
-    mCallback = aCallback;
-    mCallbackData = aClosureData;
+    mPostTransCallback = aCallback;
+    mPostTransCallbackData = aClosureData;
   }
 
   /**
@@ -1626,16 +1663,21 @@ public:
 
 protected:
   CanvasLayer(LayerManager* aManager, void* aImplData)
-    : Layer(aManager, aImplData),
-      mCallback(nullptr), mCallbackData(nullptr), mFilter(gfxPattern::FILTER_GOOD),
-      mDirty(false) {}
+    : Layer(aManager, aImplData)
+    , mPreTransCallback(nullptr)
+    , mPreTransCallbackData(nullptr)
+    , mPostTransCallback(nullptr)
+    , mPostTransCallbackData(nullptr)
+    , mFilter(gfxPattern::FILTER_GOOD)
+    , mDirty(false)
+  {}
 
   virtual nsACString& PrintInfo(nsACString& aTo, const char* aPrefix);
 
   void FireDidTransactionCallback()
   {
-    if (mCallback) {
-      mCallback(mCallbackData);
+    if (mPostTransCallback) {
+      mPostTransCallback(mPostTransCallbackData);
     }
   }
 
@@ -1643,8 +1685,10 @@ protected:
    * 0, 0, canvaswidth, canvasheight
    */
   nsIntRect mBounds;
-  DidTransactionCallback mCallback;
-  void* mCallbackData;
+  PreTransactionCallback* mPreTransCallback;
+  void* mPreTransCallbackData;
+  DidTransactionCallback mPostTransCallback;
+  void* mPostTransCallbackData;
   gfxPattern::GraphicsFilter mFilter;
 
 private:

@@ -11,7 +11,6 @@ include $(DEPTH)/config/autoconf.mk
 
 MODULE           = dom
 LIBRARY_NAME     = domcamera_s
-XPIDL_MODULE     = dom_camera
 LIBXUL_LIBRARY   = 1
 FORCE_STATIC_LIB = 1
 FAIL_ON_WARNINGS := 1
@@ -33,6 +32,7 @@ CPPSRCS += \
   GonkCameraControl.cpp \
   GonkCameraHwMgr.cpp \
   GonkNativeWindow.cpp \
+  GonkNativeWindowClient.cpp \
   GonkRecorder.cpp \
   GonkCameraSource.cpp \
   AudioParameter.cpp \
@@ -43,6 +43,7 @@ CPPSRCS += \
   FallbackCameraManager.cpp \
   FallbackCameraControl.cpp \
   GonkNativeWindow.cpp \
+  GonkNativeWindowClient.cpp \
   $(NULL)
 else
 CPPSRCS += \
@@ -51,23 +52,13 @@ CPPSRCS += \
   $(NULL)
 endif
 
-XPIDLSRCS = \
-  nsIDOMNavigatorCamera.idl \
-  nsIDOMCameraManager.idl \
-  $(NULL)
-
 EXPORTS = \
   CameraCommon.h \
   DOMCameraManager.h \
   GonkNativeWindow.h \
+  GonkNativeWindowClient.h \
   $(NULL)
 
 include $(topsrcdir)/config/rules.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk
 
-XPIDL_FLAGS += \
-  -I$(topsrcdir)/dom/base \
-  -I$(topsrcdir)/dom/interfaces/base \
-  -I$(topsrcdir)/dom/interfaces/events \
-  -I$(topsrcdir)/dom/media \
-  $(NULL)

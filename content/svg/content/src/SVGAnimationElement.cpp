@@ -8,7 +8,6 @@
 #include "nsSMILTimeContainer.h"
 #include "nsSMILAnimationController.h"
 #include "nsSMILAnimationFunction.h"
-#include "nsISMILAttr.h"
 #include "nsContentUtils.h"
 
 namespace mozilla {
@@ -22,7 +21,7 @@ NS_IMPL_RELEASE_INHERITED(SVGAnimationElement, SVGAnimationElementBase)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SVGAnimationElement)
   NS_INTERFACE_MAP_ENTRY(nsISMILAnimationElement)
-  NS_INTERFACE_MAP_ENTRY(DOMSVGTests)
+  NS_INTERFACE_MAP_ENTRY(mozilla::dom::SVGTests)
 NS_INTERFACE_MAP_END_INHERITING(SVGAnimationElementBase)
 
 // Cycle collection magic -- based on nsSVGUseElement
@@ -89,7 +88,7 @@ SVGAnimationElement::AsElement()
 bool
 SVGAnimationElement::PassesConditionalProcessingTests()
 {
-  return DOMSVGTests::PassesConditionalProcessingTests();
+  return SVGTests::PassesConditionalProcessingTests();
 }
 
 const nsAttrValue*

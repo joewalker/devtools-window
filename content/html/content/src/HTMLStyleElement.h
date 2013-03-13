@@ -92,10 +92,7 @@ public:
     SetHTMLBoolAttr(nsGkAtoms::scoped, aScoped, aError);
   }
 
-  virtual JSObject* WrapNode(JSContext *aCx, JSObject *aScope,
-                             bool *aTriedToWrap);
-
-  virtual nsXPCClassInfo* GetClassInfo();
+  virtual JSObject* WrapNode(JSContext *aCx, JSObject *aScope) MOZ_OVERRIDE;
 
   virtual nsIDOMNode* AsDOMNode() { return this; }
 protected:

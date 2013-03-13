@@ -51,6 +51,9 @@ EXPORTS_mozilla/dom = \
   DOMImplementation.h \
   EventSource.h \
   Link.h \
+  NodeIterator.h \
+  Text.h \
+  TreeWalker.h \
   $(NULL)
 
 CPPSRCS		= \
@@ -106,7 +109,7 @@ CPPSRCS		= \
 		nsNoDataProtocolContentPolicy.cpp \
 		nsNodeInfo.cpp \
 		nsNodeInfoManager.cpp \
-		nsNodeIterator.cpp \
+		NodeIterator.cpp \
 		nsNodeUtils.cpp \
 		nsObjectLoadingContent.cpp \
 		nsPlainTextSerializer.cpp \
@@ -120,11 +123,12 @@ CPPSRCS		= \
 		nsStyledElement.cpp \
 		nsStyleLinkElement.cpp \
 		nsSyncLoadService.cpp \
+		Text.cpp \
 		nsTextFragment.cpp \
 		nsTextNode.cpp \
 		nsTraversal.cpp \
 		nsTreeSanitizer.cpp \
-		nsTreeWalker.cpp \
+		TreeWalker.cpp \
                 nsViewportInfo.cpp \
 		WebSocket.cpp \
 		nsXHTMLContentSerializer.cpp \
@@ -163,8 +167,6 @@ GQI_SRCS = contentbase.gqi
 FORCE_STATIC_LIB = 1
 
 EXTRA_COMPONENTS = \
-		$(srcdir)/nsBadCertHandler.js \
-		nsBadCertHandler.manifest \
 		contentSecurityPolicy.manifest \
 		contentAreaDropListener.js \
 		contentAreaDropListener.manifest \

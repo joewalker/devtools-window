@@ -30,6 +30,7 @@
 #include "nsIGfxInfo.h"
 #include "npapi.h"
 #include "base/thread.h"
+#include "prdtoa.h"
 #include "prenv.h"
 #include "mozilla/Attributes.h"
 #include "nsContentUtils.h"
@@ -383,14 +384,14 @@ double nsIWidget::GetDefaultScale()
   // The number of device pixels per CSS pixel. A value <= 0 means choose
   // automatically based on the DPI. A positive value is used as-is. This effectively
   // controls the size of a CSS "px".
-  float devPixelsPerCSSPixel = -1.0;
+  double devPixelsPerCSSPixel = -1.0;
 
   nsAdoptingCString prefString = Preferences::GetCString("layout.css.devPixelsPerPx");
   if (!prefString.IsEmpty()) {
-    devPixelsPerCSSPixel = static_cast<float>(atof(prefString));
+    devPixelsPerCSSPixel = PR_strtod(prefString, nullptr);
   }
 
-  if (devPixelsPerCSSPixel <= 0) {
+  if (devPixelsPerCSSPixel <= 0.0) {
     devPixelsPerCSSPixel = GetDefaultScaleInternal();
   }
 
@@ -900,7 +901,7 @@ void nsBaseWidget::CreateCompositor()
   }
 }
 
-bool nsBaseWidget::UseOffMainThreadCompositing()
+bool nsBaseWidget::ShouldUseOffMainThreadCompositing()
 {
   bool isSmallPopup = ((mWindowType == eWindowType_popup) &&
                       (mPopupType != ePopupTypePanel));
@@ -917,7 +918,7 @@ LayerManager* nsBaseWidget::GetLayerManager(PLayersChild* aShadowManager,
     mUseLayersAcceleration = ComputeShouldAccelerate(mUseLayersAcceleration);
 
     // Try to use an async compositor first, if possible
-    if (UseOffMainThreadCompositing()) {
+    if (ShouldUseOffMainThreadCompositing()) {
       // e10s uses the parameter to pass in the shadow manager from the TabChild
       // so we don't expect to see it there since this doesn't support e10s.
       NS_ASSERTION(aShadowManager == nullptr, "Async Compositor not supported with e10s");

@@ -10,8 +10,5 @@ VPATH     = @srcdir@
 include $(DEPTH)/config/autoconf.mk
 
 MODULE        = exthelper
-XPIDL_MODULE  = exthelper
-
-XPIDLSRCS = extIApplication.idl
 
 include $(topsrcdir)/config/rules.mk

@@ -317,10 +317,11 @@ nsresult
 mozInlineSpellWordUtil::MakeRange(NodeOffset aBegin, NodeOffset aEnd,
                                   nsRange** aRange)
 {
+  NS_ENSURE_ARG_POINTER(aBegin.mNode);
   if (!mDOMDocument)
     return NS_ERROR_NOT_INITIALIZED;
 
-  nsRefPtr<nsRange> range = new nsRange();
+  nsRefPtr<nsRange> range = new nsRange(aBegin.mNode);
   nsresult rv = range->Set(aBegin.mNode, aBegin.mOffset,
                            aEnd.mNode, aEnd.mOffset);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -449,7 +450,7 @@ IsBreakElement(nsINode* aNode)
 
   // Anything that's not an inline element is a break element.
   // XXXbz should replaced inlines be break elements, though?
-  return element->GetPrimaryFrame()->GetStyleDisplay()->mDisplay !=
+  return element->GetPrimaryFrame()->StyleDisplay()->mDisplay !=
     NS_STYLE_DISPLAY_INLINE;
 }
 

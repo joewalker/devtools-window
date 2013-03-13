@@ -112,6 +112,7 @@ namespace layers {
 } // namespace layers
 
 namespace dom {
+class DocumentFragment;
 class Element;
 } // namespace dom
 
@@ -167,6 +168,11 @@ public:
   static bool     IsCallerXBL();
 
   static bool     IsImageSrcSetDisabled();
+
+  static bool LookupBindingMember(JSContext* aCx, nsIContent *aContent,
+                                  JS::HandleId aId, JSPropertyDescriptor* aDesc);
+  static bool IsBindingField(JSContext* aCx, nsIContent* aContent,
+                             JS::HandleId aId);
 
   /**
    * Returns the parent node of aChild crossing document boundaries.
@@ -361,6 +367,7 @@ public:
 
   // Check if the (JS) caller can access aNode.
   static bool CanCallerAccess(nsIDOMNode *aNode);
+  static bool CanCallerAccess(nsINode* aNode);
 
   // Check if the (JS) caller can access aWindow.
   // aWindow can be either outer or inner window.
@@ -1079,6 +1086,10 @@ public:
                                            const nsAString& aFragment,
                                            bool aPreventScriptExecution,
                                            nsIDOMDocumentFragment** aReturn);
+  static already_AddRefed<mozilla::dom::DocumentFragment>
+  CreateContextualFragment(nsINode* aContextNode, const nsAString& aFragment,
+                           bool aPreventScriptExecution,
+                           mozilla::ErrorResult& aRv);
 
   /**
    * Invoke the fragment parsing algorithm (innerHTML) using the HTML parser.
@@ -1806,6 +1817,32 @@ public:
   static bool IsRequestFullScreenAllowed();
 
   /**
+   * Returns true if the DOM fullscreen API is restricted to content only.
+   * This mirrors the pref "full-screen-api.content-only". If this is true,
+   * fullscreen requests in chrome are denied, and fullscreen requests in
+   * content stop percolating upwards before they reach chrome documents.
+   * That is, when an element in content requests fullscreen, only its
+   * containing frames that are in content are also made fullscreen, not
+   * the containing frame in the chrome document.
+   *
+   * Note if the fullscreen API is running in content only mode then multiple
+   * branches of a doctree can be fullscreen at the same time, but no fullscreen
+   * document will have a common ancestor with another fullscreen document
+   * that is also fullscreen (since the only common ancestor they can have
+   * is the chrome document, and that can't be fullscreen). i.e. multiple
+   * child documents of the chrome document can be fullscreen, but the chrome
+   * document won't be fullscreen.
+   *
+   * Making the fullscreen API content only is useful on platforms where we
+   * still want chrome to be visible or accessible while content is
+   * fullscreen, like on Windows 8 in Metro mode.
+   *
+   * Note that if the fullscreen API is content only, chrome can still go
+   * fullscreen by setting the "fullScreen" attribute on its XUL window.
+   */
+  static bool IsFullscreenApiContentOnly();
+
+  /**
    * Returns true if the idle observers API is enabled.
    */
   static bool IsIdleObserverAPIEnabled() { return sIsIdleObserverAPIEnabled; }
@@ -1827,10 +1864,12 @@ public:
   static bool HasPluginWithUncontrolledEventDispatch(nsIContent* aContent);
 
   /**
-   * Returns the root document in a document hierarchy. Normally this will
-   * be the chrome document.
+   * Returns the document that is the closest ancestor to aDoc that is
+   * fullscreen. If aDoc is fullscreen this returns aDoc. If aDoc is not
+   * fullscreen and none of aDoc's ancestors are fullscreen this returns
+   * nullptr.
    */
-  static nsIDocument* GetRootDocument(nsIDocument* aDoc);
+  static nsIDocument* GetFullscreenAncestor(nsIDocument* aDoc);
 
   /**
    * Returns the time limit on handling user input before
@@ -2156,6 +2195,7 @@ private:
   static bool sAllowXULXBL_for_file;
   static bool sIsFullScreenApiEnabled;
   static bool sTrustedFullScreenOnly;
+  static bool sFullscreenApiIsContentOnly;
   static uint32_t sHandlingInputTimeout;
   static bool sIsIdleObserverAPIEnabled;
 
@@ -2200,9 +2240,9 @@ public:
   bool RePush(nsIDOMEventTarget *aCurrentTarget);
   // If a null JSContext is passed to Push(), that will cause no
   // push to happen and false to be returned.
-  bool Push(JSContext *cx, bool aRequiresScriptContext = true);
+  void Push(JSContext *cx);
   // Explicitly push a null JSContext on the the stack
-  bool PushNull();
+  void PushNull();
 
   // Pop() will be a no-op if Push() or PushNull() fail
   void Pop();
@@ -2210,7 +2250,7 @@ public:
   nsIScriptContext* GetCurrentScriptContext() { return mScx; }
 private:
   // Combined code for PushNull() and Push(JSContext*)
-  bool DoPush(JSContext* cx);
+  void DoPush(JSContext* cx);
 
   nsCOMPtr<nsIScriptContext> mScx;
   bool mScriptIsRunning;
@@ -2297,6 +2337,33 @@ public:
   SafeAutoJSContext(MOZ_GUARD_OBJECT_NOTIFIER_ONLY_PARAM);
 };
 
+/**
+ * Use AutoPushJSContext when you want to use a specific JSContext that may or
+ * may not be already on the stack. This differs from nsCxPusher in that it only
+ * pushes in the case that the given cx is not the active cx on the JSContext
+ * stack, which avoids an expensive JS_SaveFrameChain in the common case.
+ *
+ * Most consumers of this should probably just use AutoJSContext. But the goal
+ * here is to preserve the existing behavior while ensure proper cx-stack
+ * semantics in edge cases where the context being used doesn't match the active
+ * context.
+ *
+ * NB: This will not push a null cx even if aCx is null. Make sure you know what
+ * you're doing.
+ */
+class NS_STACK_CLASS AutoPushJSContext {
+  nsCxPusher mPusher;
+  JSContext* mCx;
+
+public:
+    AutoPushJSContext(JSContext* aCx) : mCx(aCx) {
+      if (mCx && mCx != nsContentUtils::GetCurrentJSContext()) {
+        mPusher.Push(mCx);
+      }
+    }
+    operator JSContext*() { return mCx; }
+};
+
 } // namespace mozilla
 
 #define NS_INTERFACE_MAP_ENTRY_TEAROFF(_interface, _allocator)                \
@@ -2320,11 +2387,6 @@ public:
 
 #define NS_ENSURE_FINITE2(f1, f2, rv)                                         \
   if (!NS_finite((f1)+(f2))) {                                                \
-    return (rv);                                                              \
-  }
-
-#define NS_ENSURE_FINITE3(f1, f2, f3, rv)                                     \
-  if (!NS_finite((f1)+(f2)+(f3))) {                                           \
     return (rv);                                                              \
   }
 

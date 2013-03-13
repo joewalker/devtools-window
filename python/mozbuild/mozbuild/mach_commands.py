@@ -35,6 +35,7 @@ class Build(MachCommandBase):
         # building code in bug 780329 lands.
         from mozbuild.compilation.warnings import WarningsCollector
         from mozbuild.compilation.warnings import WarningsDatabase
+        from mozbuild.util import resolve_target_to_make
 
         warnings_path = self._get_state_filename('warnings.json')
         warnings_database = WarningsDatabase()
@@ -60,50 +61,6 @@ class Build(MachCommandBase):
 
             self.log(logging.INFO, 'build_output', {'line': line}, '{line}')
 
-        def resolve_target_to_make(target):
-            if os.path.isabs(target):
-                print('Absolute paths for make targets are not allowed.')
-                return (None, None)
-
-            target = target.replace(os.sep, '/')
-
-            abs_target = os.path.join(self.topobjdir, target)
-
-            # For directories, run |make -C dir|. If the directory does not
-            # contain a Makefile, check parents until we find one. At worst,
-            # this will terminate at the root.
-            if os.path.isdir(abs_target):
-                current = abs_target
-
-                while True:
-                    make_path = os.path.join(current, 'Makefile')
-                    if os.path.exists(make_path):
-                        return (current[len(self.topobjdir) + 1:], None)
-
-                    current = os.path.dirname(current)
-
-            # If it's not in a directory, this is probably a top-level make
-            # target. Treat it as such.
-            if '/' not in target:
-                return (None, target)
-
-            # We have a relative path within the tree. We look for a Makefile
-            # as far into the path as possible. Then, we compute the make
-            # target as relative to that directory.
-            reldir = os.path.dirname(target)
-            target = os.path.basename(target)
-
-            while True:
-                make_path = os.path.join(self.topobjdir, reldir, 'Makefile')
-
-                if os.path.exists(make_path):
-                    return (reldir, target)
-
-                target = os.path.join(os.path.basename(reldir), target)
-                reldir = os.path.dirname(reldir)
-
-        # End of resolve_target_to_make.
-
         if what:
             top_make = os.path.join(self.topobjdir, 'Makefile')
             if not os.path.exists(top_make):
@@ -112,7 +69,8 @@ class Build(MachCommandBase):
                 return 1
 
             for target in what:
-                make_dir, make_target = resolve_target_to_make(target)
+                make_dir, make_target = resolve_target_to_make(self.topobjdir,
+                    target)
 
                 if make_dir is None and make_target is None:
                     return 1
@@ -141,8 +99,17 @@ class Build(MachCommandBase):
 
     @Command('clobber', help='Clobber the tree (delete the object directory).')
     def clobber(self):
-        self.remove_objdir()
-        return 0
+        try:
+            self.remove_objdir()
+            return 0
+        except WindowsError as e:
+            if e.winerror in (5, 32):
+                self.log(logging.ERROR, 'file_access_error', {'error': e},
+                    "Could not clobber because a file was in use. If the "
+                    "application is running, try closing it. {error}")
+                return 1
+            else:
+                raise
 
 
 @CommandProvider
@@ -266,3 +233,56 @@ class Package(MachCommandBase):
     @Command('package', help='Package the built product for distribution as an APK, DMG, etc.')
     def package(self):
         return self._run_make(directory=".", target='package', ensure_exit_code=False)
+
+
+@CommandProvider
+class Makefiles(MachCommandBase):
+    @Command('empty-makefiles', help='Find empty Makefile.in in the tree.')
+    def empty(self):
+        import pymake.parser
+        import pymake.parserdata
+
+        IGNORE_VARIABLES = {
+            'DEPTH': ('@DEPTH@',),
+            'topsrcdir': ('@top_srcdir@',),
+            'srcdir': ('@srcdir@',),
+            'relativesrcdir': ('@relativesrcdir@',),
+            'VPATH': ('@srcdir@',),
+        }
+
+        IGNORE_INCLUDES = [
+            'include $(DEPTH)/config/autoconf.mk',
+            'include $(topsrcdir)/config/config.mk',
+            'include $(topsrcdir)/config/rules.mk',
+        ]
+
+        def is_statement_relevant(s):
+            if isinstance(s, pymake.parserdata.SetVariable):
+                exp = s.vnameexp
+                if not exp.is_static_string:
+                    return True
+
+                if exp.s not in IGNORE_VARIABLES:
+                    return True
+
+                return s.value not in IGNORE_VARIABLES[exp.s]
+
+            if isinstance(s, pymake.parserdata.Include):
+                if s.to_source() in IGNORE_INCLUDES:
+                    return False
+
+            return True
+
+        for path in self._makefile_ins():
+            statements = [s for s in pymake.parser.parsefile(path)
+                if is_statement_relevant(s)]
+
+            if not statements:
+                print(os.path.relpath(path, self.topsrcdir))
+
+    def _makefile_ins(self):
+        for root, dirs, files in os.walk(self.topsrcdir):
+            for f in files:
+                if f == 'Makefile.in':
+                    yield os.path.join(root, f)
+

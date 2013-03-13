@@ -11,7 +11,6 @@ include $(DEPTH)/config/autoconf.mk
 
 MODULE          = widget
 LIBRARY_NAME    = widget_android
-XPIDL_MODULE	= widget_android
 EXPORT_LIBRARY  = 1
 IS_COMPONENT    = 1
 MODULE_NAME     = nsWidgetAndroidModule
@@ -22,6 +21,9 @@ FAIL_ON_WARNINGS := 1
 ifdef MOZ_ONLY_TOUCH_EVENTS
 DEFINES += -DMOZ_ONLY_TOUCH_EVENTS
 endif
+ifdef MOZ_WEBSMS_BACKEND
+DEFINES += -DMOZ_WEBSMS_BACKEND
+endif
 
 CPPSRCS	= \
 	GfxInfo.cpp \
@@ -30,7 +32,6 @@ CPPSRCS	= \
 	AndroidJavaWrappers.cpp \
 	AndroidBridge.cpp \
 	AndroidDirectTexture.cpp \
-	AndroidLayerViewWrapper.cpp \
 	AndroidGraphicBuffer.cpp \
 	AndroidJNI.cpp \
 	nsWindow.cpp \
@@ -53,13 +54,9 @@ NOT_THERE_YET_CPPSRCS = \
 	nsSound.cpp \
 	$(NULL)
 
-XPIDLSRCS	= \
-	nsIAndroidBridge.idl \
-	$(NULL)
-
 SHARED_LIBRARY_LIBS = ../xpwidgets/libxpwidgets_s.a
 
-EXPORTS = AndroidBridge.h AndroidJavaWrappers.h AndroidLayerViewWrapper.h
+EXPORTS = AndroidBridge.h AndroidJavaWrappers.h
 
 include $(topsrcdir)/config/rules.mk
 

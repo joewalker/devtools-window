@@ -95,7 +95,7 @@ js::ScriptDebugPrologue(JSContext *cx, AbstractFramePtr frame)
     }
 
     RootedValue rval(cx);
-    JSTrapStatus status = Debugger::onEnterFrame(cx, rval.address());
+    JSTrapStatus status = Debugger::onEnterFrame(cx, &rval);
     switch (status) {
       case JSTRAP_CONTINUE:
         break;
@@ -142,12 +142,12 @@ js::DebugExceptionUnwind(JSContext *cx, AbstractFramePtr frame, jsbytecode *pc)
         return JSTRAP_CONTINUE;
 
     /* Call debugger throw hook if set. */
-    Value rval;
+    RootedValue rval(cx);
     JSTrapStatus status = Debugger::onExceptionUnwind(cx, &rval);
     if (status == JSTRAP_CONTINUE) {
         if (JSThrowHook handler = cx->runtime->debugHooks.throwHook) {
             RootedScript script(cx, frame.script());
-            status = handler(cx, script, pc, &rval, cx->runtime->debugHooks.throwHookData);
+            status = handler(cx, script, pc, rval.address(), cx->runtime->debugHooks.throwHookData);
         }
     }
 
@@ -512,17 +512,15 @@ JS_GetFunctionScript(JSContext *cx, JSFunction *fun)
 {
     if (fun->isNative())
         return NULL;
-    UnrootedScript script;
     if (fun->isInterpretedLazy()) {
         RootedFunction rootedFun(cx, fun);
         AutoCompartment funCompartment(cx, rootedFun);
-        script = rootedFun->getOrCreateScript(cx);
+        RawScript script = rootedFun->getOrCreateScript(cx);
         if (!script)
             MOZ_CRASH();
-    } else {
-        script = fun->nonLazyScript();
+        return script;
     }
-    return script;
+    return fun->nonLazyScript();
 }
 
 JS_PUBLIC_API(JSNative)
@@ -570,7 +568,7 @@ JS_GetDebugClassName(JSObject *obj)
 JS_PUBLIC_API(const char *)
 JS_GetScriptFilename(JSContext *cx, JSScript *script)
 {
-    return script->filename;
+    return script->filename();
 }
 
 JS_PUBLIC_API(const jschar *)
@@ -730,8 +728,7 @@ JS_GetPropertyDescArray(JSContext *cx, JSObject *obj_, JSPropertyDescArray *pda)
         return false;
 
     {
-        Shape::Range r(obj->lastProperty()->all());
-        Shape::Range::AutoRooter rooter(cx, &r);
+        Shape::Range<CanGC> r(cx, obj->lastProperty());
         RootedShape shape(cx);
         for (; !r.empty(); r.popFront()) {
             pd[i].id = JSVAL_NULL;
@@ -849,7 +846,6 @@ GetAtomTotalSize(JSContext *cx, JSAtom *atom)
 JS_PUBLIC_API(size_t)
 JS_GetFunctionTotalSize(JSContext *cx, JSFunction *fun)
 {
-    AutoAssertNoGC nogc;
     size_t nbytes = sizeof *fun;
     nbytes += JS_GetObjectTotalSize(cx, fun);
     if (fun->isInterpreted())
@@ -873,8 +869,8 @@ JS_GetScriptTotalSize(JSContext *cx, JSScript *script)
     for (size_t i = 0; i < script->natoms; i++)
         nbytes += GetAtomTotalSize(cx, script->atoms[i]);
 
-    if (script->filename)
-        nbytes += strlen(script->filename) + 1;
+    if (script->filename())
+        nbytes += strlen(script->filename()) + 1;
 
     notes = script->notes();
     for (sn = notes; !SN_IS_TERMINATOR(sn); sn = SN_NEXT(sn))
@@ -940,10 +936,10 @@ JS_DumpBytecode(JSContext *cx, JSScript *scriptArg)
     if (!sprinter.init())
         return;
 
-    fprintf(stdout, "--- SCRIPT %s:%d ---\n", script->filename, script->lineno);
+    fprintf(stdout, "--- SCRIPT %s:%d ---\n", script->filename(), script->lineno);
     js_Disassemble(cx, script, true, &sprinter);
     fputs(sprinter.string(), stdout);
-    fprintf(stdout, "--- END SCRIPT %s:%d ---\n", script->filename, script->lineno);
+    fprintf(stdout, "--- END SCRIPT %s:%d ---\n", script->filename(), script->lineno);
 #endif
 }
 
@@ -958,10 +954,10 @@ JS_DumpPCCounts(JSContext *cx, JSScript *scriptArg)
     if (!sprinter.init())
         return;
 
-    fprintf(stdout, "--- SCRIPT %s:%d ---\n", script->filename, script->lineno);
+    fprintf(stdout, "--- SCRIPT %s:%d ---\n", script->filename(), script->lineno);
     js_DumpPCCounts(cx, script, &sprinter);
     fputs(sprinter.string(), stdout);
-    fprintf(stdout, "--- END SCRIPT %s:%d ---\n", script->filename, script->lineno);
+    fprintf(stdout, "--- END SCRIPT %s:%d ---\n", script->filename(), script->lineno);
 #endif
 }
 
@@ -1017,7 +1013,6 @@ JS_UnwrapObjectAndInnerize(JSObject *obj)
 JS_FRIEND_API(JSBool)
 js_CallContextDebugHandler(JSContext *cx)
 {
-    AssertCanGC();
     ScriptFrameIter iter(cx);
     JS_ASSERT(!iter.done());
 
@@ -1040,10 +1035,11 @@ js_CallContextDebugHandler(JSContext *cx)
 JS_PUBLIC_API(StackDescription *)
 JS::DescribeStack(JSContext *cx, unsigned maxFrames)
 {
-    AutoAssertNoGC nogc;
     Vector<FrameDescription> frames(cx);
 
     for (ScriptFrameIter i(cx); !i.done(); ++i) {
+        if (i.script()->selfHosted)
+            continue;
         FrameDescription desc;
         desc.script = i.script();
         desc.lineno = PCToLineNumber(i.script(), i.pc());
@@ -1104,7 +1100,7 @@ FormatValue(JSContext *cx, const Value &v, JSAutoByteString &bytes)
     JSString *str = ToString<CanGC>(cx, v);
     if (!str)
         return NULL;
-    const char *buf = bytes.encode(cx, str);
+    const char *buf = bytes.encodeLatin1(cx, str);
     if (!buf)
         return NULL;
     const char *found = strstr(buf, "function ");
@@ -1117,15 +1113,13 @@ static char *
 FormatFrame(JSContext *cx, const ScriptFrameIter &iter, char *buf, int num,
             JSBool showArgs, JSBool showLocals, JSBool showThisProps)
 {
-    AssertCanGC();
-
     RootedScript script(cx, iter.script());
     jsbytecode* pc = iter.pc();
 
     RootedObject scopeChain(cx, iter.scopeChain());
     JSAutoCompartment ac(cx, scopeChain);
 
-    const char *filename = script->filename;
+    const char *filename = script->filename();
     unsigned lineno = PCToLineNumber(script, pc);
     RootedFunction fun(cx, iter.maybeCallee());
     RootedString funname(cx);
@@ -1153,7 +1147,7 @@ FormatFrame(JSContext *cx, const ScriptFrameIter &iter, char *buf, int num,
     // print the frame number and function name
     if (funname) {
         JSAutoByteString funbytes;
-        buf = JS_sprintf_append(buf, "%d %s(", num, funbytes.encode(cx, funname));
+        buf = JS_sprintf_append(buf, "%d %s(", num, funbytes.encodeLatin1(cx, funname));
     } else if (fun) {
         buf = JS_sprintf_append(buf, "%d anonymous(", num);
     } else {
@@ -1251,7 +1245,7 @@ FormatFrame(JSContext *cx, const ScriptFrameIter &iter, char *buf, int num,
             JSAutoByteString thisValBytes;
             RootedString thisValStr(cx, ToString<CanGC>(cx, thisVal));
             if (thisValStr) {
-                if (const char *str = thisValBytes.encode(cx, thisValStr)) {
+                if (const char *str = thisValBytes.encodeLatin1(cx, thisValStr)) {
                     buf = JS_sprintf_append(buf, "    this = %s\n", str);
                     if (!buf)
                         return buf;
@@ -1364,7 +1358,7 @@ JSAbstractFramePtr::script()
 }
 
 bool
-JSAbstractFramePtr::getThisValue(JSContext *cx, jsval *thisv)
+JSAbstractFramePtr::getThisValue(JSContext *cx, MutableHandleValue thisv)
 {
     AbstractFramePtr frame = Valueify(*this);
 
@@ -1373,7 +1367,7 @@ JSAbstractFramePtr::getThisValue(JSContext *cx, jsval *thisv)
     if (!ComputeThis(cx, frame))
         return false;
 
-    *thisv = frame.thisValue();
+    thisv.set(frame.thisValue());
     return true;
 }
 
@@ -1388,7 +1382,7 @@ bool
 JSAbstractFramePtr::evaluateInStackFrame(JSContext *cx,
                                          const char *bytes, unsigned length,
                                          const char *filename, unsigned lineno,
-                                         jsval *rval)
+                                         MutableHandleValue rval)
 {
     if (!CheckDebugMode(cx))
         return false;
@@ -1409,7 +1403,7 @@ bool
 JSAbstractFramePtr::evaluateUCInStackFrame(JSContext *cx,
                                            const jschar *chars, unsigned length,
                                            const char *filename, unsigned lineno,
-                                           jsval *rval)
+                                           MutableHandleValue rval)
 {
     if (!CheckDebugMode(cx))
         return false;

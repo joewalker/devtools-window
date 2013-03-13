@@ -40,7 +40,6 @@
 #include "nsIScriptGlobalObject.h"
 #include "nsPIDOMWindow.h"
 #include "nsIDocShell.h"
-#include "nsIDocShellTreeItem.h"
 #include "nsIPrompt.h"
 #include "nsIWindowWatcher.h"
 #include "nsIConsoleService.h"
@@ -1688,6 +1687,14 @@ nsScriptSecurityManager::CanExecuteScripts(JSContext* cx,
     if (aPrincipal == mSystemPrincipal)
     {
         // Even if JavaScript is disabled, we must still execute system scripts
+        *result = true;
+        return NS_OK;
+    }
+
+    // Same thing for nsExpandedPrincipal, which is pseudo-privileged.
+    nsCOMPtr<nsIExpandedPrincipal> ep = do_QueryInterface(aPrincipal);
+    if (ep)
+    {
         *result = true;
         return NS_OK;
     }

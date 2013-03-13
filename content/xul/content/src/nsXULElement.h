@@ -37,7 +37,6 @@
 #include "nsDOMScriptObjectHolder.h"
 #include "nsIFrameLoader.h"
 #include "jspubtd.h"
-#include "nsGenericHTMLElement.h"
 #include "nsFrameLoader.h"
 
 class nsIDocument;
@@ -421,8 +420,6 @@ public:
       mBindingParent = aBindingParent;
     }
 
-    virtual nsXPCClassInfo* GetClassInfo();
-
     virtual nsIDOMNode* AsDOMNode() { return this; }
 
     virtual bool IsEventAttributeName(nsIAtom* aName) MOZ_OVERRIDE;
@@ -586,10 +583,7 @@ public:
         }
         return nsStyledElement::GetParentObject();
     }
-    static bool PrefEnabled()
-    {
-        return nsGenericHTMLElement::PrefEnabled();
-    }
+
 protected:
 
     // This can be removed if EnsureContentsGenerated dies.
@@ -698,8 +692,7 @@ protected:
             !HasAttr(kNameSpaceID_None, nsGkAtoms::readonly);
     }
 
-    virtual JSObject* WrapNode(JSContext *aCx, JSObject *aScope,
-                               bool *aTriedToWrap) MOZ_OVERRIDE;
+    virtual JSObject* WrapNode(JSContext *aCx, JSObject *aScope) MOZ_OVERRIDE;
 
     void MaybeUpdatePrivateLifetime();
 };

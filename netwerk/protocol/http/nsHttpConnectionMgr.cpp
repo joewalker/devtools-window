@@ -542,7 +542,7 @@ nsHttpConnectionMgr::ReportSpdyConnection(nsHttpConnection *conn,
         conn->DontReuse();
     }
 
-    ProcessAllSpdyPendingQ();
+    PostEvent(&nsHttpConnectionMgr::OnMsgProcessAllSpdyPendingQ);
 }
 
 void
@@ -1953,8 +1953,10 @@ nsHttpConnectionMgr::ProcessSpdyPendingQCB(const nsACString &key,
 }
 
 void
-nsHttpConnectionMgr::ProcessAllSpdyPendingQ()
+nsHttpConnectionMgr::OnMsgProcessAllSpdyPendingQ(int32_t, void *)
 {
+    NS_ABORT_IF_FALSE(PR_GetCurrentThread() == gSocketThread, "wrong thread");
+    LOG(("nsHttpConnectionMgr::OnMsgProcessAllSpdyPendingQ\n"));
     mCT.Enumerate(ProcessSpdyPendingQCB, this);
 }
 
@@ -2785,7 +2787,8 @@ nsHalfOpenSocket::OnOutputStreamReady(nsIAsyncOutputStream *out)
                         gHttpHandler->ConnMgr()->mMaxRequestDelay,
                         mSocketTransport, mStreamIn, mStreamOut,
                         callbacks,
-                        PR_MillisecondsToInterval(rtt.ToMilliseconds()));
+                        PR_MillisecondsToInterval(
+                          static_cast<uint32_t>(rtt.ToMilliseconds())));
 
         if (NS_SUCCEEDED(mSocketTransport->GetPeerAddr(&peeraddr)))
             mEnt->RecordIPFamilyPreference(peeraddr.raw.family);
@@ -2801,7 +2804,8 @@ nsHalfOpenSocket::OnOutputStreamReady(nsIAsyncOutputStream *out)
                         gHttpHandler->ConnMgr()->mMaxRequestDelay,
                         mBackupTransport, mBackupStreamIn, mBackupStreamOut,
                         callbacks,
-                        PR_MillisecondsToInterval(rtt.ToMilliseconds()));
+                        PR_MillisecondsToInterval(
+                          static_cast<uint32_t>(rtt.ToMilliseconds())));
 
         if (NS_SUCCEEDED(mBackupTransport->GetPeerAddr(&peeraddr)))
             mEnt->RecordIPFamilyPreference(peeraddr.raw.family);

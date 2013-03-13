@@ -11,7 +11,10 @@
 #include "nsFloatManager.h"
 #include "nsLineBox.h"
 #include "nsFrameList.h"
-#include "nsBlockFrame.h"
+#include "nsHTMLReflowState.h"
+
+class nsBlockFrame;
+class nsOverflowContinuationTracker;
 
   // block reflow state flags
 #define BRS_UNCONSTRAINEDHEIGHT   0x00000001
@@ -107,11 +110,6 @@ public:
     return result;
   }
 
-  // XXX maybe we should do the same adjustment for continuations here
-  const nsMargin& Margin() const {
-    return mReflowState.mComputedMargin;
-  }
-
   // Reconstruct the previous bottom margin that goes above |aLine|.
   void ReconstructMarginAbove(nsLineList::iterator aLine);
 
@@ -193,11 +191,7 @@ public:
   // StealFrame. Call it before adding any frames to mPushedFloats.
   void SetupPushedFloatList();
   // Use this method to append to mPushedFloats.
-  void AppendPushedFloat(nsIFrame* aFloatCont) {
-    SetupPushedFloatList();
-    aFloatCont->AddStateBits(NS_FRAME_IS_PUSHED_FLOAT);
-    mPushedFloats->AppendFrame(mBlock, aFloatCont);
-  }
+  void AppendPushedFloat(nsIFrame* aFloatCont);
 
   // Track child overflow continuations.
   nsOverflowContinuationTracker* mOverflowTracker;

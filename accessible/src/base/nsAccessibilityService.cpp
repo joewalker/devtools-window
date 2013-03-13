@@ -141,11 +141,12 @@ nsAccessibilityService::~nsAccessibilityService()
 ////////////////////////////////////////////////////////////////////////////////
 // nsISupports
 
-NS_IMPL_ISUPPORTS_INHERITED3(nsAccessibilityService,
+NS_IMPL_ISUPPORTS_INHERITED4(nsAccessibilityService,
                              DocManager,
                              nsIAccessibilityService,
                              nsIAccessibleRetrieval,
-                             nsIObserver)
+                             nsIObserver,
+                             nsISelectionListener) // from SelectionManager
 
 ////////////////////////////////////////////////////////////////////////////////
 // nsIObserver
@@ -398,6 +399,24 @@ nsAccessibilityService::UpdateImageMap(nsImageFrame* aImageFrame)
       // If image map was initialized after we created an accessible (that'll
       // be an image accessible) then recreate it.
       RecreateAccessible(presShell, aImageFrame->GetContent());
+    }
+  }
+}
+
+void
+nsAccessibilityService::UpdateLabelValue(nsIPresShell* aPresShell,
+                                         nsIContent* aLabelElm,
+                                         const nsString& aNewValue)
+{
+  DocAccessible* document = GetDocAccessible(aPresShell);
+  if (document) {
+    Accessible* accessible = document->GetAccessible(aLabelElm);
+    if (accessible) {
+      XULLabelAccessible* xulLabel = accessible->AsXULLabel();
+      NS_ASSERTION(xulLabel,
+                   "UpdateLabelValue was called for wrong accessible!");
+      if (xulLabel)
+        xulLabel->UpdateLabelValue(aNewValue);
     }
   }
 }
@@ -743,7 +762,7 @@ nsAccessibilityService::GetOrCreateAccessible(nsINode* aNode,
 
   // Check frame and its visibility. Note, hidden frame allows visible
   // elements in subtree.
-  if (!frame || !frame->GetStyleVisibility()->IsVisible()) {
+  if (!frame || !frame->StyleVisibility()->IsVisible()) {
     if (aIsSubtreeHidden && !frame)
       *aIsSubtreeHidden = true;
 
@@ -1005,6 +1024,8 @@ nsAccessibilityService::Shutdown()
 
   // Stop accessible document loader.
   DocManager::Shutdown();
+
+  SelectionManager::Shutdown();
 
   // Application is going to be closed, shutdown accessibility and mark
   // accessibility service as shutdown to prevent calls of its methods.
@@ -1422,8 +1443,10 @@ nsAccessibilityService::CreateAccessibleByFrameType(nsIFrame* aFrame,
       newAcc = new HTMLTableAccessibleWrap(aContent, document);
       break;
     case eHTMLTableCellType:
-      // Accessible HTML table cell must be a child of accessible HTML table row.
-      if (aContext->IsHTMLTableRow())
+      // Accessible HTML table cell should be a child of accessible HTML table
+      // or its row (CSS HTML tables are polite to the used markup at
+      // certain degree).
+      if (aContext->IsHTMLTableRow() || aContext->IsHTMLTable())
         newAcc = new HTMLTableCellAccessibleWrap(aContent, document);
       break;
 
@@ -1584,6 +1607,12 @@ namespace a11y {
 
 FocusManager*
 FocusMgr()
+{
+  return nsAccessibilityService::gAccessibilityService;
+}
+
+SelectionManager*
+SelectionMgr()
 {
   return nsAccessibilityService::gAccessibilityService;
 }

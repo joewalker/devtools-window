@@ -322,7 +322,7 @@ WeakMap_set_impl(JSContext *cx, CallArgs args)
         JS_ReportOutOfMemory(cx);
         return false;
     }
-    HashTableWriteBarrierPost(cx->zone(), map, key);
+    HashTableWriteBarrierPost(cx->runtime, map, key.get());
 
     args.rval().setUndefined();
     return true;
@@ -373,6 +373,11 @@ WeakMap_finalize(FreeOp *fop, RawObject obj)
 {
     if (ObjectValueMap *map = GetObjectMap(obj)) {
         map->check();
+        /*
+         * The map may contain finalized entries, so drop them before destructing to avoid calling
+         * ~EncapsulatedPtr.
+         */
+        map->clearWithoutCallingDestructors();
 #ifdef DEBUG
         map->~ObjectValueMap();
         memset(static_cast<void *>(map), 0xdc, sizeof(*map));

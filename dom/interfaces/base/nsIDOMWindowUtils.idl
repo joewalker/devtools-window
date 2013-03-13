@@ -41,7 +41,7 @@ interface nsIDOMClientRect;
 interface nsIURI;
 interface nsIDOMEventTarget;
 
-[scriptable, uuid(458f5b08-4966-4a91-8617-258afb87070e)]
+[scriptable, uuid(69b7d908-c8e4-4416-94cf-4fdbe7a80441)]
 interface nsIDOMWindowUtils : nsISupports {
 
   /**
@@ -213,7 +213,8 @@ interface nsIDOMWindowUtils : nsISupports {
   const long MODIFIER_OS         = 0x0400;
 
   /** Synthesize a mouse event. The event types supported are:
-   *    mousedown, mouseup, mousemove, mouseover, mouseout, contextmenu
+   *    mousedown, mouseup, mousemove, mouseover, mouseout, contextmenu,
+   *    MozMouseHitTest
    *
    * Events are sent in coordinates offset by aX and aY from the window.
    *
@@ -244,16 +245,18 @@ interface nsIDOMWindowUtils : nsISupports {
    * @param aPressure touch input pressure: 0.0 -> 1.0
    * @param aInputSourceArg input source, see nsIDOMMouseEvent for values,
    *        defaults to mouse input.
+   *
+   * returns true if the page called prevent default on this event
    */
-  void sendMouseEvent(in AString aType,
-                      in float aX,
-                      in float aY,
-                      in long aButton,
-                      in long aClickCount,
-                      in long aModifiers,
-                      [optional] in boolean aIgnoreRootScrollFrame,
-                      [optional] in float aPressure,
-                      [optional] in unsigned short aInputSourceArg);
+  boolean sendMouseEvent(in AString aType,
+                         in float aX,
+                         in float aY,
+                         in long aButton,
+                         in long aClickCount,
+                         in long aModifiers,
+                         [optional] in boolean aIgnoreRootScrollFrame,
+                         [optional] in float aPressure,
+                         [optional] in unsigned short aInputSourceArg);
 
   /** Synthesize a touch event. The event types supported are:
    *    touchstart, touchend, touchmove, and touchcancel
@@ -643,6 +646,13 @@ interface nsIDOMWindowUtils : nsISupports {
    * @see nsIDOMWindow::scrollX/Y
    */
   void getScrollXY(in boolean aFlushLayout, out long aScrollX, out long aScrollY);
+
+  /**
+   * Returns the scrollbar width of the window's scroll frame.
+   *
+   * @param aFlushLayout flushes layout if true. Otherwise, no flush occurs.
+   */
+  void getScrollbarSize(in boolean aFlushLayout, out long aWidth, out long aHeight);
 
   /**
    * Returns the bounds of the window's currently loaded document. This will
@@ -1279,6 +1289,19 @@ interface nsIDOMWindowUtils : nsISupports {
   void setScrollPositionClampingScrollPortSize(in float aWidth, in float aHeight);
 
   /**
+   * Set margins for the layout of fixed position elements in the content
+   * document. These are used on mobile, where the viewable area can be
+   * temporarily obscured by the browser chrome. In this situation, we're ok
+   * with scrollable page content being obscured, but fixed position content
+   * cannot be revealed without removing the obscuring chrome, so we use these
+   * margins so that it can remain visible.
+   *
+   * The caller of this method must have chrome privileges.
+   */
+  void setContentDocumentFixedPositionMargins(in float aTop, in float aRight,
+                                              in float aBottom, in float aLeft);
+
+  /**
    * Prevent this window (and any child windows) from displaying any further
    * dialogs (e.g. window.alert()).
    */
@@ -1326,4 +1349,9 @@ interface nsIDOMWindowUtils : nsISupports {
     * attribute or -moz-user-input: none/disabled.
     */
    boolean isNodeDisabledForEvents(in nsIDOMNode aNode);
+
+   /**
+    * Setting paintFlashing to true will flash newly painted area.
+    */
+   attribute boolean paintFlashing;
 };

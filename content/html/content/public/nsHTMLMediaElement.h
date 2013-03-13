@@ -19,9 +19,9 @@
 #include "AudioStream.h"
 #include "VideoFrameContainer.h"
 #include "mozilla/CORSMode.h"
-#include "nsDOMMediaStream.h"
+#include "DOMMediaStream.h"
 #include "mozilla/Mutex.h"
-#include "nsTimeRanges.h"
+#include "mozilla/dom/TimeRanges.h"
 #include "nsIDOMWakeLock.h"
 #include "AudioChannelCommon.h"
 #include "DecoderTraits.h"
@@ -54,6 +54,7 @@ public:
   typedef mozilla::MetadataTags MetadataTags;
   typedef mozilla::AudioStream AudioStream;
   typedef mozilla::MediaDecoder MediaDecoder;
+  typedef mozilla::DOMMediaStream DOMMediaStream;
 
   mozilla::CORSMode GetCORSMode() {
     return mCORSMode;
@@ -107,6 +108,10 @@ public:
   virtual void UnbindFromTree(bool aDeep = true,
                               bool aNullParent = true);
   virtual void DoneCreatingElement();
+
+  virtual bool IsHTMLFocusable(bool aWithMouse, bool *aIsFocusable,
+                               int32_t *aTabIndex);
+  virtual int32_t TabIndexDefault();
 
   /**
    * Call this to reevaluate whether we should start/stop due to our owner
@@ -253,11 +258,6 @@ public:
   static mozilla::CanPlayStatus GetCanPlay(const nsAString& aType);
 
   /**
-   * Get the mime type for this element.
-   */
-  void GetMimeType(nsCString& aMimeType);
-
-  /**
    * Called when a child source element is added to this media element. This
    * may queue a task to run the select resource algorithm if appropriate.
    */
@@ -364,7 +364,7 @@ protected:
   /**
    * Initialize the media element for playback of aStream
    */
-  void SetupSrcMediaStreamPlayback(nsDOMMediaStream* aStream);
+  void SetupSrcMediaStreamPlayback(DOMMediaStream* aStream);
   /**
    * Stop playback on mSrcStream.
    */
@@ -377,13 +377,7 @@ protected:
    * When aFinishWhenEnded is false, ending playback does not finish the stream.
    * The stream will never finish.
    */
-  already_AddRefed<nsDOMMediaStream> CaptureStreamInternal(bool aFinishWhenEnded);
-
-  /**
-   * Create a decoder for the given aMIMEType. Returns null if we
-   * were unable to create the decoder.
-   */
-  already_AddRefed<MediaDecoder> CreateDecoder(const nsACString& aMIMEType);
+  already_AddRefed<DOMMediaStream> CaptureStreamInternal(bool aFinishWhenEnded);
 
   /**
    * Initialize a decoder as a clone of an existing decoder in another
@@ -635,17 +629,17 @@ protected:
 
   // Holds a reference to the DOM wrapper for the MediaStream that has been
   // set in the src attribute.
-  nsRefPtr<nsDOMMediaStream> mSrcAttrStream;
+  nsRefPtr<DOMMediaStream> mSrcAttrStream;
 
   // Holds a reference to the DOM wrapper for the MediaStream that we're
   // actually playing.
   // At most one of mDecoder and mSrcStream can be non-null.
-  nsRefPtr<nsDOMMediaStream> mSrcStream;
+  nsRefPtr<DOMMediaStream> mSrcStream;
 
   // Holds references to the DOM wrappers for the MediaStreams that we're
   // writing to.
   struct OutputMediaStream {
-    nsRefPtr<nsDOMMediaStream> mStream;
+    nsRefPtr<DOMMediaStream> mStream;
     bool mFinishWhenEnded;
   };
   nsTArray<OutputMediaStream> mOutputStreams;
@@ -777,7 +771,7 @@ protected:
   nsAutoPtr<AudioStream> mAudioStream;
 
   // Range of time played.
-  nsTimeRanges mPlayed;
+  mozilla::dom::TimeRanges mPlayed;
 
   // Stores the time at the start of the current 'played' range.
   double mCurrentPlayRangeStart;
@@ -893,13 +887,6 @@ protected:
 
   // True if the media's channel's download has been suspended.
   bool mDownloadSuspendedByCache;
-
-  // The Content-Type for this media. When we are sniffing for the Content-Type,
-  // and we are recreating a channel after the initial load, we need that
-  // information to give it as a hint to the channel for it to bypass the
-  // sniffing phase, that would fail because sniffing only works when applied to
-  // the first bytes of the stream.
-  nsCString mMimeType;
 
   // Audio Channel Type.
   mozilla::dom::AudioChannelType mAudioChannelType;

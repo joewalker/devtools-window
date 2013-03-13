@@ -5,7 +5,7 @@
 
 package org.mozilla.gecko;
 
-import org.mozilla.gecko.gfx.GfxInfoThread;
+import org.mozilla.gecko.mozglue.GeckoLoader;
 import org.mozilla.gecko.util.GeckoEventListener;
 
 import org.json.JSONObject;
@@ -46,12 +46,23 @@ public class GeckoThread extends Thread implements GeckoEventListener {
         // so just save it to locale here and reset it as default after the join
         Locale locale = Locale.getDefault();
 
+        if (locale.toString().equalsIgnoreCase("zh_hk")) {
+            locale = Locale.TRADITIONAL_CHINESE;
+            Locale.setDefault(locale);
+        }
+
         GeckoApp app = GeckoApp.mAppContext;
         String resourcePath = app.getApplication().getPackageResourcePath();
-        GeckoAppShell.setupGeckoEnvironment(app);
-        GeckoAppShell.loadSQLiteLibs(app, resourcePath);
-        GeckoAppShell.loadNSSLibs(app, resourcePath);
-        GeckoAppShell.loadGeckoLibs(resourcePath);
+        String[] pluginDirs = null;
+        try {
+            pluginDirs = app.getPluginDirectories();
+        } catch (Exception e) {
+            Log.w(LOGTAG, "Caught exception getting plugin dirs.", e);
+        }
+        GeckoLoader.setupGeckoEnvironment(app, pluginDirs, GeckoProfile.get(app).getFilesDir().getPath());
+        GeckoLoader.loadSQLiteLibs(app, resourcePath);
+        GeckoLoader.loadNSSLibs(app, resourcePath);
+        GeckoLoader.loadGeckoLibs(app, resourcePath);
 
         Locale.setDefault(locale);
 
@@ -78,16 +89,8 @@ public class GeckoThread extends Thread implements GeckoEventListener {
         return (args != null ? args : "") + profile;
     }
 
+    @Override
     public void run() {
-        // Here we start the GfxInfo thread, which will query OpenGL
-        // system information for Gecko. This must be done early enough that the data will be
-        // ready by the time it's needed to initialize the LayerManager (it takes about 100 ms
-        // to obtain). Doing it here seems to have no negative effect on startup time. See bug 766251.
-        // Starting the GfxInfoThread here from the GeckoThread, ensures that
-        // the Gecko thread is started first, adding some determinism there.
-        GeckoAppShell.sGfxInfoThread = new GfxInfoThread();
-        GeckoAppShell.sGfxInfoThread.start();
-
         String path = initGeckoEnvironment();
 
         Log.w(LOGTAG, "zerdatime " + SystemClock.uptimeMillis() + " - runGecko");
@@ -101,6 +104,7 @@ public class GeckoThread extends Thread implements GeckoEventListener {
         GeckoAppShell.runGecko(path, args, mUri, type);
     }
 
+    @Override
     public void handleMessage(String event, JSONObject message) {
         if ("Gecko:Ready".equals(event)) {
             GeckoAppShell.getEventDispatcher().unregisterEventListener(event, this);

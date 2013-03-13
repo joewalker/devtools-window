@@ -68,15 +68,12 @@ nsClientRect::GetHeight(float* aResult)
   return NS_OK;
 }
 
-DOMCI_DATA(ClientRectList, nsClientRectList)
-
 NS_IMPL_CYCLE_COLLECTION_WRAPPERCACHE_1(nsClientRectList, mParent)
 
 NS_INTERFACE_TABLE_HEAD(nsClientRectList)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
   NS_INTERFACE_TABLE1(nsClientRectList, nsIDOMClientRectList)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsClientRectList)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(ClientRectList)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsClientRectList)
@@ -98,10 +95,9 @@ nsClientRectList::Item(uint32_t aIndex, nsIDOMClientRect** aReturn)
 }
 
 JSObject*
-nsClientRectList::WrapObject(JSContext *cx, JSObject *scope, bool *triedToWrap)
+nsClientRectList::WrapObject(JSContext *cx, JSObject *scope)
 {
-  return mozilla::dom::ClientRectListBinding::Wrap(cx, scope, this,
-                                                   triedToWrap);
+  return mozilla::dom::ClientRectListBinding::Wrap(cx, scope, this);
 }
 
 static double

@@ -35,8 +35,7 @@
 
 // For calculating max history entries and max cachable contentviewers
 #include "nspr.h"
-#include <cstdlib> // for std::abs(int/long)
-#include <cmath> // for std::abs(float/double), and std::log(double)
+#include "mozilla/MathAlgorithms.h"
 
 using namespace mozilla;
 
@@ -61,6 +60,8 @@ int32_t nsSHistory::sHistoryMaxTotalViewers = -1;
 // A counter that is used to be able to know the order in which
 // entries were touched, so that we can evict older entries first.
 static uint32_t gTouchCounter = 0;
+
+#ifdef PR_LOGGING
 
 static PRLogModuleInfo*
 GetSHistoryLog()
@@ -104,6 +105,14 @@ GetSHistoryLog()
       LOG_SPEC(format, uri);                               \
     }                                                      \
   PR_END_MACRO
+
+#else // !PR_LOGGING
+
+#define LOG(format)
+#define LOG_SPEC(format, uri)
+#define LOG_SHENTRY_SPEC(format, shentry)
+
+#endif // PR_LOGGING
 
 // Iterates over all registered session history listeners.
 #define ITERATE_LISTENERS(body)                            \
@@ -1092,8 +1101,7 @@ nsSHistory::GloballyEvictContentViewers()
         for (uint32_t j = 0; j < shTransactions.Length(); j++) {
           TransactionAndDistance &container = shTransactions[j];
           if (container.mViewer == contentViewer) {
-            container.mDistance = std::min(container.mDistance,
-                                         std::abs(i - shist->mIndex));
+            container.mDistance = std::min(container.mDistance, Abs(i - shist->mIndex));
             found = true;
             break;
           }
@@ -1102,7 +1110,7 @@ nsSHistory::GloballyEvictContentViewers()
         // If we didn't find a TransactionAndDistance for this content viewer, make a new
         // one.
         if (!found) {
-          TransactionAndDistance container(trans, std::abs(i - shist->mIndex));
+          TransactionAndDistance container(trans, Abs(i - shist->mIndex));
           shTransactions.AppendElement(container);
         }
       }

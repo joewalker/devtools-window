@@ -93,7 +93,7 @@ public:
     }
 
     nsCOMPtr<nsIDOMEvent> event;
-    if (NS_SUCCEEDED(nsEventDispatcher::CreateEvent(mPresContext, nullptr,
+    if (NS_SUCCEEDED(nsEventDispatcher::CreateEvent(mMenu, mPresContext, nullptr,
                                                     NS_LITERAL_STRING("Events"),
                                                     getter_AddRefs(event)))) {
       event->InitEvent(domEventToFire, true, true);
@@ -375,19 +375,20 @@ nsMenuFrame::DestroyFrom(nsIFrame* aDestructRoot)
   nsBoxFrame::DestroyFrom(aDestructRoot);
 }
 
-NS_IMETHODIMP
+void
 nsMenuFrame::BuildDisplayListForChildren(nsDisplayListBuilder*   aBuilder,
                                          const nsRect&           aDirtyRect,
                                          const nsDisplayListSet& aLists)
 {
-  if (!aBuilder->IsForEventDelivery())
-    return nsBoxFrame::BuildDisplayListForChildren(aBuilder, aDirtyRect, aLists);
+  if (!aBuilder->IsForEventDelivery()) {
+    nsBoxFrame::BuildDisplayListForChildren(aBuilder, aDirtyRect, aLists);
+    return;
+  }
     
   nsDisplayListCollection set;
-  nsresult rv = nsBoxFrame::BuildDisplayListForChildren(aBuilder, aDirtyRect, set);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsBoxFrame::BuildDisplayListForChildren(aBuilder, aDirtyRect, set);
   
-  return WrapListsInRedirector(aBuilder, set, aLists);
+  WrapListsInRedirector(aBuilder, set, aLists);
 }
 
 NS_IMETHODIMP
@@ -1280,7 +1281,9 @@ nsMenuFrame::RemoveFrame(ChildListID     aListID,
                          nsIFrame*       aOldFrame)
 {
   nsFrameList* popupList = GetPopupList();
-  if (popupList && popupList->DestroyFrameIfPresent(aOldFrame)) {
+  if (popupList && popupList->FirstChild() == aOldFrame) {
+    popupList->RemoveFirstChild();
+    aOldFrame->Destroy();
     DestroyPopupList();
     PresContext()->PresShell()->
       FrameNeedsReflow(this, nsIPresShell::eTreeChange,

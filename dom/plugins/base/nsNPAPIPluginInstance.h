@@ -15,11 +15,13 @@
 #include "nsIChannel.h"
 #include "nsInterfaceHashtable.h"
 #include "nsHashKeys.h"
+#include <prinrval.h>
 #ifdef MOZ_WIDGET_ANDROID
 #include "nsAutoPtr.h"
 #include "nsIRunnable.h"
 #include "GLContext.h"
 #include "nsSurfaceTexture.h"
+#include "AndroidBridge.h"
 #include <map>
 class PluginEventRunnable;
 class SharedPluginTexture;
@@ -50,6 +52,18 @@ const NPDrawingModel kDefaultDrawingModel = NPDrawingModelCoreGraphics;
 const NPDrawingModel kDefaultDrawingModel = static_cast<NPDrawingModel>(0);
 #endif
 
+/**
+ * Used to indicate whether it's OK to reenter Gecko and repaint, flush frames,
+ * run scripts, etc, during this plugin call.
+ * When NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO is set, we try to avoid dangerous
+ * Gecko activities when the plugin spins a nested event loop, on a best-effort
+ * basis.
+ */
+enum NSPluginCallReentry {
+  NS_PLUGIN_CALL_SAFE_TO_REENTER_GECKO,
+  NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO
+};
+
 class nsNPAPITimer
 {
 public:
@@ -75,7 +89,8 @@ public:
   nsresult SetWindow(NPWindow* window);
   nsresult NewStreamFromPlugin(const char* type, const char* target, nsIOutputStream* *result);
   nsresult Print(NPPrint* platformPrint);
-  nsresult HandleEvent(void* event, int16_t* result);
+  nsresult HandleEvent(void* event, int16_t* result,
+                       NSPluginCallReentry aSafeToReenterGecko = NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO);
   nsresult GetValueFromPlugin(NPPVariable variable, void* value);
   nsresult GetDrawingModel(int32_t* aModel);
   nsresult IsRemoteDrawingCoreAnimation(bool* aDrawing);
@@ -244,6 +259,8 @@ public:
 
   nsresult PrivateModeStateChanged(bool aEnabled);
 
+  nsresult IsPrivateBrowsing(bool *aEnabled);
+
   nsresult GetDOMElement(nsIDOMElement* *result);
 
   nsNPAPITimer* TimerWithID(uint32_t id, uint32_t* index);
@@ -273,12 +290,19 @@ public:
   // Returns the contents scale factor of the screen the plugin is drawn on.
   double GetContentsScaleFactor();
 
-  static bool InPluginCall() { return gInPluginCalls > 0; }
-  static void BeginPluginCall() { ++gInPluginCalls; }
-  static void EndPluginCall()
+  static bool InPluginCallUnsafeForReentry() { return gInUnsafePluginCalls > 0; }
+  static void BeginPluginCall(NSPluginCallReentry aReentryState)
   {
-    NS_ASSERTION(InPluginCall(), "Must be in plugin call");
-    --gInPluginCalls;
+    if (aReentryState == NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO) {
+      ++gInUnsafePluginCalls;
+    }
+  }
+  static void EndPluginCall(NSPluginCallReentry aReentryState)
+  {
+    if (aReentryState == NS_PLUGIN_CALL_UNSAFE_TO_REENTER_GECKO) {
+      NS_ASSERTION(gInUnsafePluginCalls > 0, "Must be in plugin call");
+      --gInUnsafePluginCalls;
+    }
   }
 
 protected:
@@ -376,7 +400,34 @@ private:
   // is this instance Java and affected by bug 750480?
   bool mHaveJavaC2PJSObjectQuirk;
 
-  static uint32_t gInPluginCalls;
+  static uint32_t gInUnsafePluginCalls;
 };
+
+// On Android, we need to guard against plugin code leaking entries in the local
+// JNI ref table. See https://bugzilla.mozilla.org/show_bug.cgi?id=780831#c21
+#ifdef MOZ_WIDGET_ANDROID
+  #define MAIN_THREAD_JNI_REF_GUARD mozilla::AutoLocalJNIFrame jniFrame
+#else
+  #define MAIN_THREAD_JNI_REF_GUARD
+#endif
+
+PRIntervalTime NS_NotifyBeginPluginCall(NSPluginCallReentry aReentryState);
+void NS_NotifyPluginCall(PRIntervalTime aTime, NSPluginCallReentry aReentryState);
+
+#define NS_TRY_SAFE_CALL_RETURN(ret, fun, pluginInst, pluginCallReentry) \
+PR_BEGIN_MACRO                                     \
+  MAIN_THREAD_JNI_REF_GUARD;                       \
+  PRIntervalTime startTime = NS_NotifyBeginPluginCall(pluginCallReentry); \
+  ret = fun;                                       \
+  NS_NotifyPluginCall(startTime, pluginCallReentry); \
+PR_END_MACRO
+
+#define NS_TRY_SAFE_CALL_VOID(fun, pluginInst, pluginCallReentry) \
+PR_BEGIN_MACRO                                     \
+  MAIN_THREAD_JNI_REF_GUARD;                       \
+  PRIntervalTime startTime = NS_NotifyBeginPluginCall(pluginCallReentry); \
+  fun;                                             \
+  NS_NotifyPluginCall(startTime, pluginCallReentry); \
+PR_END_MACRO
 
 #endif // nsNPAPIPluginInstance_h_

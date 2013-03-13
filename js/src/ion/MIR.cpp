@@ -175,18 +175,11 @@ MDefinition::foldsTo(bool useValueNumbers)
 void
 MDefinition::analyzeEdgeCasesForward()
 {
-    return;
 }
 
 void
 MDefinition::analyzeEdgeCasesBackward()
 {
-    return;
-}
-void
-MDefinition::analyzeTruncateBackward()
-{
-    return;
 }
 
 static bool
@@ -334,18 +327,6 @@ MConstant::MConstant(const js::Value &vp)
     setMovable();
 }
 
-void
-MConstant::analyzeTruncateBackward()
-{
-    if (js::ion::EdgeCaseAnalysis::AllUsesTruncate(this) &&
-        value_.isDouble() && isBigIntOutput())
-    {
-        // Truncate the double to int, since all uses truncates it.
-        value_.setInt32(ToInt32(value_.toDouble()));
-        setResultType(MIRType_Int32);
-    }
-}
-
 HashNumber
 MConstant::valueHash() const
 {
@@ -392,9 +373,9 @@ MConstant::printOpcode(FILE *fp)
                 fputs("unnamed function", fp);
             }
             if (fun->hasScript()) {
-                UnrootedScript script = fun->nonLazyScript();
+                RawScript script = fun->nonLazyScript();
                 fprintf(fp, " (%s:%u)",
-                        script->filename ? script->filename : "", script->lineno);
+                        script->filename() ? script->filename() : "", script->lineno);
             }
             fprintf(fp, " at %p", (void *) fun);
             break;
@@ -502,6 +483,32 @@ MGoto::New(MBasicBlock *target)
 {
     JS_ASSERT(target);
     return new MGoto(target);
+}
+
+void
+MUnbox::printOpcode(FILE *fp)
+{
+    PrintOpcodeName(fp, op());
+    fprintf(fp, " ");
+    getOperand(0)->printName(fp);
+    fprintf(fp, " ");
+
+    switch (type()) {
+      case MIRType_Int32: fprintf(fp, "to Int32"); break;
+      case MIRType_Double: fprintf(fp, "to Double"); break;
+      case MIRType_Boolean: fprintf(fp, "to Boolean"); break;
+      case MIRType_String: fprintf(fp, "to String"); break;
+      case MIRType_Object: fprintf(fp, "to Object"); break;
+      default: break;
+    }
+
+    switch (mode()) {
+      case Fallible: fprintf(fp, " (fallible)"); break;
+      case Infallible: fprintf(fp, " (infallible)"); break;
+      case TypeBarrier: fprintf(fp, " (typebarrier)"); break;
+      case TypeGuard: fprintf(fp, " (typeguard)"); break;
+      default: break;
+    }
 }
 
 MPhi *
@@ -865,7 +872,7 @@ MBinaryArithInstruction::foldsTo(bool useValueNumbers)
 bool
 MAbs::fallible() const
 {
-    return !range() || !range()->isFinite();
+    return !range() || !range()->isInt32();
 }
 
 MDefinition *
@@ -919,27 +926,6 @@ MDiv::analyzeEdgeCasesBackward()
         setCanBeNegativeZero(false);
 }
 
-void
-MDiv::analyzeTruncateBackward()
-{
-    if (!isTruncated())
-        setTruncated(js::ion::EdgeCaseAnalysis::AllUsesTruncate(this));
-}
-
-bool
-MDiv::updateForReplacement(MDefinition *ins_)
-{
-    JS_ASSERT(ins_->isDiv());
-    MDiv *ins = ins_->toDiv();
-    // Since EdgeCaseAnalysis is not being run before GVN, its information does
-    // not need to be merged here.
-    if (isTruncated() && ins->isTruncated())
-        setTruncated(Max(isTruncated(), ins->isTruncated()));
-    else
-        setTruncated(0);
-    return true;
-}
-
 bool
 MDiv::fallible()
 {
@@ -966,92 +952,21 @@ MMod::foldsTo(bool useValueNumbers)
     return this;
 }
 
-void
-MMod::analyzeTruncateBackward()
-{
-    if (!isTruncated())
-        setTruncated(js::ion::EdgeCaseAnalysis::AllUsesTruncate(this));
-}
-
-bool
-MMod::updateForReplacement(MDefinition *ins_)
-{
-    JS_ASSERT(ins_->isMod());
-    MMod *ins = ins_->toMod();
-    if (isTruncated() && ins->isTruncated())
-        setTruncated(Max(isTruncated(), ins->isTruncated()));
-    else
-        setTruncated(0);
-    return true;
-}
-
 bool
 MMod::fallible()
 {
     return !isTruncated();
 }
 
-void
-MAdd::analyzeTruncateBackward()
-{
-    if (!isTruncated())
-        setTruncated(js::ion::EdgeCaseAnalysis::AllUsesTruncate(this));
-    if (isTruncated() && isTruncated() < 20) {
-        // Super obvious optimization... If this operation is a double
-        // BUT it happens to look like a large precision int that eventually
-        // gets truncated, then just call it an int.
-        // This can arise if we have x+y | 0, and x and y are both INT_MAX,
-        // TI will observe an overflow, thus marking the addition as double-like
-        // but we'll have MTruncate(MAddD(toDouble(x), toDouble(y))), which we know
-        // we'll be able to convert to MAddI(x,y)
-        if (isBigInt_ && type() == MIRType_Double) {
-            specialization_ = MIRType_Int32;
-            setResultType(MIRType_Int32);
-        }
-    }
-}
-
-bool
-MAdd::updateForReplacement(MDefinition *ins_)
-{
-    JS_ASSERT(ins_->isAdd());
-    MAdd *ins = ins_->toAdd();
-    if (isTruncated() && ins->isTruncated())
-        setTruncated(Max(isTruncated(), ins->isTruncated()));
-    else
-        setTruncated(0);
-    return true;
-}
-
 bool
 MAdd::fallible()
 {
     // the add is fallible if range analysis does not say that it is finite, AND
-    // either the truncation analysis shows that there are non-truncated uses, or
-    // there are more than 20 operations before it gets truncated. 20 was chosen
-    // for two reasons. First, it is a nice sane number. Second, the largest int32
-    // can be (about) 2^31. The smallest integer that cannot be exactly represented
-    // as a double is 2^53 + 1  by doing something simple, like x = x + x, it takes
-    // 23 additions toget from 2^31 to 2^53 + 1. 20 is simply a conservative estimate of that.
-    return (!isTruncated() || isTruncated() > 20) && (!range() || !range()->isFinite());
-}
-
-void
-MSub::analyzeTruncateBackward()
-{
-    if (!isTruncated())
-        setTruncated(js::ion::EdgeCaseAnalysis::AllUsesTruncate(this));
-}
-
-bool
-MSub::updateForReplacement(MDefinition *ins_)
-{
-    JS_ASSERT(ins_->isSub());
-    MSub *ins = ins_->toSub();
-    if (isTruncated() && ins->isTruncated())
-        setTruncated(Max(isTruncated(), ins->isTruncated()));
-    else
-        setTruncated(0);
+    // either the truncation analysis shows that there are non-truncated uses.
+    if (isTruncated())
+        return false;
+    if (range() && range()->isInt32())
+        return false;
     return true;
 }
 
@@ -1059,7 +974,11 @@ bool
 MSub::fallible()
 {
     // see comment in MAdd::fallible()
-    return (!isTruncated() || isTruncated() > 20) && (!range() || !range()->isFinite());
+    if (isTruncated())
+        return false;
+    if (range() && range()->isInt32())
+        return false;
+    return true;
 }
 
 MDefinition *
@@ -1099,7 +1018,6 @@ MMul::analyzeEdgeCasesForward()
         if (val.isInt32() && val.toInt32() > 0)
             setCanBeNegativeZero(false);
     }
-
 }
 
 void
@@ -1109,23 +1027,11 @@ MMul::analyzeEdgeCasesBackward()
         setCanBeNegativeZero(false);
 }
 
-void
-MMul::analyzeTruncateBackward()
-{
-    if (!isPossibleTruncated() && js::ion::EdgeCaseAnalysis::AllUsesTruncate(this))
-        setPossibleTruncated(true);
-}
-
 bool
 MMul::updateForReplacement(MDefinition *ins_)
 {
-    JS_ASSERT(ins_->isMul());
     MMul *ins = ins_->toMul();
-    // setPossibleTruncated can reset the canBenegativeZero check,
-    // therefore first query the state, before setting the new state.
-    bool truncated = isPossibleTruncated() && ins->isPossibleTruncated();
     bool negativeZero = canBeNegativeZero() || ins->canBeNegativeZero();
-    setPossibleTruncated(truncated);
     setCanBeNegativeZero(negativeZero);
     return true;
 }
@@ -1133,9 +1039,9 @@ MMul::updateForReplacement(MDefinition *ins_)
 bool
 MMul::canOverflow()
 {
-    if (implicitTruncate_)
+    if (isTruncated())
         return false;
-    return !range() || !range()->isFinite();
+    return !range() || !range()->isInt32();
 }
 
 void
@@ -1227,16 +1133,14 @@ CanDoValueBitwiseCmp(JSContext *cx, types::StackTypeSet *lhs, types::StackTypeSe
         return false;
     }
 
-    // Objects with special equality or that emulates undefined are not supported.
+    // Objects that emulate undefined are not supported.
     if (lhs->maybeObject() &&
-        (lhs->hasObjectFlags(cx, types::OBJECT_FLAG_SPECIAL_EQUALITY) ||
-         lhs->hasObjectFlags(cx, types::OBJECT_FLAG_EMULATES_UNDEFINED)))
+        lhs->hasObjectFlags(cx, types::OBJECT_FLAG_EMULATES_UNDEFINED))
     {
         return false;
     }
     if (rhs->maybeObject() &&
-        (rhs->hasObjectFlags(cx, types::OBJECT_FLAG_SPECIAL_EQUALITY) ||
-         rhs->hasObjectFlags(cx, types::OBJECT_FLAG_EMULATES_UNDEFINED)))
+        rhs->hasObjectFlags(cx, types::OBJECT_FLAG_EMULATES_UNDEFINED))
     {
         return false;
     }
@@ -1359,12 +1263,6 @@ MCompare::infer(const TypeOracle::BinaryTypes &b, JSContext *cx)
 
     // Handle object comparison.
     if (!relationalEq && lhs == MIRType_Object && rhs == MIRType_Object) {
-        if (b.lhsTypes->hasObjectFlags(cx, types::OBJECT_FLAG_SPECIAL_EQUALITY) ||
-            b.rhsTypes->hasObjectFlags(cx, types::OBJECT_FLAG_SPECIAL_EQUALITY))
-        {
-            return;
-        }
-
         compareType_ = Compare_Object;
         return;
     }
@@ -1581,7 +1479,7 @@ MTruncateToInt32::foldsTo(bool useValueNumbers)
 
     if (input->type() == MIRType_Double && input->isConstant()) {
         const Value &v = input->toConstant()->value();
-        uint32_t ret = ToInt32(v.toDouble());
+        int32_t ret = ToInt32(v.toDouble());
         return MConstant::New(Int32Value(ret));
     }
 
@@ -1880,6 +1778,29 @@ MBeta::computeRange()
 }
 
 bool
+MNewObject::shouldUseVM() const
+{
+    return templateObject()->hasSingletonType() ||
+           templateObject()->hasDynamicSlots();
+}
+
+bool
+MNewArray::shouldUseVM() const
+{
+    JS_ASSERT(count() < JSObject::NELEMENTS_LIMIT);
+
+    size_t maxArraySlots =
+        gc::GetGCKindSlots(gc::FINALIZE_OBJECT_LAST) - ObjectElements::VALUES_PER_HEADER;
+
+    // Allocate space using the VMCall
+    // when mir hints it needs to get allocated immediatly,
+    // but only when data doesn't fit the available array slots.
+    bool allocating = isAllocating() && count() > maxArraySlots;
+
+    return templateObject()->hasSingletonType() || allocating;
+}
+
+bool
 MLoadFixedSlot::mightAlias(MDefinition *store)
 {
     if (store->isStoreFixedSlot() && store->toStoreFixedSlot()->slot() != slot())
@@ -1893,4 +1814,34 @@ MLoadSlot::mightAlias(MDefinition *store)
     if (store->isStoreSlot() && store->toStoreSlot()->slot() != slot())
         return false;
     return true;
+}
+
+void
+InlinePropertyTable::trimToAndMaybePatchTargets(AutoObjectVector &targets,
+                                                AutoObjectVector &originals)
+{
+    IonSpew(IonSpew_Inlining, "Got inlineable property cache with %d cases",
+            (int)numEntries());
+
+    size_t i = 0;
+    while (i < numEntries()) {
+        bool foundFunc = false;
+        // Compare using originals, but if we find a matching function,
+        // patch it to the target, which might be a clone.
+        for (size_t j = 0; j < originals.length(); j++) {
+            if (entries_[i]->func == originals[j]) {
+                if (entries_[i]->func != targets[j])
+                    entries_[i] = new Entry(entries_[i]->typeObj, targets[j]->toFunction());
+                foundFunc = true;
+                break;
+            }
+        }
+        if (!foundFunc)
+            entries_.erase(&(entries_[i]));
+        else
+            i++;
+    }
+
+    IonSpew(IonSpew_Inlining, "%d inlineable cases left after trimming to %d targets",
+            (int)numEntries(), (int)targets.length());
 }

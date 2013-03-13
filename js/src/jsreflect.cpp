@@ -19,7 +19,6 @@
 #include "jsprf.h"
 #include "jsiter.h"
 #include "jsbool.h"
-#include "jsval.h"
 #include "jsinferinlines.h"
 #include "jsobjinlines.h"
 #include "jsarray.h"
@@ -1458,7 +1457,7 @@ NodeBuilder::function(ASTType type, TokenPos *pos,
 class ASTSerializer
 {
     JSContext           *cx;
-    Parser              *parser;
+    Parser<FullParseHandler> *parser;
     NodeBuilder         builder;
     DebugOnly<uint32_t> lineno;
 
@@ -1552,7 +1551,7 @@ class ASTSerializer
         return builder.init(userobj);
     }
 
-    void setParser(Parser *p) {
+    void setParser(Parser<FullParseHandler> *p) {
         parser = p;
     }
 
@@ -2524,7 +2523,7 @@ ASTSerializer::expression(ParseNode *pn, MutableHandleValue dst)
       {
         /* The parser notes any uninitialized properties by setting the PNX_DESTRUCT flag. */
         if (pn->pn_xflags & PNX_DESTRUCT) {
-            parser->reportError(pn, JSMSG_BAD_OBJECT_INIT);
+            JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL, JSMSG_BAD_OBJECT_INIT);
             return false;
         }
         NodeVector elts(cx);
@@ -3032,7 +3031,7 @@ reflect_parse(JSContext *cx, uint32_t argc, jsval *vp)
     size_t length = stable->length();
     CompileOptions options(cx);
     options.setFileAndLine(filename, lineno);
-    Parser parser(cx, options, chars, length, /* foldConstants = */ false);
+    Parser<FullParseHandler> parser(cx, options, chars.get(), length, /* foldConstants = */ false);
     if (!parser.init())
         return JS_FALSE;
 
@@ -3061,8 +3060,8 @@ JS_PUBLIC_API(JSObject *)
 JS_InitReflect(JSContext *cx, JSObject *objArg)
 {
     RootedObject obj(cx, objArg);
-    RootedObject Reflect(cx, NewObjectWithClassProto(cx, &ObjectClass, NULL, obj));
-    if (!Reflect || !JSObject::setSingletonType(cx, Reflect))
+    RootedObject Reflect(cx, NewObjectWithClassProto(cx, &ObjectClass, NULL, obj, SingletonObject));
+    if (!Reflect)
         return NULL;
 
     if (!JS_DefineProperty(cx, obj, "Reflect", OBJECT_TO_JSVAL(Reflect),

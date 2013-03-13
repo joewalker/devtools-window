@@ -58,10 +58,7 @@ function reflectString(aParameters)
   // TODO: remove this ugly hack when null stringification will work as expected.
   var todoAttrs = {
     form: [ "acceptCharset", "name", "target" ],
-    input: [ "accept", "alt", "formTarget", "max", "min", "name", "pattern", "placeholder", "step", "defaultValue" ],
-    link: [ "crossOrigin" ],
-    source: [ "media" ],
-    textarea: [ "name", "placeholder" ]
+    input: [ "accept", "alt", "formTarget", "max", "min", "name", "pattern", "placeholder", "step", "defaultValue" ]
   };
   if (!(element.localName in todoAttrs) || todoAttrs[element.localName].indexOf(idlAttr) == -1) {
     is(element.getAttribute(contentAttr), "null",
@@ -263,8 +260,6 @@ function reflectLimitedEnumerated(aParameters)
                   ? aParameters.attribute : aParameters.attribute.idl;
   var validValues = aParameters.validValues;
   var invalidValues = aParameters.invalidValues;
-  var defaultValue = aParameters.defaultValue !== undefined
-                       ? aParameters.defaultValue : "";
   var defaultValueInvalid = aParameters.defaultValue === undefined
                                ? "" : typeof aParameters.defaultValue === "string"
                                    ? aParameters.defaultValue : aParameters.defaultValue.invalid
@@ -588,4 +583,25 @@ function reflectInt(aParameters)
      "When not set, the content attribute should be null.");
   is(element[attr], defaultValue,
      "When not set, the IDL attribute should return default value.");
+}
+
+/**
+ * Checks that a given attribute is correctly reflected as a url.
+ *
+ * @param aParameters   Object    object containing the parameters, which are:
+ *  - element           Element   node to test
+ *  - attribute         String    name of the attribute
+ *     OR
+ *    attribute         Object    object containing two attributes, 'content' and 'idl'
+ */
+function reflectURL(aParameters)
+{
+  var element = aParameters.element;
+  var contentAttr = typeof aParameters.attribute === "string"
+	              ? aParameters.attribute : aParameters.attribute.content;
+  var idlAttr = typeof aParameters.attribute === "string"
+                  ? aParameters.attribute : aParameters.attribute.idl;
+
+  element[idlAttr] = "";
+  is(element[idlAttr], document.URL, "Empty string should resolve to document URL");
 }

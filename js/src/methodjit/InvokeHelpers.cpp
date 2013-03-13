@@ -62,7 +62,7 @@ FindExceptionHandler(JSContext *cx)
         for (TryNoteIter tni(cx, cx->regs()); !tni.done(); ++tni) {
             JSTryNote *tn = *tni;
 
-            UnwindScope(cx, tn->stackDepth);
+            UnwindScope(cx, cx->fp(), tn->stackDepth);
 
             /*
              * Set pc to the first bytecode after the the try note to point
@@ -134,7 +134,8 @@ static inline bool
 MaybeCloneAndPatchCallee(JSContext *cx, CallArgs args, HandleScript script, jsbytecode *pc)
 {
     if (cx->typeInferenceEnabled() && !args.calleev().isPrimitive() &&
-        args.callee().isFunction() && args.callee().toFunction()->isCloneAtCallsite())
+        args.callee().isFunction() && args.callee().toFunction()->hasScript() &&
+        args.callee().toFunction()->nonLazyScript()->shouldCloneAtCallsite)
     {
         RootedFunction fun(cx, args.callee().toFunction());
         fun = CloneFunctionAtCallsite(cx, fun, script, pc);
@@ -211,7 +212,6 @@ stubs::HitStackQuota(VMFrame &f)
 void * JS_FASTCALL
 stubs::FixupArity(VMFrame &f, uint32_t nactual)
 {
-    AssertCanGC();
     JSContext *cx = f.cx;
     StackFrame *oldfp = f.fp();
 
@@ -232,8 +232,8 @@ stubs::FixupArity(VMFrame &f, uint32_t nactual)
 
     /* Reserve enough space for a callee frame. */
     CallArgs args = CallArgsFromSp(nactual, f.regs.sp);
-    if (fun->isCallsiteClone()) {
-        JS_ASSERT(args.callee().toFunction() == fun->getExtendedSlot(0).toObject().toFunction());
+    if (script->isCallsiteClone) {
+        JS_ASSERT(args.callee().toFunction() == script->originalFunction());
         args.setCallee(ObjectValue(*fun));
     }
     StackFrame *fp = cx->stack.getFixupFrame(cx, DONT_REPORT_ERROR, args, fun,
@@ -308,7 +308,6 @@ static inline bool
 UncachedInlineCall(VMFrame &f, InitialFrameFlags initial,
                    void **pret, bool *unjittable, uint32_t argc)
 {
-    AssertCanGC();
     JSContext *cx = f.cx;
     CallArgs args = CallArgsFromSp(argc, f.regs.sp);
     RootedFunction newfun(cx, args.callee().toFunction());
@@ -558,11 +557,11 @@ js_InternalThrow(VMFrame &f)
             // Call the throw hook if necessary
             JSThrowHook handler = cx->runtime->debugHooks.throwHook;
             if (handler || !cx->compartment->getDebuggees().empty()) {
-                Value rval;
+                RootedValue rval(cx);
                 JSTrapStatus st = Debugger::onExceptionUnwind(cx, &rval);
                 if (st == JSTRAP_CONTINUE && handler) {
                     RootedScript fscript(cx, cx->fp()->script());
-                    st = handler(cx, fscript, cx->regs().pc, &rval,
+                    st = handler(cx, fscript, cx->regs().pc, rval.address(),
                                  cx->runtime->debugHooks.throwHookData);
                 }
 
@@ -599,7 +598,7 @@ js_InternalThrow(VMFrame &f)
         // prologues and epilogues. Interpret(), and Invoke() all rely on this
         // property.
         JS_ASSERT(!f.fp()->finishedInInterpreter());
-        UnwindScope(cx, 0);
+        UnwindScope(cx, cx->fp(), 0);
         f.regs.setToEndOfScript();
 
         if (cx->compartment->debugMode()) {
@@ -686,7 +685,7 @@ stubs::CreateThis(VMFrame &f, JSObject *proto)
     JSContext *cx = f.cx;
     StackFrame *fp = f.fp();
     RootedObject callee(cx, &fp->callee());
-    JSObject *obj = js_CreateThisForFunctionWithProto(cx, callee, proto);
+    JSObject *obj = CreateThisForFunctionWithProto(cx, callee, proto);
     if (!obj)
         THROW();
     fp->thisValue() = ObjectValue(*obj);
@@ -695,7 +694,6 @@ stubs::CreateThis(VMFrame &f, JSObject *proto)
 void JS_FASTCALL
 stubs::ScriptDebugPrologue(VMFrame &f)
 {
-    AssertCanGC();
     Probes::enterScript(f.cx, f.script(), f.script()->function(), f.fp());
     JSTrapStatus status = js::ScriptDebugPrologue(f.cx, f.fp());
     switch (status) {
@@ -722,21 +720,18 @@ stubs::ScriptDebugEpilogue(VMFrame &f)
 void JS_FASTCALL
 stubs::ScriptProbeOnlyPrologue(VMFrame &f)
 {
-    AutoAssertNoGC nogc;
     Probes::enterScript(f.cx, f.script(), f.script()->function(), f.fp());
 }
 
 void JS_FASTCALL
 stubs::ScriptProbeOnlyEpilogue(VMFrame &f)
 {
-    AutoAssertNoGC nogc;
     Probes::exitScript(f.cx, f.script(), f.script()->function(), f.fp());
 }
 
 void JS_FASTCALL
 stubs::CrossChunkShim(VMFrame &f, void *edge_)
 {
-    AssertCanGC();
     DebugOnly<CrossChunkEdge*> edge = (CrossChunkEdge *) edge_;
 
     mjit::ExpandInlineFrames(f.cx->compartment);
@@ -818,7 +813,7 @@ js_InternalInterpret(void *returnData, void *returnType, void *returnReg, js::VM
 
 #ifdef JS_METHODJIT_SPEW
     JaegerSpew(JSpew_Recompile, "interpreter rejoin (file \"%s\") (line \"%d\") (op %s) (opline \"%d\")\n",
-               script->filename, script->lineno, OpcodeNames[op], PCToLineNumber(script, pc));
+               script->filename(), script->lineno, OpcodeNames[op], PCToLineNumber(script, pc));
 #endif
 
     uint32_t nextDepth = UINT32_MAX;
@@ -897,7 +892,7 @@ js_InternalInterpret(void *returnData, void *returnType, void *returnReg, js::VM
       case REJOIN_THIS_PROTOTYPE: {
         RootedObject callee(cx, &fp->callee());
         JSObject *proto = f.regs.sp[0].isObject() ? &f.regs.sp[0].toObject() : NULL;
-        JSObject *obj = js_CreateThisForFunctionWithProto(cx, callee, proto);
+        JSObject *obj = CreateThisForFunctionWithProto(cx, callee, proto);
         if (!obj)
             return js_InternalThrow(f);
         fp->thisValue() = ObjectValue(*obj);
@@ -939,7 +934,9 @@ js_InternalInterpret(void *returnData, void *returnType, void *returnReg, js::VM
             return js_InternalThrow(f);
         fp->initVarsToUndefined();
         fp->scopeChain();
-        if (!fp->prologue(cx, types::UseNewTypeAtEntry(cx, fp)))
+        if (types::UseNewTypeAtEntry(cx, fp))
+            fp->setUseNewType();
+        if (!fp->prologue(cx))
             return js_InternalThrow(f);
 
         /*
@@ -958,7 +955,7 @@ js_InternalInterpret(void *returnData, void *returnType, void *returnReg, js::VM
       case REJOIN_FUNCTION_PROLOGUE:
         if (fp->isConstructing()) {
             RootedObject callee(cx, &fp->callee());
-            JSObject *obj = js_CreateThisForFunction(cx, callee, types::UseNewTypeAtEntry(cx, fp));
+            JSObject *obj = CreateThisForFunction(cx, callee, types::UseNewTypeAtEntry(cx, fp));
             if (!obj)
                 return js_InternalThrow(f);
             fp->functionThis() = ObjectValue(*obj);

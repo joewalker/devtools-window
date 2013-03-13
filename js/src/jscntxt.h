@@ -30,6 +30,7 @@
 
 #include "ds/LifoAlloc.h"
 #include "gc/Statistics.h"
+#include "gc/StoreBuffer.h"
 #include "js/HashTable.h"
 #include "js/Vector.h"
 #include "vm/DateTime.h"
@@ -236,7 +237,7 @@ struct EvalCacheHashPolicy
     typedef EvalCacheLookup Lookup;
 
     static HashNumber hash(const Lookup &l);
-    static bool match(UnrootedScript script, const EvalCacheLookup &l);
+    static bool match(RawScript script, const EvalCacheLookup &l);
 };
 
 typedef HashSet<RawScript, EvalCacheHashPolicy, SystemAllocPolicy> EvalCache;
@@ -341,7 +342,7 @@ class NewObjectCache
      * NULL if returning the object could possibly trigger GC (does not
      * indicate failure).
      */
-    inline JSObject *newObjectFromHit(JSContext *cx, EntryIndex entry);
+    inline JSObject *newObjectFromHit(JSContext *cx, EntryIndex entry, js::gc::InitialHeap heap);
 
     /* Fill an entry after a cache miss. */
     inline void fillProto(EntryIndex entry, Class *clasp, js::TaggedProto proto, gc::AllocKind kind, JSObject *obj);
@@ -354,7 +355,7 @@ class NewObjectCache
   private:
     inline bool lookup(Class *clasp, gc::Cell *key, gc::AllocKind kind, EntryIndex *pentry);
     inline void fill(EntryIndex entry, Class *clasp, gc::Cell *key, gc::AllocKind kind, JSObject *obj);
-    static inline void copyCachedToObject(JSObject *dst, JSObject *src);
+    static inline void copyCachedToObject(JSObject *dst, JSObject *src, gc::AllocKind kind);
 };
 
 /*
@@ -464,7 +465,6 @@ class PerThreadData : public js::PerThreadDataFriendFields
     js::Vector<SavedGCRoot, 0, js::SystemAllocPolicy> gcSavedRoots;
 
     bool                gcRelaxRootChecks;
-    int                 gcAssertNoGCDepth;
 #endif
 
     /*
@@ -568,7 +568,7 @@ struct MallocProvider
 namespace gc {
 class MarkingValidator;
 } // namespace gc
-
+class JS_FRIEND_API(AutoEnterPolicy);
 } // namespace js
 
 struct JSRuntime : js::RuntimeFriendFields,
@@ -591,6 +591,12 @@ struct JSRuntime : js::RuntimeFriendFields,
 
     /* List of compartments (protected by the GC lock). */
     js::CompartmentVector compartments;
+
+    /* Locale-specific callbacks for string conversion. */
+    JSLocaleCallbacks *localeCallbacks;
+
+    /* Default locale for Internationalization API */
+    char *defaultLocale;
 
     /* See comment for JS_AbortIfWrongThread in jsapi.h. */
 #ifdef JS_THREADSAFE
@@ -675,6 +681,10 @@ struct JSRuntime : js::RuntimeFriendFields,
         return ionRuntime_ ? ionRuntime_ : createIonRuntime(cx);
     }
 
+    //-------------------------------------------------------------------------
+    // Self-hosting support
+    //-------------------------------------------------------------------------
+
     bool initSelfHosting(JSContext *cx);
     void markSelfHostingGlobal(JSTracer *trc);
     bool isSelfHostingGlobal(js::HandleObject global) {
@@ -684,6 +694,25 @@ struct JSRuntime : js::RuntimeFriendFields,
                                        js::Handle<JSFunction*> targetFun);
     bool cloneSelfHostedValue(JSContext *cx, js::Handle<js::PropertyName*> name,
                               js::MutableHandleValue vp);
+
+    //-------------------------------------------------------------------------
+    // Locale information
+    //-------------------------------------------------------------------------
+
+    /*
+     * Set the default locale for the ECMAScript Internationalization API
+     * (Intl.Collator, Intl.NumberFormat, Intl.DateTimeFormat).
+     * Note that the Internationalization API encourages clients to
+     * specify their own locales.
+     * The locale string remains owned by the caller.
+     */
+    bool setDefaultLocale(const char *locale);
+
+    /* Reset the default locale to OS defaults. */
+    void resetDefaultLocale();
+
+    /* Gets current default locale. String remains owned by context. */
+    const char *getDefaultLocale();
 
     /* Base address of the native stack for the current thread. */
     uintptr_t           nativeStackBase;
@@ -741,7 +770,7 @@ struct JSRuntime : js::RuntimeFriendFields,
     js::RootedValueMap  gcRootsHash;
     js::GCLocks         gcLocksHash;
     unsigned            gcKeepAtoms;
-    size_t              gcBytes;
+    volatile size_t     gcBytes;
     size_t              gcMaxBytes;
     size_t              gcMaxMallocBytes;
 
@@ -881,27 +910,34 @@ struct JSRuntime : js::RuntimeFriendFields,
     /*
      * This is true if we are in the middle of a brain transplant (e.g.,
      * JS_TransplantObject) or some other operation that can manipulate
-     * dead compartments.
+     * dead zones.
      */
-    bool                gcManipulatingDeadCompartments;
+    bool                gcManipulatingDeadZones;
 
     /*
      * This field is incremented each time we mark an object inside a
-     * compartment with no incoming cross-compartment pointers. Typically if
+     * zone with no incoming cross-compartment pointers. Typically if
      * this happens it signals that an incremental GC is marking too much
      * stuff. At various times we check this counter and, if it has changed, we
      * run an immediate, non-incremental GC to clean up the dead
-     * compartments. This should happen very rarely.
+     * zones. This should happen very rarely.
      */
-    unsigned            gcObjectsMarkedInDeadCompartments;
+    unsigned            gcObjectsMarkedInDeadZones;
 
     bool                gcPoke;
 
-    js::HeapState       heapState;
+    volatile js::HeapState heapState;
 
     bool isHeapBusy() { return heapState != js::Idle; }
 
     bool isHeapCollecting() { return heapState == js::Collecting; }
+
+#ifdef JSGC_GENERATIONAL
+# ifdef JS_GC_ZEAL
+    js::gc::VerifierNursery      gcVerifierNursery;
+# endif
+    js::gc::StoreBuffer          gcStoreBuffer;
+#endif
 
     /*
      * These options control the zealousness of the GC. The fundamental values
@@ -957,6 +993,7 @@ struct JSRuntime : js::RuntimeFriendFields,
 #endif
 
     bool                gcValidate;
+    bool                gcFullCompartmentChecks;
 
     JSGCCallback        gcCallback;
     js::GCSliceCallback gcSliceCallback;
@@ -1130,7 +1167,7 @@ struct JSRuntime : js::RuntimeFriendFields,
     JSPreWrapCallback                      preWrapObjectCallback;
     js::PreserveWrapperCallback            preserveWrapperCallback;
 
-    js::ScriptFilenameTable scriptFilenameTable;
+    js::ScriptDataTable scriptDataTable;
 
 #ifdef DEBUG
     size_t              noGCOrAllocationCheck;
@@ -1148,6 +1185,10 @@ struct JSRuntime : js::RuntimeFriendFields,
     js::ThreadPool threadPool;
 
     js::CTypesActivityCallback  ctypesActivityCallback;
+
+    // Non-zero if this is a parallel warmup execution.  See
+    // js::parallel::Do() for more information.
+    uint32_t parallelWarmup;
 
   private:
     // In certain cases, we want to optimize certain opcodes to typed instructions,
@@ -1261,7 +1302,11 @@ struct JSRuntime : js::RuntimeFriendFields,
         return 0;
 #endif
     }
+#ifdef DEBUG
+  public:
+    js::AutoEnterPolicy *enteredPolicy;
 
+#endif
   private:
     /*
      * Used to ensure that compartments created at the same time get different
@@ -1291,7 +1336,6 @@ struct AutoResolving;
  */
 namespace VersionFlags {
 static const unsigned MASK      = 0x0FFF; /* see JSVersion in jspubtd.h */
-static const unsigned FULL_MASK = 0x0FFF;
 } /* namespace VersionFlags */
 
 static inline JSVersion
@@ -1316,20 +1360,6 @@ static inline bool
 VersionHasFlags(JSVersion version)
 {
     return !!VersionExtractFlags(version);
-}
-
-static inline unsigned
-VersionFlagsToOptions(JSVersion version)
-{
-    unsigned copts = 0;
-    JS_ASSERT((copts & JSCOMPILEOPTION_MASK) == copts);
-    return copts;
-}
-
-static inline JSVersion
-OptionFlagsToVersion(unsigned options, JSVersion version)
-{
-    return version;
 }
 
 static inline bool
@@ -1371,32 +1401,11 @@ struct JSContext : js::ContextFriendFields,
     bool                throwing;            /* is there a pending exception? */
     js::Value           exception;           /* most-recently-thrown exception */
 
-    /* Per-context run options. */
-    unsigned            runOptions;          /* see jsapi.h for JSOPTION_* */
-
-    /* Default locale for Internationalization API */
-    char                *defaultLocale;
+    /* Per-context options. */
+    unsigned            options_;            /* see jsapi.h for JSOPTION_* */
 
   public:
     int32_t             reportGranularity;  /* see jsprobes.h */
-
-    /*
-     * Set the default locale for the ECMAScript Internationalization API
-     * (Intl.Collator, Intl.NumberFormat, Intl.DateTimeFormat).
-     * Note that the Internationalization API encourages clients to
-     * specify their own locales.
-     * The locale string remains owned by the caller.
-     */
-    bool setDefaultLocale(const char *locale);
-
-    /* Reset the default locale to OS defaults. */
-    void resetDefaultLocale();
-
-    /* Gets current default locale. String remains owned by context. */
-    const char *getDefaultLocale();
-
-    /* Locale specific callbacks for string conversion. */
-    JSLocaleCallbacks   *localeCallbacks;
 
     js::AutoResolving   *resolvingList;
 
@@ -1559,26 +1568,20 @@ struct JSContext : js::ContextFriendFields,
      */
     inline JSVersion findVersion() const;
 
-    void setRunOptions(unsigned ropts) {
-        JS_ASSERT((ropts & JSRUNOPTION_MASK) == ropts);
-        runOptions = ropts;
+    void setOptions(unsigned opts) {
+        JS_ASSERT((opts & JSOPTION_MASK) == opts);
+        options_ = opts;
     }
 
-    /* Note: may override the version. */
-    inline void setCompileOptions(unsigned newcopts);
+    unsigned options() const { return options_; }
 
-    unsigned getRunOptions() const { return runOptions; }
-    inline unsigned getCompileOptions() const;
-    inline unsigned allOptions() const;
-
-    bool hasRunOption(unsigned ropt) const {
-        JS_ASSERT((ropt & JSRUNOPTION_MASK) == ropt);
-        return !!(runOptions & ropt);
+    bool hasOption(unsigned opt) const {
+        JS_ASSERT((opt & JSOPTION_MASK) == opt);
+        return !!(options_ & opt);
     }
 
-    bool hasStrictOption() const { return hasRunOption(JSOPTION_STRICT); }
-    bool hasWErrorOption() const { return hasRunOption(JSOPTION_WERROR); }
-    bool hasAtLineOption() const { return hasRunOption(JSOPTION_ATLINE); }
+    bool hasStrictOption() const { return hasOption(JSOPTION_STRICT); }
+    bool hasWErrorOption() const { return hasOption(JSOPTION_WERROR); }
 
     js::LifoAlloc &tempLifoAlloc() { return runtime->tempLifoAlloc; }
     inline js::LifoAlloc &analysisLifoAlloc();
@@ -1634,9 +1637,7 @@ struct JSContext : js::ContextFriendFields,
     void *onOutOfMemory(void *p, size_t nbytes) {
         return runtime->onOutOfMemory(p, nbytes, this);
     }
-    void updateMallocCounter(size_t nbytes) {
-        runtime->updateMallocCounter(compartment, nbytes);
-    }
+    void updateMallocCounter(size_t nbytes);
     void reportAllocationOverflow() {
         js_ReportAllocationOverflow(this);
     }
@@ -2167,7 +2168,33 @@ class AutoObjectObjectHashMap : public AutoHashMapRooter<RawObject, RawObject>
     MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
 };
 
-class AutoAssertNoGCOrException : public AutoAssertNoGC
+class AutoObjectUnsigned32HashMap : public AutoHashMapRooter<RawObject, uint32_t>
+{
+  public:
+    explicit AutoObjectUnsigned32HashMap(JSContext *cx
+                                         MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+      : AutoHashMapRooter<RawObject, uint32_t>(cx, OBJU32HASHMAP)
+    {
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    }
+
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
+
+class AutoObjectHashSet : public AutoHashSetRooter<RawObject>
+{
+  public:
+    explicit AutoObjectHashSet(JSContext *cx
+                               MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+      : AutoHashSetRooter<RawObject>(cx, OBJHASHSET)
+    {
+        MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    }
+
+    MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
+
+class AutoAssertNoException
 {
 #ifdef DEBUG
     JSContext *cx;
@@ -2175,7 +2202,7 @@ class AutoAssertNoGCOrException : public AutoAssertNoGC
 #endif
 
   public:
-    AutoAssertNoGCOrException(JSContext *cx)
+    AutoAssertNoException(JSContext *cx)
 #ifdef DEBUG
       : cx(cx),
         hadException(cx->isExceptionPending())
@@ -2183,7 +2210,7 @@ class AutoAssertNoGCOrException : public AutoAssertNoGC
     {
     }
 
-    ~AutoAssertNoGCOrException()
+    ~AutoAssertNoException()
     {
         JS_ASSERT_IF(!hadException, !cx->isExceptionPending());
     }
@@ -2219,17 +2246,26 @@ class RuntimeAllocPolicy
  */
 class ContextAllocPolicy
 {
-    JSContext *const cx;
+    JSContext *const cx_;
 
   public:
-    ContextAllocPolicy(JSContext *cx) : cx(cx) {}
-    JSContext *context() const { return cx; }
-    void *malloc_(size_t bytes) { return cx->malloc_(bytes); }
-    void *calloc_(size_t bytes) { return cx->calloc_(bytes); }
-    void *realloc_(void *p, size_t oldBytes, size_t bytes) { return cx->realloc_(p, oldBytes, bytes); }
+    ContextAllocPolicy(JSContext *cx) : cx_(cx) {}
+    JSContext *context() const { return cx_; }
+    void *malloc_(size_t bytes) { return cx_->malloc_(bytes); }
+    void *calloc_(size_t bytes) { return cx_->calloc_(bytes); }
+    void *realloc_(void *p, size_t oldBytes, size_t bytes) { return cx_->realloc_(p, oldBytes, bytes); }
     void free_(void *p) { js_free(p); }
-    void reportAllocOverflow() const { js_ReportAllocationOverflow(cx); }
+    void reportAllocOverflow() const { js_ReportAllocationOverflow(cx_); }
 };
+
+JSBool intrinsic_ThrowError(JSContext *cx, unsigned argc, Value *vp);
+JSBool intrinsic_NewDenseArray(JSContext *cx, unsigned argc, Value *vp);
+JSBool intrinsic_UnsafeSetElement(JSContext *cx, unsigned argc, Value *vp);
+JSBool intrinsic_ShouldForceSequential(JSContext *cx, unsigned argc, Value *vp);
+
+#ifdef DEBUG
+JSBool intrinsic_Dump(JSContext *cx, unsigned argc, Value *vp);
+#endif
 
 } /* namespace js */
 

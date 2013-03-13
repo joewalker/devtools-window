@@ -6,11 +6,13 @@
 # Shortcut for mochitest* and xpcshell-tests targets,
 # replaces 'EXTRA_TEST_ARGS=--test-path=...'.
 ifdef TEST_PATH
-TEST_PATH_ARG := --test-path=$(TEST_PATH)
-PEPTEST_PATH_ARG := --test-path=$(TEST_PATH)
+TEST_PATH_ARG := --test-path="$(TEST_PATH)"
+PEPTEST_PATH_ARG := --test-path="$(TEST_PATH)"
+IPCPLUGINS_PATH_ARG := --test-path="$(TEST_PATH)"
 else
 TEST_PATH_ARG :=
 PEPTEST_PATH_ARG := --test-path=_tests/peptest/tests/firefox/firefox_all.ini
+IPCPLUGINS_PATH_ARG := --test-path=dom/plugins/test
 endif
 
 # include automation-build.mk to get the path to the binary
@@ -26,6 +28,14 @@ mochitest:: $(MOCHITESTS)
 ifndef TEST_PACKAGE_NAME
 TEST_PACKAGE_NAME := $(ANDROID_PACKAGE_NAME)
 endif
+
+RUN_MOCHITEST_B2G_DESKTOP = \
+  rm -f ./$@.log && \
+  $(PYTHON) _tests/testing/mochitest/runtestsb2g.py --autorun --close-when-done \
+    --console-level=INFO --log-file=./$@.log --file-level=INFO \
+    --desktop --profile ${GAIA_PROFILE_DIR} \
+    --failure-file=$(call core_abspath,_tests/testing/mochitest/makefailures.json) \
+    $(TEST_PATH_ARG) $(EXTRA_TEST_ARGS)
 
 RUN_MOCHITEST = \
   rm -f ./$@.log && \
@@ -96,9 +106,19 @@ mochitest-robotium:
         $(RUN_MOCHITEST_ROBOTIUM); \
     fi
 
+ifdef MOZ_B2G
+mochitest-plain:
+	@if [ "${GAIA_PROFILE_DIR}"  = "" ]; then \
+        echo "please specify the GAIA_PROFILE_DIR env variable"; \
+    else \
+        $(RUN_MOCHITEST_B2G_DESKTOP); \
+        $(CHECK_TEST_ERROR_RERUN); \
+    fi
+else
 mochitest-plain:
 	$(RUN_MOCHITEST)
 	$(CHECK_TEST_ERROR_RERUN)
+endif
 
 mochitest-plain-rerun-failures:
 	$(RERUN_MOCHITEST)
@@ -121,13 +141,13 @@ mochitest-a11y:
 mochitest-ipcplugins:
 ifeq (Darwin,$(OS_ARCH))
 ifeq (i386,$(TARGET_CPU))
-	$(RUN_MOCHITEST) --setpref=dom.ipc.plugins.enabled.i386.test.plugin=false --test-path=dom/plugins/test
+	$(RUN_MOCHITEST) --setpref=dom.ipc.plugins.enabled.i386.test.plugin=false $(IPCPLUGINS_PATH_ARG)
 endif
 ifeq (x86_64,$(TARGET_CPU))
-	$(RUN_MOCHITEST) --setpref=dom.ipc.plugins.enabled.x86_64.test.plugin=false --test-path=dom/plugins/test
+	$(RUN_MOCHITEST) --setpref=dom.ipc.plugins.enabled.x86_64.test.plugin=false $(IPCPLUGINS_PATH_ARG)
 endif
 ifeq (powerpc,$(TARGET_CPU))
-	$(RUN_MOCHITEST) --setpref=dom.ipc.plugins.enabled.ppc.test.plugin=false --test-path=dom/plugins/test
+	$(RUN_MOCHITEST) --setpref=dom.ipc.plugins.enabled.ppc.test.plugin=false $(IPCPLUGINS_PATH_ARG)
 endif
 else
 	$(RUN_MOCHITEST) --setpref=dom.ipc.plugins.enabled=false --test-path=dom/plugins/test
@@ -156,17 +176,17 @@ endif
 # Usage: |make [EXTRA_TEST_ARGS=...] *test|.
 RUN_REFTEST = rm -f ./$@.log && $(PYTHON) _tests/reftest/runreftest.py \
   --extra-profile-file=$(DIST)/plugins \
-  $(SYMBOLS_PATH) $(EXTRA_TEST_ARGS) $(1) | tee ./$@.log
+  $(SYMBOLS_PATH) $(EXTRA_TEST_ARGS) "$(1)" | tee ./$@.log
 
 REMOTE_REFTEST = rm -f ./$@.log && $(PYTHON) _tests/reftest/remotereftest.py \
   --dm_trans=$(DM_TRANS) --ignore-window-size \
   --app=$(TEST_PACKAGE_NAME) --deviceIP=${TEST_DEVICE} --xre-path=${MOZ_HOST_BIN} \
-  $(SYMBOLS_PATH) $(EXTRA_TEST_ARGS) $(1) | tee ./$@.log
+  $(SYMBOLS_PATH) $(EXTRA_TEST_ARGS) "$(1)" | tee ./$@.log
 
 RUN_REFTEST_B2G = rm -f ./$@.log && $(PYTHON) _tests/reftest/runreftestb2g.py \
   --remote-webserver=10.0.2.2 --b2gpath=${B2G_PATH} --adbpath=${ADB_PATH} \
   --xre-path=${MOZ_HOST_BIN} $(SYMBOLS_PATH) --ignore-window-size \
-  $(EXTRA_TEST_ARGS) $(1) | tee ./$@.log
+  $(EXTRA_TEST_ARGS) "$(1)" | tee ./$@.log
 
 ifeq ($(OS_ARCH),WINNT) #{
 # GPU-rendered shadow layers are unsupported here
@@ -346,6 +366,13 @@ cppunittests-remote:
 
 jetpack-tests:
 	$(PYTHON) $(topsrcdir)/addon-sdk/source/bin/cfx -b $(browser_path) --parseable testpkgs
+
+# -- -register
+# -- --trace-malloc malloc.log --shutdown-leaks=sdleak.log
+leaktest:
+	$(PYTHON) _leaktest/leaktest.py $(LEAKTEST_ARGS)
+
+
 
 # Package up the tests and test harnesses
 include $(topsrcdir)/toolkit/mozapps/installer/package-name.mk

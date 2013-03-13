@@ -23,8 +23,7 @@ public:
   }
   virtual ~XMLStylesheetProcessingInstruction();
 
-  virtual JSObject* WrapNode(JSContext *aCx, JSObject *aScope,
-                             bool *aTriedToWrap);
+  virtual JSObject* WrapNode(JSContext *aCx, JSObject *aScope) MOZ_OVERRIDE;
 
   // nsISupports
   NS_DECL_ISUPPORTS_INHERITED
@@ -49,8 +48,6 @@ public:
 
   // nsStyleLinkElement
   NS_IMETHOD GetCharset(nsAString& aCharset);
-
-  virtual nsXPCClassInfo* GetClassInfo();
 
 protected:
   nsCOMPtr<nsIURI> mOverriddenBaseURI;

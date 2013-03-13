@@ -507,6 +507,44 @@ add_test(function test_send_stk_terminal_profile() {
 });
 
 /**
+ * Verify RIL.iccGetCardLock("fdn")
+ */
+add_test(function test_icc_get_card_lock_fdn() {
+  let worker = newUint8Worker();
+  let ril = worker.RIL;
+  let buf = worker.Buf;
+
+  buf.sendParcel = function () {
+    // Request Type.
+    do_check_eq(this.readUint32(), REQUEST_QUERY_FACILITY_LOCK)
+
+    // Token : we don't care.
+    this.readUint32();
+
+    // String Array Length.
+    do_check_eq(this.readUint32(), 4);
+
+    // Facility.
+    do_check_eq(this.readString(), ICC_CB_FACILITY_FDN);
+
+    // Password.
+    do_check_eq(this.readString(), "");
+
+    // Service class.
+    do_check_eq(this.readString(), (ICC_SERVICE_CLASS_VOICE |
+                                    ICC_SERVICE_CLASS_DATA  |
+                                    ICC_SERVICE_CLASS_FAX).toString());
+
+    // AID. Ignore because it's from modem.
+    this.readUint32();
+
+    run_next_test();
+  };
+
+  ril.iccGetCardLock({lockType: "fdn"});
+});
+
+/**
  * Verify ComprehensionTlvHelper.writeLocationInfoTlv
  */
 add_test(function test_write_location_info_tlv() {
@@ -516,8 +554,8 @@ add_test(function test_write_location_info_tlv() {
 
   // Test with 2-digit mnc, and gsmCellId obtained from UMTS network.
   let loc = {
-    mcc: 466,
-    mnc: 92,
+    mcc: "466",
+    mnc: "92",
     gsmLocationAreaCode : 10291,
     gsmCellId: 19072823
   };
@@ -544,8 +582,8 @@ add_test(function test_write_location_info_tlv() {
 
   // Test with 1-digit mnc, and gsmCellId obtained from GSM network.
   loc = {
-    mcc: 466,
-    mnc: 2,
+    mcc: "466",
+    mnc: "02",
     gsmLocationAreaCode : 10291,
     gsmCellId: 65534
   };
@@ -569,8 +607,8 @@ add_test(function test_write_location_info_tlv() {
 
   // Test with 3-digit mnc, and gsmCellId obtained from GSM network.
   loc = {
-    mcc: 466,
-    mnc: 222,
+    mcc: "466",
+    mnc: "222",
     gsmLocationAreaCode : 10291,
     gsmCellId: 65534
   };
@@ -1035,6 +1073,70 @@ add_test(function test_stk_proactive_command_set_up_call() {
   run_next_test();
 });
 
+add_test(function test_read_pnn() {
+  let worker = newUint8Worker();
+  let helper = worker.GsmPDUHelper;
+  let record = worker.ICCRecordHelper;
+  let buf    = worker.Buf;
+  let io     = worker.ICCIOHelper;
+  let ril    = worker.RIL;
+
+  io.loadLinearFixedEF = function fakeLoadLinearFixedEF(options) {
+    let records = [
+      // Record 1 - fullName: 'Long1', shortName: 'Short1'
+      [0x43, 0x06, 0x85, 0xCC, 0xB7, 0xFB, 0x1C, 0x03,
+       0x45, 0x07, 0x86, 0x53, 0xF4, 0x5B, 0x4E, 0x8F, 0x01,
+       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
+      // Record 2 - fullName: 'Long2'
+      [0x43, 0x06, 0x85, 0xCC, 0xB7, 0xFB, 0x2C, 0x03,
+       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
+      // Record 3 - Unused bytes
+      [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+       0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
+    ];
+
+    // Fake get response
+    options.totalRecords = records.length;
+    options.recordSize = records[0].length;
+
+    options.p1 = options.p1 || 1;
+
+    let record = records[options.p1 - 1];
+
+    // Write data size
+    buf.writeUint32(record.length * 2);
+
+    // Write record
+    for (let i = 0; i < record.length; i++) {
+      helper.writeHexOctet(record[i]);
+    }
+
+    // Write string delimiter
+    buf.writeStringDelimiter(record.length * 2);
+
+    if (options.callback) {
+      options.callback(options);
+    }
+  };
+
+  io.loadNextRecord = function fakeLoadNextRecord(options) {
+    options.p1++;
+    io.loadLinearFixedEF(options);
+  };
+
+  record.readPNN();
+
+  do_check_eq(ril.iccInfoPrivate.PNN.length, 2);
+  do_check_eq(ril.iccInfoPrivate.PNN[0].fullName, "Long1");
+  do_check_eq(ril.iccInfoPrivate.PNN[0].shortName, "Short1");
+  do_check_eq(ril.iccInfoPrivate.PNN[1].fullName, "Long2");
+  do_check_eq(ril.iccInfoPrivate.PNN[1].shortName, undefined);
+
+  run_next_test();
+});
+
 add_test(function read_network_name() {
   let worker = newUint8Worker();
   let helper = worker.GsmPDUHelper;
@@ -1080,34 +1182,27 @@ add_test(function read_network_name() {
   run_next_test();
 });
 
-add_test(function test_update_network_name() {
-  let RIL = newWorker({
-    postRILMessage: function fakePostRILMessage(data) {
-      // Do nothing
-    },
-    postMessage: function fakePostMessage(message) {
-      // Do nothing
+add_test(function test_get_network_name_from_icc() {
+  let worker = newUint8Worker();
+  let RIL = worker.RIL;
+  let ICCUtilsHelper = worker.ICCUtilsHelper;
+
+  function testGetNetworkNameFromICC(operatorData, expectedResult) {
+    let result = ICCUtilsHelper.getNetworkNameFromICC(operatorData.mcc,
+                                                      operatorData.mnc,
+                                                      operatorData.lac);
+
+    if (expectedResult == null) {
+      do_check_eq(result, expectedResult);
+    } else {
+      do_check_eq(result.fullName, expectedResult.longName);
+      do_check_eq(result.shortName, expectedResult.shortName);
     }
-  }).RIL;
-
-  function testNetworkNameIsNull(operatorMcc, operatorMnc) {
-    RIL.operator.mcc = operatorMcc;
-    RIL.operator.mnc = operatorMnc;
-    do_check_eq(RIL.updateNetworkName(), null);
-  }
-
-  function testNetworkName(operatorMcc, operatorMnc,
-                            expectedLongName, expectedShortName) {
-    RIL.operator.mcc = operatorMcc;
-    RIL.operator.mnc = operatorMnc;
-    let result = RIL.updateNetworkName();
-
-    do_check_eq(result[0], expectedLongName);
-    do_check_eq(result[1], expectedShortName);
   }
 
   // Before EF_OPL and EF_PNN have been loaded.
-  do_check_eq(RIL.updateNetworkName(), null);
+  testGetNetworkNameFromICC({mcc: 123, mnc: 456, lac: 0x1000}, null);
+  testGetNetworkNameFromICC({mcc: 321, mnc: 654, lac: 0x2000}, null);
 
   // Set HPLMN
   RIL.iccInfo.mcc = 123;
@@ -1131,11 +1226,12 @@ add_test(function test_update_network_name() {
   };
 
   // EF_OPL isn't available and current isn't in HPLMN,
-  testNetworkNameIsNull(123, 457);
+  testGetNetworkNameFromICC({mcc: 321, mnc: 654, lac: 0x1000}, null);
 
   // EF_OPL isn't available and current is in HPLMN,
   // the first record of PNN should be returned.
-  testNetworkName(123, 456, "PNN1Long", "PNN1Short");
+  testGetNetworkNameFromICC({mcc: 123, mnc: 456, lac: 0x1000},
+                            {longName: "PNN1Long", shortName: "PNN1Short"});
 
   // Set EF_OPL
   RIL.iccInfoPrivate.OPL = [
@@ -1147,27 +1243,34 @@ add_test(function test_update_network_name() {
       "pnnRecordId": 4
     },
     {
-      "mcc": 123,
-      "mnc": 457,
+      "mcc": 321,
+      "mnc": 654,
       "lacTacStart": 0,
       "lacTacEnd": 0x0010,
       "pnnRecordId": 3
     },
     {
-      "mcc": 123,
-      "mnc": 457,
-      "lacTacStart": 0,
+      "mcc": 321,
+      "mnc": 654,
+      "lacTacStart": 0x0100,
       "lacTacEnd": 0x1010,
       "pnnRecordId": 2
     }
   ];
 
   // Both EF_PNN and EF_OPL are presented, and current PLMN is HPLMN,
-  testNetworkName(123, 456, "PNN4Long", "PNN4Short");
+  testGetNetworkNameFromICC({mcc: 123, mnc: 456, lac: 0x1000},
+                            {longName: "PNN4Long", shortName: "PNN4Short"});
 
   // Current PLMN is not HPLMN, and according to LAC, we should get
   // the second PNN record.
-  testNetworkName(123, 457, "PNN2Long", "PNN2Short");
+  testGetNetworkNameFromICC({mcc: 321, mnc: 654, lac: 0x1000},
+                            {longName: "PNN2Long", shortName: "PNN2Short"});
+
+  // Current PLMN is not HPLMN, and according to LAC, we should get
+  // the thrid PNN record.
+  testGetNetworkNameFromICC({mcc: 321, mnc: 654, lac: 0x0001},
+                            {longName: "PNN3Long", shortName: "PNN3Short"});
 
   run_next_test();
 });
@@ -1294,23 +1397,14 @@ add_test(function test_path_id_for_spid_and_spn() {
   let ICCFileHelper = worker.ICCFileHelper;
 
   // Test SIM
-  RIL.iccStatus = {
-    gsmUmtsSubscriptionAppIndex: 0,
-    apps: [
-      {
-        app_type: CARD_APPTYPE_SIM
-      }, {
-        app_type: CARD_APPTYPE_USIM
-      }
-    ]
-  }
+  RIL.appType = CARD_APPTYPE_SIM;
   do_check_eq(ICCFileHelper.getEFPath(ICC_EF_SPDI),
               EF_PATH_MF_SIM + EF_PATH_DF_GSM);
   do_check_eq(ICCFileHelper.getEFPath(ICC_EF_SPN),
               EF_PATH_MF_SIM + EF_PATH_DF_GSM);
 
   // Test USIM
-  RIL.iccStatus.gsmUmtsSubscriptionAppIndex = 1;
+  RIL.appType = CARD_APPTYPE_USIM;
   do_check_eq(ICCFileHelper.getEFPath(ICC_EF_SPDI),
               EF_PATH_MF_SIM + EF_PATH_ADF_USIM);
   do_check_eq(ICCFileHelper.getEFPath(ICC_EF_SPDI),
@@ -1343,7 +1437,13 @@ add_test(function test_parse_pbr_tlvs() {
      length: 0x05,
      value: [{tag: ICC_USIM_EFEMAIL_TAG,
               length: 0x03,
-              value: [0x4F, 0x50, 0x0B]}]
+              value: [0x4F, 0x50, 0x0B]},
+             {tag: ICC_USIM_EFANR_TAG,
+              length: 0x03,
+              value: [0x4F, 0x11, 0x02]},
+             {tag: ICC_USIM_EFANR_TAG,
+              length: 0x03,
+              value: [0x4F, 0x12, 0x03]}]
     },
     {tag: ICC_USIM_TYPE3_TAG,
      length: 0x0A,
@@ -1361,6 +1461,8 @@ add_test(function test_parse_pbr_tlvs() {
   do_check_eq(pbr.iap.fileId, 0x4F25);
   do_check_eq(pbr.pbc.fileId, 0x4F09);
   do_check_eq(pbr.email.fileId, 0x4F50);
+  do_check_eq(pbr.anr0.fileId, 0x4f11);
+  do_check_eq(pbr.anr1.fileId, 0x4f12);
   do_check_eq(pbr.ccp1.fileId, 0x4F3D);
   do_check_eq(pbr.ext1.fileId, 0x4F4A);
 
@@ -1377,7 +1479,7 @@ add_test(function test_stk_event_download_location_status() {
 
   buf.sendParcel = function () {
     // Type
-    do_check_eq(this.readUint32(), REQUEST_STK_SEND_ENVELOPE_COMMAND)
+    do_check_eq(this.readUint32(), REQUEST_STK_SEND_ENVELOPE_COMMAND);
 
     // Token : we don't care
     this.readUint32();
@@ -1436,8 +1538,8 @@ add_test(function test_stk_event_download_location_status() {
     eventType: STK_EVENT_TYPE_LOCATION_STATUS,
     locationStatus: STK_SERVICE_STATE_NORMAL,
     locationInfo: {
-      mcc: 123,
-      mnc: 456,
+      mcc: "123",
+      mnc: "456",
       gsmLocationAreaCode: 0,
       gsmCellId: 0
     }
@@ -1457,7 +1559,7 @@ add_test(function test_stk_terminal_response() {
 
   buf.sendParcel = function () {
     // Type
-    do_check_eq(this.readUint32(), REQUEST_STK_SEND_TERMINAL_RESPONSE)
+    do_check_eq(this.readUint32(), REQUEST_STK_SEND_TERMINAL_RESPONSE);
 
     // Token : we don't care
     this.readUint32();
@@ -1524,7 +1626,7 @@ add_test(function test_stk_event_download_language_selection() {
 
   buf.sendParcel = function () {
     // Type
-    do_check_eq(this.readUint32(), REQUEST_STK_SEND_ENVELOPE_COMMAND)
+    do_check_eq(this.readUint32(), REQUEST_STK_SEND_ENVELOPE_COMMAND);
 
     // Token : we don't care
     this.readUint32();
@@ -1582,7 +1684,7 @@ add_test(function test_stk_event_download_idle_screen_available() {
 
   buf.sendParcel = function () {
     // Type
-    do_check_eq(this.readUint32(), REQUEST_STK_SEND_ENVELOPE_COMMAND)
+    do_check_eq(this.readUint32(), REQUEST_STK_SEND_ENVELOPE_COMMAND);
 
     // Token : we don't care
     this.readUint32();
@@ -1619,3 +1721,362 @@ add_test(function test_stk_event_download_idle_screen_available() {
     event: event
   });
 });
+
+/**
+ * Verify ICCIOHelper.loadLinearFixedEF with recordSize.
+ */
+add_test(function test_load_linear_fixed_ef() {
+  let worker = newUint8Worker();
+  let ril = worker.RIL;
+  let io = worker.ICCIOHelper;
+
+  io.getResponse = function fakeGetResponse(options) {
+    // When recordSize is provided, loadLinearFixedEF should call iccIO directly.
+    do_check_true(false);
+    run_next_test();
+  };
+
+  ril.iccIO = function fakeIccIO(options) {
+    do_check_true(true);
+    run_next_test();
+  };
+
+  io.loadLinearFixedEF({recordSize: 0x20});
+});
+
+/**
+ * Verify ICCIOHelper.loadLinearFixedEF without recordSize.
+ */
+add_test(function test_load_linear_fixed_ef() {
+  let worker = newUint8Worker();
+  let ril = worker.RIL;
+  let io = worker.ICCIOHelper;
+
+  io.getResponse = function fakeGetResponse(options) {
+    do_check_true(true);
+    run_next_test();
+  };
+
+  ril.iccIO = function fakeIccIO(options) {
+    // When recordSize is not provided, loadLinearFixedEF should call getResponse.
+    do_check_true(false);
+    run_next_test();
+  };
+
+  io.loadLinearFixedEF({});
+});
+
+/**
+ * Verify ICCRecordHelper.readEmail
+ */
+add_test(function test_read_email() {
+  let worker = newUint8Worker();
+  let helper = worker.GsmPDUHelper;
+  let record = worker.ICCRecordHelper;
+  let buf    = worker.Buf;
+  let io     = worker.ICCIOHelper;
+  let recordSize;
+
+  io.loadLinearFixedEF = function fakeLoadLinearFixedEF(options)  {
+    let email_1 = [
+      0x65, 0x6D, 0x61, 0x69, 0x6C,
+      0x00, 0x6D, 0x6F, 0x7A, 0x69,
+      0x6C, 0x6C, 0x61, 0x2E, 0x63,
+      0x6F, 0x6D, 0x02, 0x23];
+
+    // Write data size
+    buf.writeUint32(email_1.length * 2);
+
+    // Write email
+    for (let i = 0; i < email_1.length; i++) {
+      helper.writeHexOctet(email_1[i]);
+    }
+
+    // Write string delimiter
+    buf.writeStringDelimiter(email_1.length * 2);
+
+    recordSize = email_1.length;
+    options.recordSize = recordSize;
+    if (options.callback) {
+      options.callback(options);
+    }
+  };
+
+  function doTestReadEmail(type, expectedResult) {
+    let fileId = 0x6a75;
+    let recordNumber = 1;
+
+    // fileId and recordNumber are dummy arguments.
+    record.readEmail(fileId, type, recordNumber, function (email) {
+      do_check_eq(email, expectedResult);
+    });
+  };
+
+  doTestReadEmail(ICC_USIM_TYPE1_TAG, "email@mozilla.com$#");
+  doTestReadEmail(ICC_USIM_TYPE2_TAG, "email@mozilla.com");
+  do_check_eq(record._emailRecordSize, recordSize);
+
+  run_next_test();
+});
+
+/**
+ * Verify ICCRecordHelper.readANR
+ */
+add_test(function test_read_email() {
+  let worker = newUint8Worker();
+  let helper = worker.GsmPDUHelper;
+  let record = worker.ICCRecordHelper;
+  let buf    = worker.Buf;
+  let io     = worker.ICCIOHelper;
+  let recordSize;
+
+  io.loadLinearFixedEF = function fakeLoadLinearFixedEF(options)  {
+    let anr_1 = [
+      0x01, 0x05, 0x81, 0x10, 0x32,
+      0x54, 0xF6, 0xFF, 0xFF];
+
+    // Write data size
+    buf.writeUint32(anr_1.length * 2);
+
+    // Write anr
+    for (let i = 0; i < anr_1.length; i++) {
+      helper.writeHexOctet(anr_1[i]);
+    }
+
+    // Write string delimiter
+    buf.writeStringDelimiter(anr_1.length * 2);
+
+    recordSize = anr_1.length;
+    options.recordSize = recordSize;
+    if (options.callback) {
+      options.callback(options);
+    }
+  };
+
+  function doTestReadAnr(fileType, expectedResult) {
+    let fileId = 0x4f11;
+    let recordNumber = 1;
+
+    // fileId and recordNumber are dummy arguments.
+    record.readANR(fileId, fileType, recordNumber, function (anr) {
+      do_check_eq(anr, expectedResult);
+    });
+  };
+
+  doTestReadAnr(ICC_USIM_TYPE1_TAG, "0123456");
+  do_check_eq(record._anrRecordSize, recordSize);
+
+  run_next_test();
+});
+
+/**
+ * Verify ICCRecordHelper.updateADNLike.
+ */
+add_test(function test_update_adn_like() {
+  let worker = newUint8Worker();
+  let ril = worker.RIL;
+  let record = worker.ICCRecordHelper;
+  let io = worker.ICCIOHelper;
+  let pdu = worker.GsmPDUHelper;
+  let buf = worker.Buf;
+
+  ril.appType = CARD_APPTYPE_SIM;
+  const recordSize = 0x20;
+  let fileId;
+
+  // Override.
+  io.updateLinearFixedEF = function (options) {
+    options.pathId = worker.ICCFileHelper.getEFPath(options.fileId);
+    options.command = ICC_COMMAND_UPDATE_RECORD;
+    options.p1 = options.recordNumber;
+    options.p2 = READ_RECORD_ABSOLUTE_MODE;
+    options.p3 = recordSize;
+    ril.iccIO(options);
+  };
+
+  buf.sendParcel = function () {
+    // Request Type.
+    do_check_eq(this.readUint32(), REQUEST_SIM_IO);
+
+    // Token : we don't care
+    this.readUint32();
+
+    // command.
+    do_check_eq(this.readUint32(), ICC_COMMAND_UPDATE_RECORD);
+
+    // fileId.
+    do_check_eq(this.readUint32(), fileId);
+
+    // pathId.
+    do_check_eq(this.readString(), EF_PATH_MF_SIM + EF_PATH_DF_TELECOM);
+
+    // p1.
+    do_check_eq(this.readUint32(), 1);
+
+    // p2.
+    do_check_eq(this.readUint32(), READ_RECORD_ABSOLUTE_MODE);
+
+    // p3.
+    do_check_eq(this.readUint32(), 0x20);
+
+    // data.
+    let contact = pdu.readAlphaIdDiallingNumber(0x20);
+    do_check_eq(contact.alphaId, "test");
+    do_check_eq(contact.number, "123456");
+
+    // pin2.
+    if (fileId == ICC_EF_ADN) {
+      do_check_eq(this.readString(), "");
+    } else {
+      do_check_eq(this.readString(), "1111");
+    }
+
+    // AID. Ignore because it's from modem.
+    this.readUint32();
+
+    if (fileId == ICC_EF_FDN) {
+      run_next_test();
+    }
+  };
+
+  fileId = ICC_EF_ADN;
+  record.updateADNLike(fileId,
+                       {recordId: 1, alphaId: "test", number: "123456"},
+                       "");
+
+  fileId = ICC_EF_FDN;
+  record.updateADNLike(fileId,
+                       {recordId: 1, alphaId: "test", number: "123456"},
+                       "1111");
+});
+
+/**
+ * Verify ICCRecordHelper.getFreeRecordId.
+ */
+add_test(function test_get_free_record_id() {
+  let worker = newUint8Worker();
+  let helper = worker.GsmPDUHelper;
+  let record = worker.ICCRecordHelper;
+  let buf    = worker.Buf;
+  let io     = worker.ICCIOHelper;
+
+  function writeRecord (record) {
+    // Write data size
+    buf.writeUint32(record.length * 2);
+
+    for (let i = 0; i < record.length; i++) {
+      helper.writeHexOctet(record[i]);
+    }
+
+    // Write string delimiter
+    buf.writeStringDelimiter(record.length * 2);
+  }
+
+  io.loadLinearFixedEF = function fakeLoadLinearFixedEF(options)  {
+    // Some random data.
+    let record = [0x12, 0x34, 0x56, 0x78, 0x90];
+    options.p1 = 1;
+    options.totalRecords = 2;
+    writeRecord(record);
+    if (options.callback) {
+      options.callback(options);
+    }
+  };
+
+  io.loadNextRecord = function fakeLoadNextRecord(options) {
+    // Unused bytes.
+    let record = [0xff, 0xff, 0xff, 0xff, 0xff];
+    options.p1++;
+    writeRecord(record);
+    if (options.callback) {
+      options.callback(options);
+    }
+  };
+
+  let fileId = 0x0000; // Dummy.
+  record.getFreeRecordId(
+    fileId,
+    function (recordId) {
+      do_check_eq(recordId, 2);
+      run_next_test();
+    }.bind(this),
+    function (errorMsg) {
+      do_print(errorMsg);
+      do_check_true(false);
+      run_next_test();
+    }.bind(this));
+});
+
+/**
+ * Verify ICCContactHelper.readICCContacts
+ */
+add_test(function test_read_icc_contacts() {
+  let worker = newUint8Worker();
+  let record = worker.ICCRecordHelper;
+  let contactHelper = worker.ICCContactHelper;
+
+  // Override some functions to test.
+  contactHelper.getContactFieldRecordId = function (pbr, contact, field, onsuccess, onerror) {
+    onsuccess(1);
+  };
+
+  record.readPBR = function readPBR(onsuccess, onerror) {
+    onsuccess({adn:{}, email: {}, anr0: {}});
+  };
+
+  record.readADNLike = function readADNLike(fileId, onsuccess, onerror) {
+    onsuccess([{alphaId: "name", number: "111111"}])
+  };
+
+  record.readEmail = function readEmail(fileId, fileType, recordNumber, onsuccess, onerror) {
+    onsuccess("hello@mail.com");
+  };
+
+  record.readANR = function readANR(fileId, fileType, recordNumber, onsuccess, onerror) {
+    onsuccess("123456");
+  };
+
+  let successCb = function successCb(contacts) {
+    let contact = contacts[0];
+    do_check_eq(contact.alphaId, "name");
+    do_check_eq(contact.number, "111111");
+    do_check_eq(contact.email, "hello@mail.com");
+    do_check_eq(contact.anr[0], "123456");
+    run_next_test();
+  };
+
+  let errorCb = function errorCb(errorMsg) {
+    do_print(errorMsg);
+    do_check_true(false);
+    run_next_test();
+  };
+
+  contactHelper.readICCContacts(CARD_APPTYPE_USIM, "ADN", successCb, errorCb);
+});
+
+/**
+ * Verify ICCContactHelper.updateICCContact
+ */
+add_test(function test_update_icc_contact() {
+  let worker = newUint8Worker();
+  let record = worker.ICCRecordHelper;
+  let contactHelper = worker.ICCContactHelper;
+  let contactType;
+
+  function do_test(aContact, aContactType, aFileId, aPin2) {
+    record.updateADNLike = function (fileId, contact, pin2, onsuccess, onerror) {
+      do_check_eq(fileId, aFileId);
+      do_check_eq(contact.alphaId, aContact.alphaId);
+      do_check_eq(contact.number, aContact.number);
+      do_check_eq(pin2, aPin2);
+    };
+    contactHelper.updateICCContact(CARD_APPTYPE_SIM, aContactType, aContact, aPin2);
+  };
+
+  let contact = {recordId: 1, alphaId: "test", number: "123456"};
+  do_test(contact, "ADN", ICC_EF_ADN);
+  do_test(contact, "FDN", ICC_EF_FDN, "1111");
+
+  run_next_test();
+});
+

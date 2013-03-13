@@ -121,10 +121,10 @@ enum GCProgress {
 };
 
 struct JS_FRIEND_API(GCDescription) {
-    bool isCompartment;
+    bool isCompartment_;
 
     GCDescription(bool isCompartment)
-      : isCompartment(isCompartment) {}
+      : isCompartment_(isCompartment) {}
 
     jschar *formatMessage(JSRuntime *rt) const;
     jschar *formatJSON(JSRuntime *rt, uint64_t timestamp) const;
@@ -151,6 +151,9 @@ IsIncrementalGCInProgress(JSRuntime *rt);
 
 extern JS_FRIEND_API(void)
 DisableIncrementalGC(JSRuntime *rt);
+
+extern JS_FRIEND_API(void)
+DisableGenerationalGC(JSRuntime *rt);
 
 extern JS_FRIEND_API(bool)
 IsIncrementalBarrierNeeded(JSRuntime *rt);

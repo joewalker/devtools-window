@@ -559,7 +559,8 @@ const std::string Histogram::GetAsciiBucketRange(size_t i) const {
 // Update histogram data with new sample.
 void Histogram::Accumulate(Sample value, Count count, size_t index) {
   // Note locking not done in this version!!!
-  sample_.AccumulateWithExponentialStats(value, count, index);
+  sample_.AccumulateWithExponentialStats(value, count, index,
+					 flags_ & kExtendedStatisticsFlag);
 }
 
 void Histogram::SetBucketRange(size_t i, Sample value) {
@@ -743,12 +744,15 @@ void Histogram::SampleSet::AccumulateWithLinearStats(Sample value,
 
 void Histogram::SampleSet::AccumulateWithExponentialStats(Sample value,
                                                           Count count,
-                                                          size_t index) {
+                                                          size_t index,
+							  bool computeExtendedStatistics) {
   Accumulate(value, count, index);
-  DCHECK_GE(value, 0);
-  float value_log = logf(static_cast<float>(value) + 1.0f);
-  log_sum_ += count * value_log;
-  log_sum_squares_ += count * value_log * value_log;
+  if (computeExtendedStatistics) {
+    DCHECK_GE(value, 0);
+    float value_log = logf(static_cast<float>(value) + 1.0f);
+    log_sum_ += count * value_log;
+    log_sum_squares_ += count * value_log * value_log;
+  }
 }
 
 Count Histogram::SampleSet::TotalCount() const {
@@ -967,6 +971,14 @@ void BooleanHistogram::AddBoolean(bool value) {
 
 BooleanHistogram::BooleanHistogram(const std::string& name)
     : LinearHistogram(name, 1, 2, 3) {
+}
+
+void
+BooleanHistogram::Accumulate(Sample value, Count count, size_t index)
+{
+  // Callers will have computed index based on the non-booleanified value.
+  // So we need to adjust the index manually.
+  LinearHistogram::Accumulate(!!value, count, value ? 1 : 0);
 }
 
 //------------------------------------------------------------------------------

@@ -8,11 +8,14 @@
 #include "mozilla/Assertions.h"
 #include "mozilla/Attributes.h"
 
-#include "gc/Barrier-inl.h"
 #include "js/TemplateLib.h"
+#include "js/Value.h"
 #include "vm/Debugger.h"
 #include "vm/ObjectImpl.h"
 
+#include "jsatominlines.h"
+
+#include "gc/Barrier-inl.h"
 #include "vm/ObjectImpl-inl.h"
 #include "vm/Shape-inl.h"
 
@@ -135,12 +138,16 @@ PropDesc::wrapInto(JSContext *cx, HandleObject obj, const jsid &id, jsid *wrappe
         return false;
 
     *desc = *this;
-    if (!comp->wrap(cx, &desc->value_))
+    RootedValue value(cx, desc->value_);
+    RootedValue get(cx, desc->get_);
+    RootedValue set(cx, desc->set_);
+
+    if (!comp->wrap(cx, &value) || !comp->wrap(cx, &get) || !comp->wrap(cx, &set))
         return false;
-    if (!comp->wrap(cx, &desc->get_))
-        return false;
-    if (!comp->wrap(cx, &desc->set_))
-        return false;
+
+    desc->value_ = value;
+    desc->get_ = get;
+    desc->set_ = set;
     return !obj->isProxy() || desc->makeObject(cx);
 }
 
@@ -162,7 +169,7 @@ ObjectElements::ConvertElementsToDoubles(JSContext *cx, uintptr_t elementsPtr)
     JS_ASSERT(elementsHeapPtr != emptyObjectElements);
 
     ObjectElements *header = ObjectElements::fromElements(elementsHeapPtr);
-    JS_ASSERT(!header->convertDoubleElements);
+    JS_ASSERT(!header->shouldConvertDoubleElements());
 
     Value *vp = (Value *) elementsPtr;
     for (size_t i = 0; i < header->initializedLength; i++) {
@@ -170,7 +177,7 @@ ObjectElements::ConvertElementsToDoubles(JSContext *cx, uintptr_t elementsPtr)
             vp[i].setDouble(vp[i].toInt32());
     }
 
-    header->convertDoubleElements = 1;
+    header->setShouldConvertDoubleElements();
     return true;
 }
 
@@ -190,8 +197,8 @@ js::ObjectImpl::checkShapeConsistency()
 
     MOZ_ASSERT(isNative());
 
-    UnrootedShape shape = lastProperty();
-    UnrootedShape prev = NULL;
+    RawShape shape = lastProperty();
+    RawShape prev = NULL;
 
     if (inDictionaryMode()) {
         MOZ_ASSERT(shape->hasTable());
@@ -225,7 +232,7 @@ js::ObjectImpl::checkShapeConsistency()
             if (shape->hasTable()) {
                 ShapeTable &table = shape->table();
                 MOZ_ASSERT(shape->parent);
-                for (Shape::Range r(shape); !r.empty(); r.popFront()) {
+                for (Shape::Range<NoGC> r(shape); !r.empty(); r.popFront()) {
                     Shape **spp = table.search(r.front().propid(), false);
                     MOZ_ASSERT(SHAPE_FETCH(spp) == &r.front());
                 }
@@ -243,13 +250,13 @@ js::ObjectImpl::checkShapeConsistency()
 void
 js::ObjectImpl::initSlotRange(uint32_t start, const Value *vector, uint32_t length)
 {
-    JS::Zone *zone = this->zone();
+    JSRuntime *rt = runtime();
     HeapSlot *fixedStart, *fixedEnd, *slotsStart, *slotsEnd;
     getSlotRange(start, length, &fixedStart, &fixedEnd, &slotsStart, &slotsEnd);
     for (HeapSlot *sp = fixedStart; sp < fixedEnd; sp++)
-        sp->init(zone, this->asObjectPtr(), HeapSlot::Slot, start++, *vector++);
+        sp->init(rt, this->asObjectPtr(), HeapSlot::Slot, start++, *vector++);
     for (HeapSlot *sp = slotsStart; sp < slotsEnd; sp++)
-        sp->init(zone, this->asObjectPtr(), HeapSlot::Slot, start++, *vector++);
+        sp->init(rt, this->asObjectPtr(), HeapSlot::Slot, start++, *vector++);
 }
 
 void
@@ -283,10 +290,9 @@ js::ObjectImpl::slotInRange(uint32_t slot, SentinelAllowed sentinel) const
  */
 MOZ_NEVER_INLINE
 #endif
-UnrootedShape
+RawShape
 js::ObjectImpl::nativeLookup(JSContext *cx, jsid id)
 {
-    AutoAssertNoGC nogc;
     MOZ_ASSERT(isNative());
     Shape **spp;
     return Shape::search(cx, lastProperty(), id, &spp);
@@ -525,11 +531,8 @@ js::GetOwnProperty(JSContext *cx, Handle<ObjectImpl*> obj, PropertyId pid_, unsi
         return false;
     }
 
-    /* |shape| is always set /after/ a GC. */
-    UnrootedShape shape = obj->nativeLookup(cx, pid);
+    RootedShape shape(cx, obj->nativeLookup(cx, pid));
     if (!shape) {
-        DropUnrooted(shape);
-
         /* Not found: attempt to resolve it. */
         Class *clasp = obj->getClass();
         JSResolveOp resolve = clasp->resolve;
@@ -626,6 +629,7 @@ js::GetProperty(JSContext *cx, Handle<ObjectImpl*> obj, Handle<ObjectImpl*> rece
         }
 
         PropDesc desc;
+        PropDesc::AutoRooter rootDesc(cx, &desc);
         if (!GetOwnProperty(cx, current, pid, resolveFlags, &desc))
             return false;
 
@@ -682,6 +686,7 @@ js::GetElement(JSContext *cx, Handle<ObjectImpl*> obj, Handle<ObjectImpl*> recei
 
     Rooted<ObjectImpl*> current(cx, obj);
 
+    RootedValue getter(cx);
     do {
         MOZ_ASSERT(current);
 
@@ -712,8 +717,8 @@ js::GetElement(JSContext *cx, Handle<ObjectImpl*> obj, Handle<ObjectImpl*> recei
 
         /* If it's an accessor property, call its [[Get]] with the receiver. */
         if (desc.isAccessorDescriptor()) {
-            Value get = desc.getterValue();
-            if (get.isUndefined()) {
+            getter = desc.getterValue();
+            if (getter.isUndefined()) {
                 vp->setUndefined();
                 return true;
             }
@@ -722,8 +727,8 @@ js::GetElement(JSContext *cx, Handle<ObjectImpl*> obj, Handle<ObjectImpl*> recei
             if (!cx->stack.pushInvokeArgs(cx, 0, &args))
                 return false;
 
-            /* Push get, receiver, and no args. */
-            args.setCallee(get);
+            /* Push getter, receiver, and no args. */
+            args.setCallee(getter);
             args.setThis(ObjectValue(*current));
 
             bool ok = Invoke(cx, args);
@@ -913,6 +918,7 @@ js::SetElement(JSContext *cx, Handle<ObjectImpl*> obj, Handle<ObjectImpl*> recei
     NEW_OBJECT_REPRESENTATION_ONLY();
 
     Rooted<ObjectImpl*> current(cx, obj);
+    RootedValue setter(cx);
 
     MOZ_ASSERT(receiver);
 
@@ -946,7 +952,7 @@ js::SetElement(JSContext *cx, Handle<ObjectImpl*> obj, Handle<ObjectImpl*> recei
             }
 
             if (ownDesc.isAccessorDescriptor()) {
-                Value setter = ownDesc.setterValue();
+                setter = ownDesc.setterValue();
                 if (setter.isUndefined()) {
                     *succeeded = false;
                     return true;

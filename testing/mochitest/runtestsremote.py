@@ -9,6 +9,7 @@ import tempfile
 import re
 import traceback
 import shutil
+import math
 
 sys.path.insert(0, os.path.abspath(os.path.realpath(os.path.dirname(sys.argv[0]))))
 
@@ -519,6 +520,19 @@ def main():
         # TODO: pull this in dynamically
         mp.read(options.robocop)
         robocop_tests = mp.active_tests(exists=False)
+        tests = []
+        my_tests = tests
+        for test in robocop_tests:
+            tests.append(test['name'])
+
+        if options.totalChunks:
+            tests_per_chunk = math.ceil(len(tests) / (options.totalChunks * 1.0))
+            start = int(round((options.thisChunk-1) * tests_per_chunk))
+            end = int(round(options.thisChunk * tests_per_chunk))
+            if end > len(tests):
+                end = len(tests)
+            my_tests = tests[start:end]
+            print "Running tests %d-%d/%d" % ((start+1), end, len(tests))
 
         deviceRoot = dm.getDeviceRoot()      
         dm.removeFile(os.path.join(deviceRoot, "fennec_ids.txt"))
@@ -529,6 +543,8 @@ def main():
         options.extraPrefs.append('robocop.logfile="%s/robocop.log"' % deviceRoot)
         options.extraPrefs.append('browser.search.suggest.enabled=true')
         options.extraPrefs.append('browser.search.suggest.prompted=true')
+        options.extraPrefs.append('browser.viewport.scaleRatio=100')
+        options.extraPrefs.append('browser.chrome.dynamictoolbar=false')
 
         if (options.dm_trans == 'adb' and options.robocopPath):
           dm._checkCmd(["install", "-r", os.path.join(options.robocopPath, "robocop.apk")])
@@ -536,6 +552,9 @@ def main():
         retVal = None
         for test in robocop_tests:
             if options.testPath and options.testPath != test['name']:
+                continue
+
+            if not test['name'] in my_tests:
                 continue
 
             options.app = "am"

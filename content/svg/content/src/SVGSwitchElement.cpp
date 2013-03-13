@@ -3,16 +3,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/Util.h"
-
 #include "mozilla/dom/SVGSwitchElement.h"
-#include "DOMSVGTests.h"
-#include "nsIFrame.h"
 #include "nsSVGUtils.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/dom/SVGSwitchElementBinding.h"
 
-DOMCI_NODE_DATA(SVGSwitchElement, mozilla::dom::SVGSwitchElement)
+class nsIFrame;
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(Switch)
 
@@ -20,9 +16,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGSwitchElement::WrapNode(JSContext *aCx, JSObject *aScope, bool *aTriedToWrap)
+SVGSwitchElement::WrapNode(JSContext *aCx, JSObject *aScope)
 {
-  return SVGSwitchElementBinding::Wrap(aCx, aScope, this, aTriedToWrap);
+  return SVGSwitchElementBinding::Wrap(aCx, aScope, this);
 }
 
 //----------------------------------------------------------------------
@@ -41,9 +37,8 @@ NS_IMPL_ADDREF_INHERITED(SVGSwitchElement,SVGSwitchElementBase)
 NS_IMPL_RELEASE_INHERITED(SVGSwitchElement,SVGSwitchElementBase)
 
 NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(SVGSwitchElement)
-  NS_NODE_INTERFACE_TABLE4(SVGSwitchElement, nsIDOMNode, nsIDOMElement,
-                           nsIDOMSVGElement, nsIDOMSVGSwitchElement)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGSwitchElement)
+  NS_NODE_INTERFACE_TABLE3(SVGSwitchElement, nsIDOMNode, nsIDOMElement,
+                           nsIDOMSVGElement)
 NS_INTERFACE_MAP_END_INHERITING(SVGSwitchElementBase)
 
 //----------------------------------------------------------------------
@@ -149,10 +144,10 @@ SVGSwitchElement::FindActiveChild() const
       if (!child->IsElement()) {
         continue;
       }
-      nsCOMPtr<DOMSVGTests> tests(do_QueryInterface(child));
+      nsCOMPtr<SVGTests> tests(do_QueryInterface(child));
       if (tests) {
         if (tests->PassesConditionalProcessingTests(
-                            DOMSVGTests::kIgnoreSystemLanguage)) {
+                            SVGTests::kIgnoreSystemLanguage)) {
           int32_t languagePreferenceRank =
               tests->GetBestLanguagePreferenceRank(acceptLangs);
           switch (languagePreferenceRank) {
@@ -184,7 +179,7 @@ SVGSwitchElement::FindActiveChild() const
     if (!child->IsElement()) {
       continue;
     }
-    nsCOMPtr<DOMSVGTests> tests(do_QueryInterface(child));
+    nsCOMPtr<SVGTests> tests(do_QueryInterface(child));
     if (!tests || tests->PassesConditionalProcessingTests(&acceptLangs)) {
       return child;
     }

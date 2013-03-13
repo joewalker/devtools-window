@@ -60,7 +60,7 @@ public class testHistoryTab extends PixelTest {
         loadAndPaint(url);
 
         mActions.sendSpecialKey(Actions.SpecialKey.MENU);
-        mSolo.waitForText("Settings");
+        waitForText("Settings");
 
         // On ICS+ phones, there is no button labeled "Bookmarks"
         // instead we have to just dig through every button on the screen
@@ -98,25 +98,20 @@ public class testHistoryTab extends PixelTest {
     }
 
     private void testList(String url) {
-        listview = getHistoryList();
-
-        // Around midnight we will switch from Today -> Yesterday, account for both
-        if (!mSolo.waitForText("Today")) {
-            mSolo.waitForText("Yesterday");
-        }
-
-        mAsserter.isnot(listview,  null, "checking that history list exists");
-
-        final int count = listview.getChildCount();
-        mAsserter.is(count, 3, "history list has 3 children");
-
+        listview = getHistoryList("Today|Yesterday", 3);
+        mAsserter.isnot(listview,  null, "checking that history list exists and has 3 children");
+        final int count = listview.getAdapter().getCount();
         String loadUrl = "";
         for (int i = count - 1; i >= 0; i--) {
             View child = listview.getChildAt(i);
-
+            if (child == null) {
+                // this may simply indicate that the item is not visible
+                Object item = listview.getAdapter().getItem(i);
+                mAsserter.ok(item != null, "adapter item is set", item != null ? item.toString() : "null!");
+                continue;
+            }
             ArrayList<View> views = mSolo.getViews(child);
             ArrayList<ImageView> imageViews = new ArrayList<ImageView>();
-
             int expectedImages = 1;
             for (int j = 0; j < views.size(); j++) {
                 View v = views.get(j);
@@ -160,12 +155,13 @@ public class testHistoryTab extends PixelTest {
     }
 
     private void testContextMenu(String url) {
-        listview = getHistoryList();
-        mSolo.waitForText(url);
+        listview = getHistoryList("Today|Yesterday");
+        waitForText(url);
 
         // wait for the history list to be populated
         mFirstChild = null;
         boolean success = waitForTest(new BooleanTest() {
+            @Override
             public boolean test() {
                 mFirstChild = listview.getChildAt(1);
                 if (mFirstChild == null) {
@@ -202,6 +198,7 @@ public class testHistoryTab extends PixelTest {
             mActions.sendSpecialKey(Actions.SpecialKey.BACK);
 
             View child = listview.getChildAt(0);
+            mAsserter.ok(child != null, "first list item can be retrieved", child != null ? child.toString() : "null!");
             mSolo.clickLongOnView(child);
             mAsserter.is(false, mSolo.waitForText("Open in New Tab"), "Header rows should not show a context menu");
 
@@ -212,17 +209,18 @@ public class testHistoryTab extends PixelTest {
     }
 
     private void testClick(String url) {
-        listview = getHistoryList();
-
-        mSolo.waitForText(url);
+        listview = getHistoryList("Today|Yesterday");
+        waitForText(url);
 
         View child = listview.getChildAt(0);
+        mAsserter.ok(child != null, "first list item can be retrieved", child != null ? child.toString() : "null!");
         mSolo.clickOnView(child);
         // nothing should happen
 
         Actions.EventExpecter contentEventExpecter = mActions.expectGeckoEvent("DOMContentLoaded");
         mFirstChild = null;
         boolean success = waitForTest(new BooleanTest() {
+            @Override
             public boolean test() {
                 mFirstChild = listview.getChildAt(1);
                 if (mFirstChild == null) {
@@ -240,6 +238,7 @@ public class testHistoryTab extends PixelTest {
         }
     }
 
+    @Override
     public void tearDown() throws Exception {
         ContentResolver resolver = getActivity().getContentResolver();
         Uri uri = Uri.parse("content://@ANDROID_PACKAGE_NAME@.db.browser/history");

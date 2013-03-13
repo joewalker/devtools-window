@@ -41,7 +41,6 @@ static UINT sWM_MSIME_MOUSE = 0; // mouse message for MSIME 98/2000
 #define IMEMOUSE_WUP        0x10    // wheel up
 #define IMEMOUSE_WDOWN      0x20    // wheel down
 
-bool nsIMM32Handler::sIsStatusChanged = false;
 bool nsIMM32Handler::sIsIME = true;
 bool nsIMM32Handler::sIsIMEOpening = false;
 
@@ -108,41 +107,6 @@ nsIMM32Handler::IsTopLevelWindowOfComposition(nsWindow* aWindow)
 }
 
 /* static */ bool
-nsIMM32Handler::IsDoingKakuteiUndo(HWND aWnd)
-{
-  // This message pattern is "Kakutei-Undo" on ATOK and WXG.
-  // In this case, the message queue has following messages:
-  // ---------------------------------------------------------------------------
-  // WM_KEYDOWN              * n (wParam = VK_BACK, lParam = 0x1)
-  // WM_KEYUP                * 1 (wParam = VK_BACK, lParam = 0xC0000001) # ATOK
-  // WM_IME_STARTCOMPOSITION * 1 (wParam = 0x0, lParam = 0x0)
-  // WM_IME_COMPOSITION      * 1 (wParam = 0x0, lParam = 0x1BF)
-  // WM_CHAR                 * n (wParam = VK_BACK, lParam = 0x1)
-  // WM_KEYUP                * 1 (wParam = VK_BACK, lParam = 0xC00E0001)
-  // ---------------------------------------------------------------------------
-  // This message pattern does not match to the above case;
-  // i.e.,WM_KEYDOWN -> WM_CHAR -> WM_KEYDOWN -> WM_CHAR.
-  // For more information of this problem:
-  // https://bugzilla.mozilla.gr.jp/show_bug.cgi?id=2885 (written in Japanese)
-  // https://bugzilla.mozilla.org/show_bug.cgi?id=194559 (written in English)
-  MSG imeStartCompositionMsg, imeCompositionMsg, charMsg;
-  return ::PeekMessageW(&imeStartCompositionMsg, aWnd,
-                        WM_IME_STARTCOMPOSITION, WM_IME_STARTCOMPOSITION,
-                        PM_NOREMOVE | PM_NOYIELD) &&
-         ::PeekMessageW(&imeCompositionMsg, aWnd, WM_IME_COMPOSITION,
-                        WM_IME_COMPOSITION, PM_NOREMOVE | PM_NOYIELD) &&
-         ::PeekMessageW(&charMsg, aWnd, WM_CHAR, WM_CHAR,
-                        PM_NOREMOVE | PM_NOYIELD) &&
-         imeStartCompositionMsg.wParam == 0x0 &&
-         imeStartCompositionMsg.lParam == 0x0 &&
-         imeCompositionMsg.wParam == 0x0 &&
-         imeCompositionMsg.lParam == 0x1BF &&
-         charMsg.wParam == VK_BACK && charMsg.lParam == 0x1 &&
-         imeStartCompositionMsg.time <= imeCompositionMsg.time &&
-         imeCompositionMsg.time <= charMsg.time;
-}
-
-/* static */ bool
 nsIMM32Handler::ShouldDrawCompositionStringOurselves()
 {
   // If current IME has special UI or its composition window should not
@@ -173,7 +137,7 @@ nsIMM32Handler::GetKeyboardCodePage()
 }
 
 /* static */ bool
-nsIMM32Handler::CanOptimizeKeyAndIMEMessages(MSG *aNextKeyOrIMEMessage)
+nsIMM32Handler::CanOptimizeKeyAndIMEMessages()
 {
   // If IME is opening right now, we shouldn't optimize the key and IME message
   // order because ATOK (Japanese IME of third party) has some problem with the
@@ -250,19 +214,19 @@ nsIMM32Handler::CommitComposition(nsWindow* aWindow, bool aForce)
     return;
   }
 
-  bool associated = aWindow->AssociateDefaultIMC(true);
+  nsIMEContext IMEContext(aWindow->GetWindowHandle());
+  bool associated = IMEContext.AssociateDefaultContext();
   PR_LOG(gIMM32Log, PR_LOG_ALWAYS,
     ("IMM32: CommitComposition, associated=%s\n",
      associated ? "YES" : "NO"));
 
-  nsIMEContext IMEContext(aWindow->GetWindowHandle());
   if (IMEContext.IsValid()) {
     ::ImmNotifyIME(IMEContext.get(), NI_COMPOSITIONSTR, CPS_COMPLETE, 0);
     ::ImmNotifyIME(IMEContext.get(), NI_COMPOSITIONSTR, CPS_CANCEL, 0);
   }
 
   if (associated) {
-    aWindow->AssociateDefaultIMC(false);
+    IMEContext.Disassociate();
   }
 }
 
@@ -281,18 +245,18 @@ nsIMM32Handler::CancelComposition(nsWindow* aWindow, bool aForce)
     return;
   }
 
-  bool associated = aWindow->AssociateDefaultIMC(true);
+  nsIMEContext IMEContext(aWindow->GetWindowHandle());
+  bool associated = IMEContext.AssociateDefaultContext();
   PR_LOG(gIMM32Log, PR_LOG_ALWAYS,
     ("IMM32: CancelComposition, associated=%s\n",
      associated ? "YES" : "NO"));
 
-  nsIMEContext IMEContext(aWindow->GetWindowHandle());
   if (IMEContext.IsValid()) {
     ::ImmNotifyIME(IMEContext.get(), NI_COMPOSITIONSTR, CPS_CANCEL, 0);
   }
 
   if (associated) {
-    aWindow->AssociateDefaultIMC(false);
+    IMEContext.Disassociate();
   }
 }
 
@@ -498,7 +462,7 @@ nsIMM32Handler::OnInputLangChange(nsWindow* aWindow,
     ("IMM32: OnInputLangChange, hWnd=%08x, wParam=%08x, lParam=%08x\n",
      aWindow->GetWindowHandle(), wParam, lParam));
 
-  aWindow->ResetInputState();
+  aWindow->NotifyIME(REQUEST_TO_COMMIT_COMPOSITION);
   NS_ASSERTION(!mIsComposing, "ResetInputState failed");
 
   if (mIsComposing) {
@@ -703,29 +667,6 @@ nsIMM32Handler::OnIMENotify(nsWindow* aWindow,
       break;
   }
 #endif // PR_LOGGING
-
-  if (::GetKeyState(NS_VK_ALT) >= 0) {
-    return false;
-  }
-
-  // XXXmnakano Following code was added by bug 28852 (Key combo to trun ON/OFF
-  // Japanese IME incorrectly activates "File" menu).  If one or more keypress
-  // events come between Alt keydown event and Alt keyup event, XUL menubar
-  // isn't activated by the Alt keyup event.  Therefore, this code sends dummy
-  // keypress event to Gecko.  But this is ugly, and this fires incorrect DOM
-  // keypress event.  So, we should find another way for the bug.
-
-  // add hacky code here
-  mozilla::widget::ModifierKeyState modKeyState(false, false, true);
-  mozilla::widget::NativeKey nativeKey; // Dummy is okay for this usage.
-  nsKeyEvent keyEvent(true, NS_KEY_PRESS, aWindow);
-  keyEvent.keyCode = 192;
-  aWindow->InitKeyEvent(keyEvent, nativeKey, modKeyState);
-  aWindow->DispatchKeyEvent(keyEvent, nullptr);
-  sIsStatusChanged = sIsStatusChanged || (wParam == IMN_SETOPENSTATUS);
-  PR_LOG(gIMM32Log, PR_LOG_ALWAYS,
-    ("IMM32: OnIMENotify, sIsStatusChanged=%s\n",
-     sIsStatusChanged ? "TRUE" : "FALSE"));
 
   // not implement yet
   return false;

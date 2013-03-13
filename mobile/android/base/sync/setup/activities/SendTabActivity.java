@@ -11,10 +11,10 @@ import java.util.Map;
 import java.util.Map.Entry;
 
 import org.mozilla.gecko.R;
+import org.mozilla.gecko.background.common.log.Logger;
 import org.mozilla.gecko.sync.CommandProcessor;
 import org.mozilla.gecko.sync.CommandRunner;
 import org.mozilla.gecko.sync.GlobalSession;
-import org.mozilla.gecko.sync.Logger;
 import org.mozilla.gecko.sync.SyncConfiguration;
 import org.mozilla.gecko.sync.SyncConstants;
 import org.mozilla.gecko.sync.repositories.NullCursorException;
@@ -286,8 +286,12 @@ public class SendTabActivity extends Activity {
       return new ArrayList<ClientRecord>(0);
     }
 
-    final ArrayList<ClientRecord> out = new ArrayList<ClientRecord>(all.size());
     final String ourGUID = getAccountGUID();
+    if (ourGUID == null) {
+      return all.values();
+    }
+
+    final ArrayList<ClientRecord> out = new ArrayList<ClientRecord>(all.size());
     for (Entry<String, ClientRecord> entry : all.entrySet()) {
       if (ourGUID.equals(entry.getKey())) {
         continue;

@@ -6,7 +6,6 @@
 #include "mozilla/Util.h"
 
 #include "nsMathMLElement.h"
-#include "nsDOMClassInfoID.h" // for eDOMClassInfo_MathElement_id.
 #include "nsGkAtoms.h"
 #include "nsCRT.h"
 #include "nsRuleData.h"
@@ -21,13 +20,13 @@
 #include "nsIScriptError.h"
 #include "nsContentUtils.h"
 
+#include "mozilla/dom/ElementBinding.h"
+
 using namespace mozilla;
 using namespace mozilla::dom;
 
 //----------------------------------------------------------------------
 // nsISupports methods:
-
-DOMCI_NODE_DATA(MathMLElement, nsMathMLElement)
 
 NS_INTERFACE_TABLE_HEAD(nsMathMLElement)
   NS_NODE_OFFSET_AND_INTERFACE_TABLE_BEGIN(nsMathMLElement)
@@ -37,7 +36,6 @@ NS_INTERFACE_TABLE_HEAD(nsMathMLElement)
     NS_INTERFACE_TABLE_ENTRY(nsMathMLElement, Link)
   NS_OFFSET_AND_INTERFACE_TABLE_END
   NS_ELEMENT_INTERFACE_TABLE_TO_MAP_SEGUE
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(MathMLElement)
 NS_ELEMENT_INTERFACE_MAP_END
 
 NS_IMPL_ADDREF_INHERITED(nsMathMLElement, nsMathMLElementBase)
@@ -940,4 +938,10 @@ nsMathMLElement::UnsetAttr(int32_t aNameSpaceID, nsIAtom* aAttr,
   }
 
   return rv;
+}
+
+JSObject*
+nsMathMLElement::WrapNode(JSContext *aCx, JSObject *aScope)
+{
+  return ElementBinding::Wrap(aCx, aScope, this);
 }

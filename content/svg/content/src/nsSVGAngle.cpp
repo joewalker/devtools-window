@@ -17,7 +17,6 @@
 #include "nsAttrValueInlines.h"
 #include "SVGAngle.h"
 #include "SVGAnimatedAngle.h"
-#include "mozilla/Attributes.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -379,7 +378,7 @@ nsSVGAngle::SMILOrient::ValueFromString(const nsAString& aStr,
 {
   nsSMILValue val(&SVGOrientSMILType::sSingleton);
   if (aStr.EqualsLiteral("auto")) {
-    val.mU.mOrient.mOrientType = nsIDOMSVGMarkerElement::SVG_MARKER_ORIENT_AUTO;
+    val.mU.mOrient.mOrientType = SVG_MARKER_ORIENT_AUTO;
   } else {
     float value;
     uint16_t unitType;
@@ -389,7 +388,7 @@ nsSVGAngle::SMILOrient::ValueFromString(const nsAString& aStr,
     }
     val.mU.mOrient.mAngle = value;
     val.mU.mOrient.mUnit = unitType;
-    val.mU.mOrient.mOrientType = nsIDOMSVGMarkerElement::SVG_MARKER_ORIENT_ANGLE;
+    val.mU.mOrient.mOrientType = SVG_MARKER_ORIENT_ANGLE;
   }
   aValue.Swap(val);
   aPreventCachingOfSandwich = false;
@@ -427,7 +426,7 @@ nsSVGAngle::SMILOrient::SetAnimValue(const nsSMILValue& aValue)
 
   if (aValue.mType == &SVGOrientSMILType::sSingleton) {
     mOrientType->SetAnimValue(aValue.mU.mOrient.mOrientType);
-    if (aValue.mU.mOrient.mOrientType == nsIDOMSVGMarkerElement::SVG_MARKER_ORIENT_AUTO) {
+    if (aValue.mU.mOrient.mOrientType == SVG_MARKER_ORIENT_AUTO) {
       mAngle->SetAnimValue(0.0f, SVG_ANGLETYPE_UNSPECIFIED, mSVGElement);
     } else {
       mAngle->SetAnimValue(aValue.mU.mOrient.mAngle, aValue.mU.mOrient.mUnit, mSVGElement);

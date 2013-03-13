@@ -16,9 +16,12 @@
 #include "nsIFile.h"
 #include "nsIProperties.h"
 #include "nsIWindowMediator.h"
+#include "nsIWinTaskbar.h"
 #include "nsServiceManagerUtils.h"
 
 #include "WidgetUtils.h"
+
+#define NS_TASKBAR_CONTRACTID "@mozilla.org/windows-taskbar;1"
 
 using base::ProcessHandle;
 
@@ -31,9 +34,12 @@ namespace {
 class nsPluginHangUITelemetry : public nsRunnable
 {
 public:
-  nsPluginHangUITelemetry(int aResponseCode, int aDontAskCode)
+  nsPluginHangUITelemetry(int aResponseCode, int aDontAskCode,
+                          uint32_t aResponseTimeMs, uint32_t aTimeoutMs)
     : mResponseCode(aResponseCode),
-      mDontAskCode(aDontAskCode)
+      mDontAskCode(aDontAskCode),
+      mResponseTimeMs(aResponseTimeMs),
+      mTimeoutMs(aTimeoutMs)
   {
   }
 
@@ -42,24 +48,32 @@ public:
   {
     mozilla::Telemetry::Accumulate(
               mozilla::Telemetry::PLUGIN_HANG_UI_USER_RESPONSE, mResponseCode);
-    mozilla::Telemetry::Accumulate(mozilla::Telemetry::PLUGIN_HANG_UI_DONT_ASK,
-                                   mDontAskCode);
+    mozilla::Telemetry::Accumulate(
+              mozilla::Telemetry::PLUGIN_HANG_UI_DONT_ASK, mDontAskCode);
+    mozilla::Telemetry::Accumulate(
+              mozilla::Telemetry::PLUGIN_HANG_UI_RESPONSE_TIME, mResponseTimeMs);
+    mozilla::Telemetry::Accumulate(
+              mozilla::Telemetry::PLUGIN_HANG_TIME, mTimeoutMs + mResponseTimeMs);
     return NS_OK;
   }
 
 private:
   int mResponseCode;
   int mDontAskCode;
+  uint32_t mResponseTimeMs;
+  uint32_t mTimeoutMs;
 };
 } // anonymous namespace
 
 namespace mozilla {
 namespace plugins {
 
-const DWORD PluginHangUIParent::kTimeout = 5000U;
+const DWORD PluginHangUIParent::kTimeout = 30000U;
 
-PluginHangUIParent::PluginHangUIParent(PluginModuleParent* aModule)
+PluginHangUIParent::PluginHangUIParent(PluginModuleParent* aModule,
+                                       const int32_t aHangUITimeoutPref)
   : mModule(aModule),
+    mTimeoutPrefMs(static_cast<uint32_t>(aHangUITimeoutPref) * 1000U),
     mMainThreadMessageLoop(MessageLoop::current()),
     mIsShowing(false),
     mLastUserResponse(0),
@@ -179,6 +193,23 @@ PluginHangUIParent::Init(const nsString& aPluginName)
   procHandleStr.AppendPrintf("%p", procHandle.Get());
   commandLine.AppendLooseValue(procHandleStr.get());
 
+  // On Win7+, pass the application user model to the child, so it can
+  // register with it. This insures windows created by the Hang UI
+  // properly group with the parent app on the Win7 taskbar.
+  nsCOMPtr<nsIWinTaskbar> taskbarInfo = do_GetService(NS_TASKBAR_CONTRACTID);
+  if (taskbarInfo) {
+    bool isSupported = false;
+    taskbarInfo->GetAvailable(&isSupported);
+    nsAutoString appId;
+    if (isSupported && NS_SUCCEEDED(taskbarInfo->GetDefaultGroupId(appId))) {
+      commandLine.AppendLooseValue(appId.get());
+    } else {
+      commandLine.AppendLooseValue(L"-");
+    }
+  } else {
+    commandLine.AppendLooseValue(L"-");
+  }
+
   std::wstring ipcCookie;
   rv = mMiniShm.GetCookie(ipcCookie);
   if (NS_FAILED(rv)) {
@@ -186,7 +217,6 @@ PluginHangUIParent::Init(const nsString& aPluginName)
   }
   commandLine.AppendLooseValue(ipcCookie);
 
-  mShowEvent = ::CreateEvent(NULL, FALSE, FALSE, NULL);
   ScopedHandle showEvent(::CreateEvent(NULL, FALSE, FALSE, NULL));
   if (!showEvent.IsValid()) {
     return false;
@@ -214,7 +244,14 @@ PluginHangUIParent::Init(const nsString& aPluginName)
                                   this,
                                   INFINITE,
                                   WT_EXECUTEDEFAULT | WT_EXECUTEONLYONCE);
-    ::WaitForSingleObject(mShowEvent, kTimeout);
+    ::WaitForSingleObject(mShowEvent, ::IsDebuggerPresent() ? INFINITE
+                                                            : kTimeout);
+    // Setting this to true even if we time out on mShowEvent. This timeout 
+    // typically occurs when the machine is thrashing so badly that 
+    // plugin-hang-ui.exe is taking a while to start. If we didn't set 
+    // this to true, Firefox would keep spawning additional plugin-hang-ui 
+    // processes, which is not what we want.
+    mIsShowing = true;
   }
   mShowEvent = NULL;
   return !(!isProcessCreated);
@@ -278,7 +315,9 @@ PluginHangUIParent::RecvUserResponse(const unsigned int& aResponse)
   }
   int dontAskCode = (aResponse & HANGUI_USER_RESPONSE_DONT_SHOW_AGAIN) ? 1 : 0;
   nsCOMPtr<nsIRunnable> workItem = new nsPluginHangUITelemetry(responseCode,
-                                                               dontAskCode);
+                                                               dontAskCode,
+                                                               LastShowDurationMs(),
+                                                               mTimeoutPrefMs);
   NS_DispatchToMainThread(workItem, NS_DISPATCH_NORMAL);
   return true;
 }
@@ -343,8 +382,7 @@ PluginHangUIParent::OnMiniShmConnect(MiniShmBase* aMiniShmObj)
     return;
   }
   cmd->mCode = PluginHangUICommand::HANGUI_CMD_SHOW;
-  mIsShowing = NS_SUCCEEDED(aMiniShmObj->Send());
-  if (mIsShowing) {
+  if (NS_SUCCEEDED(aMiniShmObj->Send())) {
     mShowTicks = GetTickCount();
   }
   ::SetEvent(mShowEvent);

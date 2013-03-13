@@ -838,12 +838,11 @@ XPCConvert::NativeInterface2JSObject(XPCLazyCallContext& lccx,
                 return false;
 
             if (!flat) {
-                bool triedToWrap;
                 flat = cache->WrapObject(lccx.GetJSContext(),
-                                         xpcscope->GetGlobalJSObject(),
-                                         &triedToWrap);
-                if (!flat && triedToWrap)
+                                         xpcscope->GetGlobalJSObject());
+                if (!flat && JS_IsExceptionPending(lccx.GetJSContext())) {
                     return false;
+                }
             }
 
             if (flat) {
@@ -1202,7 +1201,7 @@ XPCConvert::JSValToXPCException(XPCCallContext& ccx,
                 JSAutoByteString message;
                 JSString* str;
                 if (nullptr != (str = JS_ValueToString(cx, s)))
-                    message.encode(cx, str);
+                    message.encodeLatin1(cx, str);
                 return JSErrorToXPCException(ccx, message.ptr(), ifaceName,
                                              methodName, report, exceptn);
             }

@@ -13,7 +13,6 @@
 #include "nsPresContext.h"
 #include "nsIPresShell.h"
 #include "nsILinkHandler.h"
-#include "nsIDocShellTreeItem.h"
 #include "nsIDocShell.h"
 #include "nsIContentViewer.h"
 #include "nsPIDOMWindow.h"
@@ -811,6 +810,8 @@ nsPresContext::AppUnitsPerDevPixelChanged()
     // All cached style data must be recomputed.
     MediaFeatureValuesChanged(eAlwaysRebuildStyle, NS_STYLE_HINT_REFLOW);
   }
+
+  mCurAppUnitsPerDevPixel = AppUnitsPerDevPixel();
 }
 
 void
@@ -947,7 +948,14 @@ nsPresContext::Init(nsDeviceContext* aDeviceContext)
         nsCOMPtr<nsIDocShellTreeItem> parentItem;
         ourItem->GetSameTypeParent(getter_AddRefs(parentItem));
         if (parentItem) {
-          mRefreshDriver = parent->GetShell()->GetPresContext()->RefreshDriver();
+          Element* containingElement =
+            parent->FindContentForSubDocument(mDocument);
+          if (!containingElement->IsXUL() ||
+              !containingElement->
+                HasAttr(kNameSpaceID_None,
+                        nsGkAtoms::forceOwnRefreshDriver)) {
+            mRefreshDriver = parent->GetShell()->GetPresContext()->RefreshDriver();
+          }
         }
       }
     }
@@ -1151,11 +1159,21 @@ nsPresContext::GetParentPresContext()
 {
   nsIPresShell* shell = GetPresShell();
   if (shell) {
-    nsIFrame* rootFrame = shell->FrameManager()->GetRootFrame();
-    if (rootFrame) {
-      nsIFrame* f = nsLayoutUtils::GetCrossDocParentFrame(rootFrame);
-      if (f)
-        return f->PresContext();
+    nsViewManager* viewManager = shell->GetViewManager();
+    if (viewManager) {
+      nsView* view = viewManager->GetRootView();
+      if (view) {
+        view = view->GetParent(); // anonymous inner view
+        if (view) {
+          view = view->GetParent(); // subdocumentframe's view
+          if (view) {
+            nsIFrame* f = view->GetFrame();
+            if (f) {
+              return f->PresContext();
+            }
+          }
+        }
+      }
     }
   }
   return nullptr;
@@ -1182,6 +1200,19 @@ nsPresContext::GetNearestWidget(nsPoint* aOffset)
   nsIFrame* frame = mShell->GetRootFrame();
   NS_ENSURE_TRUE(frame, nullptr);
   return frame->GetView()->GetNearestWidget(aOffset);
+}
+
+nsIWidget*
+nsPresContext::GetRootWidget()
+{
+  NS_ENSURE_TRUE(mShell, nullptr);
+  nsViewManager* vm = mShell->GetViewManager();
+  if (!vm) {
+    return nullptr;
+  }
+  nsCOMPtr<nsIWidget> widget;
+  vm->GetRootWidget(getter_AddRefs(widget));
+  return widget.get();
 }
 
 // We may want to replace this with something faster, maybe caching the root prescontext
@@ -1390,8 +1421,6 @@ nsPresContext::SetFullZoom(float aZoom)
   AppUnitsPerDevPixelChanged();
 
   mSupressResizeReflow = false;
-
-  mCurAppUnitsPerDevPixel = AppUnitsPerDevPixel();
 }
 
 float
@@ -1648,7 +1677,9 @@ nsPresContext::UIResolutionChangedInternal()
   mPendingUIResolutionChanged = false;
 
   mDeviceContext->CheckDPIChange();
-  AppUnitsPerDevPixelChanged();
+  if (mCurAppUnitsPerDevPixel != AppUnitsPerDevPixel()) {
+    AppUnitsPerDevPixelChanged();
+  }
 
   mDocument->EnumerateSubDocuments(UIResolutionChangedSubdocumentCallback,
                                    nullptr);
@@ -1876,7 +1907,7 @@ nsPresContext::InvalidateIsChromeCacheExternal()
 nsPresContext::HasAuthorSpecifiedRules(nsIFrame *aFrame, uint32_t ruleTypeMask) const
 {
   return
-    nsRuleNode::HasAuthorSpecifiedRules(aFrame->GetStyleContext(),
+    nsRuleNode::HasAuthorSpecifiedRules(aFrame->StyleContext(),
                                         ruleTypeMask,
                                         UseDocumentColors());
 }
@@ -2047,8 +2078,8 @@ nsPresContext::FireDOMPaintEvent(nsInvalidateRequestList* aList)
   if (!ourWindow)
     return;
 
-  nsCOMPtr<nsIDOMEventTarget> dispatchTarget = do_QueryInterface(ourWindow);
-  nsCOMPtr<nsIDOMEventTarget> eventTarget = dispatchTarget;
+  nsCOMPtr<EventTarget> dispatchTarget = do_QueryInterface(ourWindow);
+  nsCOMPtr<EventTarget> eventTarget = dispatchTarget;
   if (!IsChrome() && !mSendAfterPaintToContent) {
     // Don't tell the window about this event, it should not know that
     // something happened in a subdocument. Tell only the chrome event handler.
@@ -2065,7 +2096,7 @@ nsPresContext::FireDOMPaintEvent(nsInvalidateRequestList* aList)
   // This will empty our list in case dispatching the event causes more damage
   // (hopefully it won't, or we're likely to get an infinite loop! At least
   // it won't be blocking app execution though).
-  NS_NewDOMNotifyPaintEvent(getter_AddRefs(event), this, nullptr,
+  NS_NewDOMNotifyPaintEvent(getter_AddRefs(event), eventTarget, this, nullptr,
                             NS_AFTERPAINT, aList);
   if (!event) {
     return;

@@ -511,7 +511,7 @@ XPCWrappedNative::GetNewOrUsed(XPCCallContext& ccx,
 
     if (sciWrapper.GetFlags().WantPreCreate()) {
         // PreCreate may touch dead compartments.
-        js::AutoMaybeTouchDeadCompartments agc(parent);
+        js::AutoMaybeTouchDeadZones agc(parent);
 
         JSObject* plannedParent = parent;
         nsresult rv = sciWrapper.GetCallback()->PreCreate(identity, ccx,
@@ -1582,8 +1582,9 @@ XPCWrappedNative::ReparentWrapperIfFound(XPCCallContext& ccx,
                     wrapper->UpdateScriptableInfo(newProto->GetScriptableInfo());
                 }
 
-                NS_ASSERTION(!newMap->Find(wrapper->GetIdentityObject()),
-                             "wrapper already in new scope!");
+                // Crash if the wrapper is already in the new scope.
+                if (newMap->Find(wrapper->GetIdentityObject()))
+                    MOZ_CRASH();
 
                 if (!newMap->Add(wrapper))
                     MOZ_CRASH();
@@ -1686,7 +1687,7 @@ RescueOrphans(XPCCallContext& ccx, JSObject* obj)
     parentObj = js::UnwrapObject(parentObj, /* stopAtOuter = */ false);
 
     // PreCreate may touch dead compartments.
-    js::AutoMaybeTouchDeadCompartments agc(parentObj);
+    js::AutoMaybeTouchDeadZones agc(parentObj);
 
     bool isWN = IS_WRAPPER_CLASS(js::GetObjectClass(obj));
 
@@ -3776,7 +3777,7 @@ ConstructSlimWrapper(XPCCallContext &ccx,
     }
 
     // PreCreate may touch dead compartments.
-    js::AutoMaybeTouchDeadCompartments agc(parent);
+    js::AutoMaybeTouchDeadZones agc(parent);
 
     JSObject* plannedParent = parent;
     nsresult rv = classInfoHelper->PreCreate(identityObj, ccx, parent, &parent);

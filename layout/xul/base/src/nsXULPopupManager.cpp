@@ -24,7 +24,6 @@
 #include "nsIComponentManager.h"
 #include "nsITimer.h"
 #include "nsFocusManager.h"
-#include "nsIDocShellTreeItem.h"
 #include "nsIDocShell.h"
 #include "nsPIDOMWindow.h"
 #include "nsIInterfaceRequestorUtils.h"
@@ -237,6 +236,21 @@ bool nsXULPopupManager::ShouldRollupOnMouseWheelEvent()
   nsAutoString value;
   content->GetAttr(kNameSpaceID_None, nsGkAtoms::type, value);
   return StringBeginsWith(value, NS_LITERAL_STRING("autocomplete"));
+}
+
+bool nsXULPopupManager::ShouldConsumeOnMouseWheelEvent()
+{
+  nsMenuChainItem* item = GetTopVisibleMenu();
+  if (!item)
+    return false;
+
+  nsMenuPopupFrame* frame = item->Frame();
+  if (frame->PopupType() != ePopupTypePanel)
+    return true;
+
+  nsIContent* content = frame->GetContent();
+  return !(content && content->AttrValueIs(kNameSpaceID_None, nsGkAtoms::type,
+                                           nsGkAtoms::arrow, eCaseMatters));
 }
 
 // a menu should not roll up if activated by a mouse activate message (eg. X-mouse)

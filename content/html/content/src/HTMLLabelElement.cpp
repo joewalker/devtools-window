@@ -14,7 +14,6 @@
 // construction, destruction
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Label)
-DOMCI_NODE_DATA(HTMLLabelElement, mozilla::dom::HTMLLabelElement)
 
 namespace mozilla {
 namespace dom {
@@ -24,9 +23,9 @@ HTMLLabelElement::~HTMLLabelElement()
 }
 
 JSObject*
-HTMLLabelElement::WrapNode(JSContext *aCx, JSObject *aScope, bool *aTriedToWrap)
+HTMLLabelElement::WrapNode(JSContext *aCx, JSObject *aScope)
 {
-  return HTMLLabelElementBinding::Wrap(aCx, aScope, this, aTriedToWrap);
+  return HTMLLabelElementBinding::Wrap(aCx, aScope, this);
 }
 
 // nsISupports 
@@ -41,7 +40,7 @@ NS_INTERFACE_TABLE_HEAD(HTMLLabelElement)
                                    nsIDOMHTMLLabelElement)
   NS_HTML_CONTENT_INTERFACE_TABLE_TO_MAP_SEGUE(HTMLLabelElement,
                                                nsGenericHTMLFormElement)
-NS_HTML_CONTENT_INTERFACE_TABLE_TAIL_CLASSINFO(HTMLLabelElement)
+NS_HTML_CONTENT_INTERFACE_MAP_END
 
 
 // nsIDOMHTMLLabelElement

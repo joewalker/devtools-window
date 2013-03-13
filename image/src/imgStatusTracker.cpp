@@ -165,6 +165,18 @@ public:
     }
   }
 
+  virtual void OnUnlockedDraw()
+  {
+    NS_ABORT_IF_FALSE(mTracker->GetImage(),
+                      "OnUnlockedDraw callback before we've created our image");
+    mTracker->RecordUnlockedDraw();
+
+    nsTObserverArray<imgRequestProxy*>::ForwardIterator iter(mTracker->mConsumers);
+    while (iter.HasMore()) {
+      mTracker->SendUnlockedDraw(iter.GetNext());
+    }
+  }
+
   virtual void OnImageIsAnimated()
   {
     NS_ABORT_IF_FALSE(mTracker->GetImage(),
@@ -464,6 +476,7 @@ imgStatusTracker::RecordDecoded()
   NS_ABORT_IF_FALSE(mImage, "RecordDecoded called before we have an Image");
   mState |= stateDecodeStarted | stateDecodeStopped | stateFrameStopped;
   mImageStatus |= imgIRequest::STATUS_FRAME_COMPLETE | imgIRequest::STATUS_DECODE_COMPLETE;
+  mImageStatus &= ~imgIRequest::STATUS_DECODE_STARTED;
 }
 
 void
@@ -471,6 +484,7 @@ imgStatusTracker::RecordStartDecode()
 {
   NS_ABORT_IF_FALSE(mImage, "RecordStartDecode without an Image");
   mState |= stateDecodeStarted;
+  mImageStatus |= imgIRequest::STATUS_DECODE_STARTED;
 }
 
 void
@@ -538,11 +552,13 @@ imgStatusTracker::RecordStopDecode(nsresult aStatus)
                     "RecordStopDecode called before we have an Image");
   mState |= stateDecodeStopped;
 
-  if (NS_SUCCEEDED(aStatus) && mImageStatus != imgIRequest::STATUS_ERROR)
+  if (NS_SUCCEEDED(aStatus) && mImageStatus != imgIRequest::STATUS_ERROR) {
     mImageStatus |= imgIRequest::STATUS_DECODE_COMPLETE;
+    mImageStatus &= ~imgIRequest::STATUS_DECODE_STARTED;
   // If we weren't successful, clear all success status bits and set error.
-  else
+  } else {
     mImageStatus = imgIRequest::STATUS_ERROR;
+  }
 }
 
 void
@@ -563,9 +579,17 @@ imgStatusTracker::RecordDiscard()
   mState &= ~stateBitsToClear;
 
   // Clear the status bits we no longer deserve.
-  uint32_t statusBitsToClear = imgIRequest::STATUS_FRAME_COMPLETE
-                               | imgIRequest::STATUS_DECODE_COMPLETE;
+  uint32_t statusBitsToClear = imgIRequest::STATUS_DECODE_STARTED |
+                               imgIRequest::STATUS_FRAME_COMPLETE |
+                               imgIRequest::STATUS_DECODE_COMPLETE;
   mImageStatus &= ~statusBitsToClear;
+}
+
+void
+imgStatusTracker::RecordUnlockedDraw()
+{
+  NS_ABORT_IF_FALSE(mImage,
+                    "RecordUnlockedDraw called before we have an Image");
 }
 
 void
@@ -594,6 +618,13 @@ imgStatusTracker::SendDiscard(imgRequestProxy* aProxy)
 }
 
 void
+imgStatusTracker::SendUnlockedDraw(imgRequestProxy* aProxy)
+{
+  if (!aProxy->NotificationsDeferred())
+    aProxy->OnUnlockedDraw();
+}
+
+void
 imgStatusTracker::RecordFrameChanged(const nsIntRect* aDirtyRect)
 {
   NS_ABORT_IF_FALSE(mImage,
@@ -619,6 +650,8 @@ imgStatusTracker::RecordStartRequest()
   mImageStatus &= ~imgIRequest::STATUS_LOAD_PARTIAL;
   mImageStatus &= ~imgIRequest::STATUS_LOAD_COMPLETE;
   mImageStatus &= ~imgIRequest::STATUS_FRAME_COMPLETE;
+  mImageStatus &= ~imgIRequest::STATUS_DECODE_STARTED;
+  mImageStatus &= ~imgIRequest::STATUS_DECODE_COMPLETE;
   mState &= ~stateRequestStarted;
   mState &= ~stateDecodeStarted;
   mState &= ~stateDecodeStopped;

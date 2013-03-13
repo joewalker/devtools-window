@@ -44,6 +44,19 @@ private:
   void AppendRelativePath();
 };
 
+/*
+  The FileUpdateDispatcher converts file-watcher-notify
+  observer events to file-watcher-update events.  This is
+  used to be able to broadcast events from one child to
+  another child in B2G.  (f.e., if one child decides to add
+  a file, we want to be able to able to send a onchange
+  notifications to every other child watching that device
+  storage object).
+
+  We create this object (via GetSingleton) in two places:
+    * ContentParent::Init (for IPC)
+    * nsDOMDeviceStorage::Init (for non-ipc)
+*/
 class FileUpdateDispatcher MOZ_FINAL
   : public nsIObserver
 {
@@ -57,17 +70,16 @@ class FileUpdateDispatcher MOZ_FINAL
 };
 
 class nsDOMDeviceStorage MOZ_FINAL
-  : public nsIDOMDeviceStorage
-  , public nsDOMEventTargetHelper
+  : public nsDOMEventTargetHelper
+  , public nsIDOMDeviceStorage
   , public nsIObserver
 {
 public:
-  NS_DECL_ISUPPORTS
+  NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_NSIDOMDEVICESTORAGE
 
   NS_DECL_NSIOBSERVER
   NS_DECL_NSIDOMEVENTTARGET
-  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(nsDOMDeviceStorage, nsDOMEventTargetHelper)
 
   nsDOMDeviceStorage();
 

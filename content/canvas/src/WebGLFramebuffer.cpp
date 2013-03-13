@@ -11,8 +11,8 @@
 using namespace mozilla;
 
 JSObject*
-WebGLFramebuffer::WrapObject(JSContext *cx, JSObject *scope, bool *triedToWrap) {
-    return dom::WebGLFramebufferBinding::Wrap(cx, scope, this, triedToWrap);
+WebGLFramebuffer::WrapObject(JSContext *cx, JSObject *scope) {
+    return dom::WebGLFramebufferBinding::Wrap(cx, scope, this);
 }
 
 WebGLFramebuffer::WebGLFramebuffer(WebGLContext *context)
@@ -352,7 +352,7 @@ WebGLFramebuffer::CheckAndInitializeRenderbuffers()
         mask |= LOCAL_GL_STENCIL_BUFFER_BIT;
     }
 
-    mContext->ForceClearFramebufferWithDefaultValues(mask, nsIntRect(0, 0, rect->Width(), rect->Height()));
+    mContext->ForceClearFramebufferWithDefaultValues(mask);
 
     if (mColorAttachment.HasUninitializedRenderbuffer())
         mColorAttachment.Renderbuffer()->SetInitialized(true);

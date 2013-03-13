@@ -45,6 +45,8 @@
 #include "nsThreadUtils.h"
 #include "mozilla/dom/NodeListBinding.h"
 
+using namespace mozilla;
+
 // ==================================================================
 // = nsAnonymousContentList 
 // ==================================================================
@@ -77,10 +79,9 @@ public:
   nsXBLInsertionPoint* GetInsertionPointAt(int32_t i) { return static_cast<nsXBLInsertionPoint*>(mElements->ElementAt(i)); }
   void RemoveInsertionPointAt(int32_t i) { mElements->RemoveElementAt(i); }
 
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope,
-                               bool *triedToWrap)
+  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope) MOZ_OVERRIDE
   {
-    return mozilla::dom::NodeListBinding::Wrap(cx, scope, this, triedToWrap);
+    return mozilla::dom::NodeListBinding::Wrap(cx, scope, this);
   }
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_ANONYMOUS_CONTENT_LIST_IID)
@@ -115,14 +116,9 @@ NS_IMPL_CYCLE_COLLECTING_RELEASE(nsAnonymousContentList)
 
 NS_INTERFACE_TABLE_HEAD(nsAnonymousContentList)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_NODELIST_OFFSET_AND_INTERFACE_TABLE_BEGIN(nsAnonymousContentList)
-    NS_INTERFACE_TABLE_ENTRY(nsAnonymousContentList, nsINodeList)
-    NS_INTERFACE_TABLE_ENTRY(nsAnonymousContentList, nsIDOMNodeList)
-    NS_INTERFACE_TABLE_ENTRY(nsAnonymousContentList, nsAnonymousContentList)
-  NS_OFFSET_AND_INTERFACE_TABLE_END
-  NS_OFFSET_AND_INTERFACE_TABLE_TO_MAP_SEGUE
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(NodeList)
-  NS_INTERFACE_MAP_ENTRIES_CYCLE_COLLECTION(nsAnonymousContentList)
+  NS_INTERFACE_TABLE3(nsAnonymousContentList, nsINodeList, nsIDOMNodeList,
+                      nsAnonymousContentList)
+  NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsAnonymousContentList)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsAnonymousContentList)
@@ -1182,7 +1178,7 @@ nsBindingManager::GetBindingImplementation(nsIContent* aContent, REFNSIID aIID,
       if (!context)
         return NS_NOINTERFACE;
 
-      JSContext* jscontext = context->GetNativeContext();
+      AutoPushJSContext jscontext(context->GetNativeContext());
       if (!jscontext)
         return NS_NOINTERFACE;
 

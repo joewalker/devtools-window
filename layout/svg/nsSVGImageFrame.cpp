@@ -17,6 +17,7 @@
 #include "mozilla/dom/SVGSVGElement.h"
 #include "nsSVGUtils.h"
 #include "SVGContentUtils.h"
+#include "SVGImageContext.h"
 #include "mozilla/dom/SVGImageElement.h"
 #include "nsContentUtils.h"
 
@@ -224,8 +225,7 @@ nsSVGImageFrame::GetRasterImageTransform(int32_t aNativeWidth,
   element->GetAnimatedLengthValues(&x, &y, &width, &height, nullptr);
 
   gfxMatrix viewBoxTM =
-    SVGContentUtils::GetViewBoxTransform(element,
-                                         width, height,
+    SVGContentUtils::GetViewBoxTransform(width, height,
                                          0, 0, aNativeWidth, aNativeHeight,
                                          element->mPreserveAspectRatio);
 
@@ -285,7 +285,7 @@ nsSVGImageFrame::PaintSVG(nsRenderingContext *aContext,
 {
   nsresult rv = NS_OK;
 
-  if (!GetStyleVisibility()->IsVisible())
+  if (!StyleVisibility()->IsVisible())
     return NS_OK;
 
   float x, y, width, height;
@@ -309,7 +309,7 @@ nsSVGImageFrame::PaintSVG(nsRenderingContext *aContext,
     gfxContext* ctx = aContext->ThebesContext();
     gfxContextAutoSaveRestore autoRestorer(ctx);
 
-    if (GetStyleDisplay()->IsScrollableOverflow()) {
+    if (StyleDisplay()->IsScrollableOverflow()) {
       gfxRect clipRect = nsSVGUtils::GetClipRectForFrame(this, x, y,
                                                          width, height);
       nsSVGUtils::SetClipRect(ctx, GetCanvasTM(FOR_PAINTING), clipRect);
@@ -324,7 +324,7 @@ nsSVGImageFrame::PaintSVG(nsRenderingContext *aContext,
     // image into the current canvas is just the group opacity.
     float opacity = 1.0f;
     if (nsSVGUtils::CanOptimizeOpacity(this)) {
-      opacity = GetStyleDisplay()->mOpacity;
+      opacity = StyleDisplay()->mOpacity;
     }
 
     if (opacity != 1.0f) {
@@ -352,25 +352,10 @@ nsSVGImageFrame::PaintSVG(nsRenderingContext *aContext,
     uint32_t drawFlags = imgIContainer::FLAG_SYNC_DECODE;
 
     if (mImageContainer->GetType() == imgIContainer::TYPE_VECTOR) {
-      nsIFrame* imgRootFrame = mImageContainer->GetRootLayoutFrame();
-      if (!imgRootFrame) {
-        // bad image (e.g. XML parse error in image's SVG file)
-        return NS_OK;
-      }
+      // Package up the attributes of this image element which can override the
+      // attributes of mImageContainer's internal SVG document.
+      SVGImageContext context(imgElem->mPreserveAspectRatio.GetAnimValue());
 
-      // Grab root node (w/ sanity-check to make sure it exists & is <svg>)
-      SVGSVGElement* rootSVGElem =
-        static_cast<SVGSVGElement*>(imgRootFrame->GetContent());
-      if (!rootSVGElem || !rootSVGElem->IsSVG(nsGkAtoms::svg)) {
-        NS_ABORT_IF_FALSE(false, "missing or non-<svg> root node!!");
-        return NS_OK;
-      }
-
-      // Override preserveAspectRatio in our helper document
-      // XXXdholbert We should technically be overriding the helper doc's clip
-      // and overflow properties here, too. See bug 272288 comment 36.
-      rootSVGElem->SetImageOverridePreserveAspectRatio(
-        imgElem->mPreserveAspectRatio.GetAnimValue());
       nsRect destRect(0, 0,
                       appUnitsPerDevPx * width,
                       appUnitsPerDevPx * height);
@@ -384,9 +369,8 @@ nsSVGImageFrame::PaintSVG(nsRenderingContext *aContext,
         nsLayoutUtils::GetGraphicsFilterForFrame(this),
         destRect,
         aDirtyRect ? dirtyRect : destRect,
+        &context,
         drawFlags);
-
-      rootSVGElem->ClearImageOverridePreserveAspectRatio();
     } else { // mImageContainer->GetType() == TYPE_RASTER
       nsLayoutUtils::DrawSingleUnscaledImage(
         aContext,
@@ -416,7 +400,7 @@ nsSVGImageFrame::GetFrameForPoint(const nsPoint &aPoint)
   // doesn't necessarily map to our <image> element's [x,y,width,height].  So,
   // we have to look up the native image size & our image transform in order
   // to filter out points that fall outside that area.
-  if (GetStyleDisplay()->IsScrollableOverflow() && mImageContainer) {
+  if (StyleDisplay()->IsScrollableOverflow() && mImageContainer) {
     if (mImageContainer->GetType() == imgIContainer::TYPE_RASTER) {
       int32_t nativeWidth, nativeHeight;
       if (NS_FAILED(mImageContainer->GetWidth(&nativeWidth)) ||
@@ -527,12 +511,12 @@ nsSVGImageFrame::GetHitTestFlags()
 {
   uint16_t flags = 0;
 
-  switch(GetStyleVisibility()->mPointerEvents) {
+  switch(StyleVisibility()->mPointerEvents) {
     case NS_STYLE_POINTER_EVENTS_NONE:
       break;
     case NS_STYLE_POINTER_EVENTS_VISIBLEPAINTED:
     case NS_STYLE_POINTER_EVENTS_AUTO:
-      if (GetStyleVisibility()->IsVisible()) {
+      if (StyleVisibility()->IsVisible()) {
         /* XXX: should check pixel transparency */
         flags |= SVG_HIT_TEST_FILL;
       }
@@ -540,7 +524,7 @@ nsSVGImageFrame::GetHitTestFlags()
     case NS_STYLE_POINTER_EVENTS_VISIBLEFILL:
     case NS_STYLE_POINTER_EVENTS_VISIBLESTROKE:
     case NS_STYLE_POINTER_EVENTS_VISIBLE:
-      if (GetStyleVisibility()->IsVisible()) {
+      if (StyleVisibility()->IsVisible()) {
         flags |= SVG_HIT_TEST_FILL;
       }
       break;

@@ -1277,7 +1277,8 @@ public:
 
     void testq_i32r(int imm, RegisterID dst)
     {
-        FIXME_INSN_PRINTING;
+        spew("testq      $0x%x, %s",
+             imm, nameIReg(dst));
         m_formatter.oneByteOp64(OP_GROUP3_EvIz, GROUP3_OP_TEST, dst);
         m_formatter.immediate32(imm);
     }
@@ -1595,6 +1596,11 @@ public:
         m_formatter.oneByteOp64(OP_GROUP11_EvIz, GROUP11_MOV, base, index, scale, offset);
         m_formatter.immediate32(imm);
     }
+
+    // Intentionally left undefined. If you need this operation, consider
+    // naming it movq_i32r_signExtended to highlight the fact the operand size
+    // is not 32; the 32-bit immediate is sign-extended.
+    void movq_i32r(int imm, RegisterID dst);
 
     void movq_i64r(int64_t imm, RegisterID dst)
     {
@@ -2447,6 +2453,11 @@ public:
         m_formatter.jumpTablePointer(ptr);
     }
 
+    void doubleConstant(double d)
+    {
+        m_formatter.doubleConstant(d);
+    }
+
     // Linking & patching:
     //
     // 'link' and 'patch' methods are for use on unprotected code - such as the code
@@ -3004,6 +3015,17 @@ private:
 #else
             m_buffer.putIntUnchecked(ptr);
 #endif
+        }
+
+        void doubleConstant(double d)
+        {
+            m_buffer.ensureSpace(sizeof(double));
+            union {
+                uint64_t u64;
+                double d;
+            } u;
+            u.d = d;
+            m_buffer.putInt64Unchecked(u.u64);
         }
 
         // Administrative methods:

@@ -67,6 +67,9 @@ private:
   bool
   SetMainThread();
 
+  void
+  ResizeButtons();
+
   INT_PTR
   HangUIDlgProc(HWND aDlgHandle, UINT aMsgCode, WPARAM aWParam, LPARAM aLParam);
 
@@ -98,6 +101,8 @@ private:
   static const int kExpectedMinimumArgc;
   static const DWORD kProcessTimeout;
   static const DWORD kShmTimeout;
+
+  typedef HRESULT (WINAPI *SETAPPUSERMODELID)(PCWSTR);
 
   DISALLOW_COPY_AND_ASSIGN(PluginHangUIChild);
 };

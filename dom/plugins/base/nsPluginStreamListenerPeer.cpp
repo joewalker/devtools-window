@@ -126,15 +126,15 @@ nsPluginByteRangeStreamListener::OnStartRequest(nsIRequest *request, nsISupports
   }
   
   if (responseCode != 200) {
-    bool bWantsAllNetworkStreams = false;
+    uint32_t wantsAllNetworkStreams = 0;
     rv = pslp->GetPluginInstance()->GetValueFromPlugin(NPPVpluginWantsAllNetworkStreams,
-                                                       &bWantsAllNetworkStreams);
+                                                       &wantsAllNetworkStreams);
     // If the call returned an error code make sure we still use our default value.
     if (NS_FAILED(rv)) {
-      bWantsAllNetworkStreams = false;
+      wantsAllNetworkStreams = 0;
     }
 
-    if (!bWantsAllNetworkStreams){
+    if (!wantsAllNetworkStreams){
       return NS_ERROR_FAILURE;
     }
   }
@@ -476,20 +476,20 @@ nsPluginStreamListenerPeer::OnStartRequest(nsIRequest *request,
     }
 
     if (responseCode > 206) { // not normal
-      bool bWantsAllNetworkStreams = false;
+      uint32_t wantsAllNetworkStreams = 0;
 
       // We don't always have an instance here already, but if we do, check
       // to see if it wants all streams.
       if (mPluginInstance) {
         rv = mPluginInstance->GetValueFromPlugin(NPPVpluginWantsAllNetworkStreams,
-                                                 &bWantsAllNetworkStreams);
+                                                 &wantsAllNetworkStreams);
         // If the call returned an error code make sure we still use our default value.
         if (NS_FAILED(rv)) {
-          bWantsAllNetworkStreams = false;
+          wantsAllNetworkStreams = 0;
         }
       }
 
-      if (!bWantsAllNetworkStreams) {
+      if (!wantsAllNetworkStreams) {
         mRequestFailed = true;
         return NS_ERROR_FAILURE;
       }
@@ -514,7 +514,7 @@ nsPluginStreamListenerPeer::OnStartRequest(nsIRequest *request,
 
   // it's possible for the server to not send a Content-Length.
   // we should still work in this case.
-  if (NS_FAILED(rv) || length == -1) {
+  if (NS_FAILED(rv) || length < 0 || length > UINT32_MAX) {
     // check out if this is file channel
     nsCOMPtr<nsIFileChannel> fileChannel = do_QueryInterface(channel);
     if (fileChannel) {
@@ -525,7 +525,7 @@ nsPluginStreamListenerPeer::OnStartRequest(nsIRequest *request,
     mLength = 0;
   }
   else {
-    mLength = length;
+    mLength = uint32_t(length);
   }
 
   nsAutoCString aContentType; // XXX but we already got the type above!

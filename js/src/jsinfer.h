@@ -390,20 +390,17 @@ enum {
     /* Whether any represented script is considered uninlineable in JM. */
     OBJECT_FLAG_UNINLINEABLE          = 0x00080000,
 
-    /* Whether any objects have an equality hook. */
-    OBJECT_FLAG_SPECIAL_EQUALITY      = 0x00100000,
-
     /* Whether any objects have been iterated over. */
-    OBJECT_FLAG_ITERATED              = 0x00200000,
+    OBJECT_FLAG_ITERATED              = 0x00100000,
 
     /* For a global object, whether flags were set on the RegExpStatics. */
-    OBJECT_FLAG_REGEXP_FLAGS_SET      = 0x00400000,
+    OBJECT_FLAG_REGEXP_FLAGS_SET      = 0x00200000,
 
     /* Whether any objects emulate undefined; see EmulatesUndefined. */
-    OBJECT_FLAG_EMULATES_UNDEFINED    = 0x00800000,
+    OBJECT_FLAG_EMULATES_UNDEFINED    = 0x00400000,
 
     /* Flags which indicate dynamic properties of represented objects. */
-    OBJECT_FLAG_DYNAMIC_MASK          = 0x00ff0000,
+    OBJECT_FLAG_DYNAMIC_MASK          = 0x007f0000,
 
     /*
      * Whether all properties of this object are considered unknown.
@@ -1122,10 +1119,6 @@ typedef HashSet<ReadBarriered<TypeObject>, TypeObjectEntry, SystemAllocPolicy> T
 bool
 UseNewType(JSContext *cx, JSScript *script, jsbytecode *pc);
 
-/* Whether to use a new type object for an initializer opcode at script/pc. */
-bool
-UseNewTypeForInitializer(JSContext *cx, JSScript *script, jsbytecode *pc, JSProtoKey key);
-
 /*
  * Whether Array.prototype, or an object on its proto chain, has an
  * indexed property.
@@ -1160,7 +1153,7 @@ struct TypeCallsite
     /* Type set receiving the return value of this call. */
     StackTypeSet *returnTypes;
 
-    inline TypeCallsite(JSContext *cx, UnrootedScript script, jsbytecode *pc,
+    inline TypeCallsite(JSContext *cx, RawScript script, jsbytecode *pc,
                         bool isNew, unsigned argumentCount);
 };
 
@@ -1186,7 +1179,7 @@ class TypeScript
     /* Array of type type sets for variables and JOF_TYPESET ops. */
     TypeSet *typeArray() { return (TypeSet *) (uintptr_t(this) + sizeof(TypeScript)); }
 
-    static inline unsigned NumTypeSets(UnrootedScript script);
+    static inline unsigned NumTypeSets(RawScript script);
 
     static inline HeapTypeSet  *ReturnTypes(RawScript script);
     static inline StackTypeSet *ThisTypes(RawScript script);
@@ -1435,7 +1428,7 @@ struct TypeCompartment
 
     /* Mark a script as needing recompilation once inference has finished. */
     void addPendingRecompile(JSContext *cx, const RecompileInfo &info);
-    void addPendingRecompile(JSContext *cx, UnrootedScript script, jsbytecode *pc);
+    void addPendingRecompile(JSContext *cx, RawScript script, jsbytecode *pc);
 
     /* Monitor future effects on a bytecode. */
     void monitorBytecode(JSContext *cx, JSScript *script, uint32_t offset,

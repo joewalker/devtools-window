@@ -26,6 +26,13 @@
 #include "CameraControlImpl.h"
 #include "CameraCommon.h"
 #include "GonkRecorder.h"
+#include "GonkCameraHwMgr.h"
+
+namespace android {
+class GonkCameraHardware;
+class MediaProfiles;
+class GonkRecorder;
+}
 
 namespace mozilla {
 
@@ -40,19 +47,20 @@ class nsGonkCameraControl : public CameraControlImpl
 {
 public:
   nsGonkCameraControl(uint32_t aCameraId, nsIThread* aCameraThread, nsDOMCameraControl* aDOMCameraControl, nsICameraGetCameraCallback* onSuccess, nsICameraErrorCallback* onError, uint64_t aWindowId);
+  void DispatchInit(nsDOMCameraControl* aDOMCameraControl, nsICameraGetCameraCallback* onSuccess, nsICameraErrorCallback* onError, uint64_t aWindowId);
   nsresult Init();
 
   const char* GetParameter(const char* aKey);
   const char* GetParameterConstChar(uint32_t aKey);
   double GetParameterDouble(uint32_t aKey);
-  void GetParameter(uint32_t aKey, nsTArray<dom::CameraRegion>& aRegions);
-  void GetParameter(uint32_t aKey, nsTArray<dom::CameraSize>& aSizes);
+  void GetParameter(uint32_t aKey, nsTArray<idl::CameraRegion>& aRegions);
+  void GetParameter(uint32_t aKey, nsTArray<idl::CameraSize>& aSizes);
   void SetParameter(const char* aKey, const char* aValue);
   void SetParameter(uint32_t aKey, const char* aValue);
   void SetParameter(uint32_t aKey, double aValue);
-  void SetParameter(uint32_t aKey, const nsTArray<dom::CameraRegion>& aRegions);
+  void SetParameter(uint32_t aKey, const nsTArray<idl::CameraRegion>& aRegions);
   void SetParameter(uint32_t aKey, int aValue);
-  nsresult GetVideoSizes(nsTArray<dom::CameraSize>& aVideoSizes);
+  nsresult GetVideoSizes(nsTArray<idl::CameraSize>& aVideoSizes);
   nsresult PushParameters();
 
   void AutoFocusComplete(bool aSuccess);
@@ -82,7 +90,7 @@ protected:
   void SetPreviewSize(uint32_t aWidth, uint32_t aHeight);
   void SetupThumbnail(uint32_t aPictureWidth, uint32_t aPictureHeight, uint32_t aPercentQuality);
 
-  uint32_t                  mHwHandle;
+  android::sp<android::GonkCameraHardware> mCameraHw;
   double                    mExposureCompensationMin;
   double                    mExposureCompensationStep;
   bool                      mDeferConfigUpdate;

@@ -10,10 +10,7 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-TEST_DIRS += tests
-
 MODULE		= layout
-XPIDL_MODULE	= layout_base
 GRE_MODULE	= 1
 LIBRARY_NAME	= gkbase_s
 LIBXUL_LIBRARY	= 1
@@ -22,10 +19,6 @@ FAIL_ON_WARNINGS = 1
 endif # !_MSC_VER
 
 
-
-XPIDLSRCS	= \
-		nsIStyleSheetService.idl	\
-		$(NULL)
 
 EXPORTS_NAMESPACES = mozilla
 
@@ -100,9 +93,6 @@ CPPSRCS		= \
 		$(NULL)
 
 ifndef MOZ_XUL
-XPIDLSRCS  += \
-		nsIBoxObject.idl \
-		$(NULL)
 EXPORTS    += \
 		nsPIBoxObject.h \
 		$(NULL)

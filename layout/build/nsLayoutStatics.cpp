@@ -55,6 +55,7 @@
 #include "nsFrameList.h"
 #include "nsListControlFrame.h"
 #include "nsHTMLInputElement.h"
+#include "SVGElementFactory.h"
 #include "nsSVGUtils.h"
 #include "nsMathMLAtoms.h"
 #include "nsMathMLOperators.h"
@@ -111,7 +112,7 @@ using namespace mozilla::system;
 #include "mozilla/dom/time/DateCacheCleaner.h"
 #include "nsIMEStateManager.h"
 
-extern void NS_ShutdownChainItemPool();
+extern void NS_ShutdownEventTargetChainItemRecyclePool();
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -191,8 +192,6 @@ nsLayoutStatics::Initialize()
     return rv;
   }
 
-  inDOMView::InitAtoms();
-
 #endif
 
   nsMathMLOperators::AddRefTable();
@@ -261,6 +260,7 @@ nsLayoutStatics::Initialize()
 
   nsWindowMemoryReporter::Init();
 
+  SVGElementFactory::Init();
   nsSVGUtils::Init();
 
   InitProcessPriorityManager();
@@ -318,6 +318,7 @@ nsLayoutStatics::Shutdown()
   nsSprocketLayout::Shutdown();
 #endif
 
+  SVGElementFactory::Shutdown();
   nsMathMLOperators::ReleaseTable();
 
   nsFloatManager::Shutdown();
@@ -329,7 +330,6 @@ nsLayoutStatics::Shutdown()
 
   nsAttrValue::Shutdown();
   nsContentUtils::Shutdown();
-  nsNodeInfo::ClearCache();
   nsLayoutStylesheetCache::Shutdown();
   NS_NameSpaceManagerShutdown();
 
@@ -368,7 +368,7 @@ nsLayoutStatics::Shutdown()
 
   nsRegion::ShutdownStatic();
 
-  NS_ShutdownChainItemPool();
+  NS_ShutdownEventTargetChainItemRecyclePool();
 
   nsFrameList::Shutdown();
 

@@ -10,8 +10,6 @@ relativesrcdir = @relativesrcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-TEST_DIRS = unit
-
 XPCSHELL_TESTS = unit
 
 MOCHITEST_FILES = \
@@ -119,6 +117,7 @@ MOCHITEST_FILES = \
   webapp_clearBrowserData_browserFrame.html \
   $(NULL)
 
+#   test_bug847147.html disabled for timeouts
 #   test_writer_starvation.html  disabled for infinite loops, bug 595368
 
 ifeq (browser,$(MOZ_BUILD_APP))
@@ -138,6 +137,9 @@ MOCHITEST_BROWSER_FILES = \
   browser_quotaPromptDatabases.js \
   browser_quotaPromptDelete.html \
   browser_quotaPromptDelete.js \
+  browser_bug839193.js \
+  bug839193.js \
+  bug839193.xul \
   head.js \
   $(NULL)
 

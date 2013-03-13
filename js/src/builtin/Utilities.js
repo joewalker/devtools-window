@@ -2,15 +2,21 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-/*jshint bitwise: true, camelcase: false, curly: false, eqeqeq: true, forin: true,
-         immed: true, indent: 4, latedef: false, newcap: false, noarg: true,
-         noempty: true, nonew: true, plusplus: false, quotmark: false, regexp: true,
-         undef: true, unused: false, strict: false, trailing: true,
+/*jshint bitwise: true, camelcase: false, curly: false, eqeqeq: true,
+         es5: true, forin: true, immed: true, indent: 4, latedef: false,
+         newcap: false, noarg: true, noempty: true, nonew: true,
+         plusplus: false, quotmark: false, regexp: true, undef: true,
+         unused: false, strict: false, trailing: true,
 */
 
-/*global ToObject: false, ToInteger: false, IsCallable: false, ThrowError: false,
-         AssertionFailed: false, MakeConstructible: false, DecompileArg: false,
+/*global ToObject: false, ToInteger: false, IsCallable: false,
+         ThrowError: false, AssertionFailed: false, SetScriptHints: false,
+         MakeConstructible: false, DecompileArg: false,
          RuntimeDefaultLocale: false,
+         ParallelDo: false, ParallelSlices: false, NewDenseArray: false,
+         UnsafeSetElement: false, ShouldForceSequential: false,
+         ParallelTestsShouldPass: false,
+         Dump: false,
          callFunction: false,
          IS_UNDEFINED: false, TO_UINT32: false,
          JSMSG_NOT_FUNCTION: false, JSMSG_MISSING_FUN_ARG: false,
@@ -45,9 +51,13 @@ var std_String_lastIndexOf = String.prototype.lastIndexOf;
 var std_String_match = String.prototype.match;
 var std_String_replace = String.prototype.replace;
 var std_String_split = String.prototype.split;
+var std_String_startsWith = String.prototype.startsWith;
 var std_String_substring = String.prototype.substring;
 var std_String_toLowerCase = String.prototype.toLowerCase;
 var std_String_toUpperCase = String.prototype.toUpperCase;
+var std_WeakMap_get = WeakMap.prototype.get;
+var std_WeakMap_has = WeakMap.prototype.has;
+var std_WeakMap_set = WeakMap.prototype.set;
 
 
 /********** List specification type **********/
@@ -103,6 +113,20 @@ function ToNumber(v) {
 function ToString(v) {
     assert(arguments.length > 0, "__toString");
     return Std_String(v);
+}
+
+
+/********** Various utility functions **********/
+
+
+/** Returns true iff Type(v) is Object; see ES5 8.6. */
+function IsObject(v) {
+    // Watch out for |typeof null === "object"| as the most obvious pitfall.
+    // But also be careful of SpiderMonkey's objects that emulate undefined
+    // (i.e. |document.all|), which have bogus |typeof| behavior.  Detect
+    // these objects using strict equality, which said bogosity doesn't affect.
+    return (typeof v === "object" && v !== null) ||
+           (typeof v === "undefined" && v !== undefined);
 }
 
 

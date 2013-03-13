@@ -67,7 +67,7 @@
                   label="&cmd.cancel.label;"
                   accesskey="&cmd.cancel.accesskey;"/>
         <menuitem command="cmd_delete"
-                  class="downloadRemoveFromListMenuItem"
+                  class="downloadRemoveFromHistoryMenuItem"
                   label="&cmd.removeFromHistory.label;"
                   accesskey="&cmd.removeFromHistory.accesskey;"/>
         <menuitem command="downloadsCmd_show"
@@ -113,7 +113,6 @@
           <image class="downloadTypeIcon" />
           <vbox>
             <description id="downloadsSummaryDescription"
-                         class="downloadTarget"
                          style="min-width: &downloadsSummary.minWidth2;"/>
             <progressmeter id="downloadsSummaryProgress"
                            class="downloadProgress"
@@ -121,7 +120,6 @@
                            max="100"
                            mode="normal" />
             <description id="downloadsSummaryDetails"
-                         class="downloadDetails"
                          style="width: &downloadDetails.width;"
                          crop="end"/>
           </vbox>

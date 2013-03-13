@@ -102,13 +102,15 @@ class B2GRemoteAutomation(Automation):
     def checkForCrashes(self, directory, symbolsPath):
         # XXX: This will have to be updated after crash reporting on b2g
         # is in place.
-        dumpDir = tempfile.mkdtemp()
-        self._devicemanager.getDirectory(self._remoteProfile + '/minidumps/', dumpDir)
-        crashed = automationutils.checkForCrashes(dumpDir, symbolsPath, self.lastTestSeen)
         try:
-            shutil.rmtree(dumpDir)
-        except:
-            print "WARNING: unable to remove directory: %s" % (dumpDir)
+            dumpDir = tempfile.mkdtemp()
+            self._devicemanager.getDirectory(self._remoteProfile + '/minidumps/', dumpDir)
+            crashed = automationutils.checkForCrashes(dumpDir, symbolsPath, self.lastTestSeen)
+        finally:
+            try:
+                shutil.rmtree(dumpDir)
+            except:
+                print "WARNING: unable to remove directory: %s" % (dumpDir)
         return crashed
 
     def initializeProfile(self,  profileDir, extraPrefs=[],
@@ -166,7 +168,7 @@ class B2GRemoteAutomation(Automation):
         # Get the current status of the device.  If we know the device
         # serial number, we look for that, otherwise we use the (presumably
         # only) device shown in 'adb devices'.
-        serial = serial or self._devicemanager.deviceSerial
+        serial = serial or self._devicemanager._deviceSerial
         status = 'unknown'
 
         for line in self._devicemanager._runCmd(['devices']).stdout.readlines():
@@ -238,7 +240,7 @@ class B2GRemoteAutomation(Automation):
         time.sleep(5)
 
         # relaunch b2g inside b2g instance
-        instance = self.B2GInstance(self._devicemanager)
+        instance = self.B2GInstance(self._devicemanager, env=env)
 
         time.sleep(5)
 
@@ -296,8 +298,9 @@ class B2GRemoteAutomation(Automation):
            automation.
         """
 
-        def __init__(self, dm):
+        def __init__(self, dm, env=None):
             self.dm = dm
+            self.env = env or {}
             self.stdout_proc = None
             self.queue = Queue.Queue()
 
@@ -309,6 +312,8 @@ class B2GRemoteAutomation(Automation):
             if self.dm._deviceSerial:
                 cmd.extend(['-s', self.dm._deviceSerial])
             cmd.append('shell')
+            for k, v in self.env.iteritems():
+                cmd.append("%s=%s" % (k, v))
             cmd.append('/system/bin/b2g.sh')
             proc = threading.Thread(target=self._save_stdout_proc, args=(cmd, self.queue))
             proc.daemon = True

@@ -3,9 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-#include "mozilla/DebugOnly.h"
-
 #include "HTMLTableAccessible.h"
+
+#include "mozilla/DebugOnly.h"
 
 #include "Accessible-inl.h"
 #include "nsAccessibilityService.h"
@@ -18,6 +18,7 @@
 #include "States.h"
 #include "TreeWalker.h"
 
+#include "mozilla/dom/HTMLTableElement.h"
 #include "nsIDOMElement.h"
 #include "nsIDOMDocument.h"
 #include "nsIDOMRange.h"
@@ -25,10 +26,6 @@
 #include "nsINameSpaceManager.h"
 #include "nsIDOMNodeList.h"
 #include "nsIDOMHTMLCollection.h"
-#include "nsIDOMHTMLTableCellElement.h"
-#include "nsIDOMHTMLTableElement.h"
-#include "nsIDOMHTMLTableRowElement.h"
-#include "nsIDOMHTMLTableSectionElement.h"
 #include "nsIDocument.h"
 #include "nsIMutableArray.h"
 #include "nsIPresShell.h"
@@ -343,16 +340,6 @@ HTMLTableRowAccessible::NativeRole()
 // HTMLTableAccessible
 ////////////////////////////////////////////////////////////////////////////////
 
-HTMLTableAccessible::
-  HTMLTableAccessible(nsIContent* aContent, DocAccessible* aDoc) :
-  AccessibleWrap(aContent, aDoc), xpcAccessibleTable(this)
-{
-  mGenericTypes |= eTable;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// HTMLTableAccessible: nsISupports implementation
-
 NS_IMPL_ISUPPORTS_INHERITED1(HTMLTableAccessible, Accessible,
                              nsIAccessibleTable)
 
@@ -465,7 +452,7 @@ HTMLTableAccessible::Caption()
 void
 HTMLTableAccessible::Summary(nsString& aSummary)
 {
-  nsCOMPtr<nsIDOMHTMLTableElement> table(do_QueryInterface(mContent));
+  dom::HTMLTableElement* table = dom::HTMLTableElement::FromContent(mContent);
 
   if (table)
     table->GetSummary(aSummary);
@@ -1062,7 +1049,7 @@ HTMLTableAccessible::IsProbablyLayoutTable()
     if (child->Role() == roles::ROW) {
       prevRowColor = rowColor;
       nsIFrame* rowFrame = child->GetFrame();
-      rowColor = rowFrame->GetStyleBackground()->mBackgroundColor;
+      rowColor = rowFrame->StyleBackground()->mBackgroundColor;
 
       if (childIdx > 0 && prevRowColor != rowColor)
         RETURN_LAYOUT_ANSWER(false, "2 styles of row background color, non-bordered");

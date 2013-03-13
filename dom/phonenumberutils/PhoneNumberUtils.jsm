@@ -16,9 +16,9 @@ Cu.import("resource://gre/modules/PhoneNumber.jsm");
 Cu.import("resource://gre/modules/mcc_iso3166_table.jsm");
 
 #ifdef MOZ_B2G_RIL
-XPCOMUtils.defineLazyServiceGetter(this, "ril",
+XPCOMUtils.defineLazyServiceGetter(this, "mobileConnection",
                                    "@mozilla.org/ril/content-helper;1",
-                                   "nsIRILContentHelper");
+                                   "nsIMobileConnectionProvider");
 #endif
 
 this.PhoneNumberUtils = {
@@ -36,18 +36,19 @@ this.PhoneNumberUtils = {
 
 #ifdef MOZ_B2G_RIL
     // Get network mcc
-    if (ril.voiceConnectionInfo && ril.voiceConnectionInfo.network) {
-      mcc = ril.voiceConnectionInfo.network.mcc;
+    if (mobileConnection.voiceConnectionInfo &&
+        mobileConnection.voiceConnectionInfo.network) {
+      mcc = mobileConnection.voiceConnectionInfo.network.mcc;
     }
 
     // Get SIM mcc
     if (!mcc) {
-      mcc = ril.iccInfo.mcc;
+      mcc = mobileConnection.iccInfo.mcc;
     }
 
     // Get previous mcc
-    if (!mcc && ril.voiceConnectionInfo && ril.voiceConnectionInfo.network) {
-      mcc = ril.voiceConnectionInfo.network.previousMcc;
+    if (!mcc && mobileConnection.voiceConnectionInfo) {
+      mcc = mobileConnection.voiceConnectionInfo.lastKnownMcc;
     }
 
     // Set to default mcc
@@ -83,5 +84,17 @@ this.PhoneNumberUtils = {
     let countryName = MCC_ISO3166_TABLE[aMCC];
     if (DEBUG) debug("found country name: " + countryName);
     return PhoneNumber.Parse(aNumber, countryName);
+  },
+
+  isPlainPhoneNumber: function isPlainPhoneNumber(aNumber) {
+    var isPlain = PhoneNumber.IsPlain(aNumber);
+    if (DEBUG) debug("isPlain(" + aNumber + ") " + isPlain);
+    return isPlain;
+  },
+
+  normalize: function Normalize(aNumber) {
+    var normalized = PhoneNumber.Normalize(aNumber);
+    if (DEBUG) debug("normalize(" + aNumber + "): " + normalized);
+    return normalized;
   }
 };

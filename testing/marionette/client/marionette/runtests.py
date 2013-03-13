@@ -13,10 +13,11 @@ import socket
 import sys
 import time
 import platform
+import moznetwork
 import xml.dom.minidom as dom
 
 from manifestparser import TestManifest
-from mozhttpd import iface, MozHttpd
+from mozhttpd import MozHttpd
 
 from marionette import Marionette
 from marionette_test import MarionetteJSTestCase, MarionetteTestCase
@@ -65,7 +66,7 @@ class MarionetteTestResult(unittest._TextTestResult):
                     return
                 self.stream.writeln('START LOG:')
                 for line in testcase.loglines:
-                    self.stream.writeln(' '.join(line))
+                    self.stream.writeln(' '.join(line).encode('ascii', 'replace'))
                 self.stream.writeln('END LOG:')
 
     def getPerfData(self, test):
@@ -250,7 +251,7 @@ class MarionetteTestRunner(object):
         self.perfrequest = None
 
     def start_httpd(self):
-        host = iface.get_lan_ip()
+        host = moznetwork.get_ip()
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.bind(("",0))
         port = s.getsockname()[1]
@@ -583,7 +584,7 @@ def parse_options():
                       help = "Use a specific image file instead of a fresh one")
     parser.add_option('--emulator-res',
                       action = 'store', dest = 'emulator_res',
-                      default = '480x800', type= 'str',
+                      default = None, type= 'str',
                       help = 'Set a custom resolution for the emulator. '
                       'Example: "480x800"')
     parser.add_option("--no-window",
@@ -635,11 +636,6 @@ def parse_options():
     parser.add_option('--tree', dest='tree', action='store',
                       default='b2g',
                       help='the tree that the revsion parameter refers to')
-    parser.add_option('--load-early', dest='load_early', action='store_true',
-                      default=False,
-                      help='on an emulator, causes Marionette to load earlier '
-                      'in the startup process than it otherwise would; needed '
-                      'for testing WebAPIs')
 
     options, tests = parser.parse_args()
 
@@ -661,11 +657,12 @@ def parse_options():
 
     # check for valid resolution string, strip whitespaces
     try:
-        dims = options.emulator_res.split('x')
-        assert len(dims) == 2
-        width = str(int(dims[0]))
-        height = str(int(dims[1]))
-        options.emulator_res = 'x'.join([width, height])
+        if options.emulator_res:
+            dims = options.emulator_res.split('x')
+            assert len(dims) == 2
+            width = str(int(dims[0]))
+            height = str(int(dims[1]))
+            options.emulator_res = 'x'.join([width, height])
     except:
         raise ValueError('Invalid emulator resolution format. '
                          'Should be like "480x800".')

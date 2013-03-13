@@ -41,8 +41,7 @@ public:
   {
   }
 
-  virtual JSObject* WrapNode(JSContext *aCx, JSObject *aScope,
-                             bool *aTriedToWrap);
+  virtual JSObject* WrapNode(JSContext *aCx, JSObject *aScope) MOZ_OVERRIDE;
 
   // nsIContent
   virtual already_AddRefed<nsINodeInfo>
@@ -77,8 +76,6 @@ public:
   }
 
   virtual bool IsNodeOfType(uint32_t aFlags) const;
-
-  virtual nsXPCClassInfo* GetClassInfo();
 
   virtual nsIDOMNode* AsDOMNode() { return this; }
 

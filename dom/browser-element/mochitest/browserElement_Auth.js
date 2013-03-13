@@ -17,7 +17,7 @@ function runTest() {
   browserElementTestHelpers.addPermission();
 
   iframe = document.createElement('iframe');
-  iframe.mozbrowser = true;
+  SpecialPowers.wrap(iframe).mozbrowser = true;
   document.body.appendChild(iframe);
 
   // Wait for the initial load to finish, then navigate the page, then start test
@@ -135,11 +135,19 @@ function testAuthJarInterfere(e) {
 
   // Will authenticate with correct password, prompt should not be
   // called again.
-  iframe.addEventListener("mozbrowserusernameandpasswordrequired", testFinish);
+  var gotusernamepasswordrequired = false;
+  function onUserNameAndPasswordRequired() {
+      gotusernamepasswordrequired = true;
+  }
+  iframe.addEventListener("mozbrowserusernameandpasswordrequired",
+                          onUserNameAndPasswordRequired);
   iframe.addEventListener("mozbrowsertitlechange", function onTitleChange(e) {
     iframe.removeEventListener("mozbrowsertitlechange", onTitleChange);
-    iframe.removeEventListener("mozbrowserusernameandpasswordrequired", testFinish);
-    SimpleTest.execute(testFail);
+    iframe.removeEventListener("mozbrowserusernameandpasswordrequired",
+                               onUserNameAndPasswordRequired);
+    ok(gotusernamepasswordrequired,
+       "Should have dispatched mozbrowserusernameandpasswordrequired event");
+    testFinish();
   });
 
   // Once more with feeling. Ensure that our new auth data interferes with this mozbrowser's
@@ -148,8 +156,6 @@ function testAuthJarInterfere(e) {
 }
 
 function testFinish() {
-  iframe.removeEventListener("mozbrowserusernameandpasswordrequired", testFinish);
-
   // Clear login information stored in password manager.
   var authMgr = SpecialPowers.Cc['@mozilla.org/network/http-auth-manager;1']
     .getService(SpecialPowers.Ci.nsIHttpAuthManager);

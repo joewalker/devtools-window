@@ -11,14 +11,12 @@
 #include <math.h>
 
 #include "gfxMatrix.h"
-#include "nsCOMPtr.h"
 
 class nsIContent;
 class nsIDocument;
 class nsIFrame;
 class nsStyleContext;
 class nsSVGElement;
-class nsSVGLength2;
 
 namespace mozilla {
 class SVGAnimatedPreserveAspectRatio;
@@ -123,15 +121,13 @@ public:
   /* Generate a viewbox to viewport tranformation matrix */
 
   static gfxMatrix
-  GetViewBoxTransform(const nsSVGElement* aElement,
-                      float aViewportWidth, float aViewportHeight,
+  GetViewBoxTransform(float aViewportWidth, float aViewportHeight,
                       float aViewboxX, float aViewboxY,
                       float aViewboxWidth, float aViewboxHeight,
                       const SVGAnimatedPreserveAspectRatio &aPreserveAspectRatio);
 
   static gfxMatrix
-  GetViewBoxTransform(const nsSVGElement* aElement,
-                      float aViewportWidth, float aViewportHeight,
+  GetViewBoxTransform(float aViewportWidth, float aViewportHeight,
                       float aViewboxX, float aViewboxY,
                       float aViewboxWidth, float aViewboxHeight,
                       const SVGPreserveAspectRatio &aPreserveAspectRatio);

@@ -6,8 +6,6 @@
 #ifndef nsCycleCollector_h__
 #define nsCycleCollector_h__
 
-//#define DEBUG_CC
-
 class nsISupports;
 class nsICycleCollectorListener;
 class nsCycleCollectionParticipant;
@@ -37,12 +35,6 @@ void nsCycleCollector_setForgetSkippableCallback(CC_ForgetSkippableCallback aCB)
 
 void nsCycleCollector_forgetSkippable(bool aRemoveChildlessNodes = false);
 
-#ifdef DEBUG_CC
-void nsCycleCollector_logPurpleAddition(void* aObject,
-                                        nsCycleCollectionParticipant* cp);
-void nsCycleCollector_logPurpleRemoval(void* aObject);
-#endif
-
 void nsCycleCollector_collect(bool aMergeCompartments,
                               nsCycleCollectorResults *aResults,
                               nsICycleCollectorListener *aListener);
@@ -54,7 +46,6 @@ void nsCycleCollector_shutdown();
 struct nsCycleCollectionJSRuntime
 {
     virtual nsresult BeginCycleCollection(nsCycleCollectionTraversalCallback &cb) = 0;
-    virtual nsresult FinishTraverse() = 0;
 
     /**
      * Called before/after transitioning to/from the main thread.

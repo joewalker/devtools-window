@@ -8,7 +8,7 @@
 #include "nsITimer.h"
 
 #include "nsCOMPtr.h"
-#include "nsDOMMediaStream.h"
+#include "DOMMediaStream.h"
 #include "nsComponentManagerUtils.h"
 
 #include "VideoUtils.h"
@@ -25,6 +25,8 @@ class ImageContainer;
 class PlanarYCbCrImage;
 }
 
+class MediaEngineDefault;
+
 /**
  * The default implementation of the MediaEngine interface.
  */
@@ -38,8 +40,7 @@ public:
   virtual void GetName(nsAString&);
   virtual void GetUUID(nsAString&);
 
-  virtual const MediaEngineVideoOptions *GetOptions();
-  virtual nsresult Allocate();
+  virtual nsresult Allocate(const MediaEnginePrefs &aPrefs);
   virtual nsresult Deallocate();
   virtual nsresult Start(SourceMediaStream*, TrackID);
   virtual nsresult Stop(SourceMediaStream*, TrackID);
@@ -57,19 +58,21 @@ public:
   NS_DECL_ISUPPORTS
   NS_DECL_NSITIMERCALLBACK
 
-  // Need something better...
-  static const int DEFAULT_WIDTH=640;
-  static const int DEFAULT_HEIGHT=480;
-  static const int DEFAULT_FPS=30;
+  static const int DEFAULT_VIDEO_FPS = 60;
+  static const int DEFAULT_VIDEO_MIN_FPS = 10;
+  static const int DEFAULT_VIDEO_WIDTH = 640;
+  static const int DEFAULT_VIDEO_HEIGHT = 480;
 
 protected:
+  friend class MediaEngineDefault;
+
   TrackID mTrackID;
   nsCOMPtr<nsITimer> mTimer;
   nsRefPtr<layers::ImageContainer> mImageContainer;
 
   SourceMediaStream* mSource;
   layers::PlanarYCbCrImage* mImage;
-  static const MediaEngineVideoOptions mOpts;
+  MediaEnginePrefs mOpts;
   int mCb;
   int mCr;
 };
@@ -84,7 +87,7 @@ public:
   virtual void GetName(nsAString&);
   virtual void GetUUID(nsAString&);
 
-  virtual nsresult Allocate();
+  virtual nsresult Allocate(const MediaEnginePrefs &aPrefs);
   virtual nsresult Deallocate();
   virtual nsresult Start(SourceMediaStream*, TrackID);
   virtual nsresult Stop(SourceMediaStream*, TrackID);

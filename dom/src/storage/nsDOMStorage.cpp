@@ -1587,6 +1587,12 @@ nsDOMStorage2::StorageType()
   return nsPIDOMStorage::Unknown;
 }
 
+bool
+nsDOMStorage2::IsPrivate()
+{
+  return mStorage && mStorage->IsPrivate();
+}
+
 namespace {
 
 class StorageNotifierRunnable : public nsRunnable
@@ -1622,7 +1628,9 @@ nsDOMStorage2::BroadcastChangeNotification(const nsSubstring &aKey,
 {
   nsresult rv;
   nsCOMPtr<nsIDOMEvent> domEvent;
-  NS_NewDOMStorageEvent(getter_AddRefs(domEvent), nullptr, nullptr);
+  // Note, this DOM event should never reach JS. It is cloned later in
+  // nsGlobalWindow.
+  NS_NewDOMStorageEvent(getter_AddRefs(domEvent), nullptr, nullptr, nullptr);
   nsCOMPtr<nsIDOMStorageEvent> event = do_QueryInterface(domEvent);
   rv = event->InitStorageEvent(NS_LITERAL_STRING("storage"),
                                false,

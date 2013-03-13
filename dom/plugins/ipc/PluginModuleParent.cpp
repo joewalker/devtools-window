@@ -116,7 +116,7 @@ PluginModuleParent::PluginModuleParent(const char* aFilePath)
     , mGetSitesWithDataSupported(false)
     , mNPNIface(NULL)
     , mPlugin(NULL)
-    , mTaskFactory(this)
+    , ALLOW_THIS_IN_INITIALIZER_LIST(mTaskFactory(this))
 #ifdef XP_WIN
     , mPluginCpuUsageOnHang()
     , mHangUIParent(nullptr)
@@ -457,15 +457,18 @@ PluginModuleParent::TerminateChildProcess(MessageLoop* aMsgLoop)
     // collect cpu usage for plugin processes
 
     InfallibleTArray<base::ProcessHandle> processHandles;
-    base::ProcessHandle handle;
 
     processHandles.AppendElement(OtherProcess());
+
 #ifdef MOZ_CRASHREPORTER_INJECTOR
-    if (mFlashProcess1 && base::OpenProcessHandle(mFlashProcess1, &handle)) {
-      processHandles.AppendElement(handle);
-    }
-    if (mFlashProcess2 && base::OpenProcessHandle(mFlashProcess2, &handle)) {
-      processHandles.AppendElement(handle);
+    {
+      base::ProcessHandle handle;
+      if (mFlashProcess1 && base::OpenProcessHandle(mFlashProcess1, &handle)) {
+        processHandles.AppendElement(handle);
+      }
+      if (mFlashProcess2 && base::OpenProcessHandle(mFlashProcess2, &handle)) {
+        processHandles.AppendElement(handle);
+      }
     }
 #endif
 
@@ -533,7 +536,8 @@ PluginModuleParent::EvaluateHangUIState(const bool aReset)
 bool
 PluginModuleParent::GetPluginName(nsAString& aPluginName)
 {
-    nsPluginHost* host = nsPluginHost::GetInst();
+    nsRefPtr<nsPluginHost> host = 
+        dont_AddRef<nsPluginHost>(nsPluginHost::GetInst());
     if (!host) {
         return false;
     }
@@ -562,7 +566,8 @@ PluginModuleParent::LaunchHangUI()
         delete mHangUIParent;
         mHangUIParent = nullptr;
     }
-    mHangUIParent = new PluginHangUIParent(this);
+    mHangUIParent = new PluginHangUIParent(this, 
+            Preferences::GetInt(kHangUITimeoutPref, 0));
     nsAutoString pluginName;
     if (!GetPluginName(pluginName)) {
         return false;

@@ -11,6 +11,9 @@
 #include "chrome/common/ipc_message_utils.h"
 
 #include "mozilla/TimeStamp.h"
+#ifdef XP_WIN
+#include "mozilla/TimeStamp_windows.h"
+#endif
 #include "mozilla/Util.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/StandardInteger.h"
@@ -834,6 +837,28 @@ struct ParamTraits<mozilla::gfx::Rect>
 };
 
 template<>
+struct ParamTraits<mozilla::gfx::Margin>
+{
+  typedef mozilla::gfx::Margin paramType;
+
+  static void Write(Message* msg, const paramType& param)
+  {
+    WriteParam(msg, param.top);
+    WriteParam(msg, param.right);
+    WriteParam(msg, param.bottom);
+    WriteParam(msg, param.left);
+  }
+
+  static bool Read(const Message* msg, void** iter, paramType* result)
+  {
+    return (ReadParam(msg, iter, &result->top) &&
+            ReadParam(msg, iter, &result->right) &&
+            ReadParam(msg, iter, &result->bottom) &&
+            ReadParam(msg, iter, &result->left));
+  }
+};
+
+template<>
 struct ParamTraits<nsRect>
 {
   typedef nsRect paramType;
@@ -924,6 +949,30 @@ struct ParamTraits<mozilla::TimeStamp>
     return ReadParam(aMsg, aIter, &aResult->mValue);
   };
 };
+
+#ifdef XP_WIN
+
+template<>
+struct ParamTraits<mozilla::TimeStampValue>
+{
+  typedef mozilla::TimeStampValue paramType;
+  static void Write(Message* aMsg, const paramType& aParam)
+  {
+    WriteParam(aMsg, aParam.mGTC);
+    WriteParam(aMsg, aParam.mQPC);
+    WriteParam(aMsg, aParam.mHasQPC);
+    WriteParam(aMsg, aParam.mIsNull);
+  }
+  static bool Read(const Message* aMsg, void** aIter, paramType* aResult)
+  {
+    return (ReadParam(aMsg, aIter, &aResult->mGTC) &&
+            ReadParam(aMsg, aIter, &aResult->mQPC) &&
+            ReadParam(aMsg, aIter, &aResult->mHasQPC) &&
+            ReadParam(aMsg, aIter, &aResult->mIsNull));
+  }
+};
+
+#endif
 
 template <>
 struct ParamTraits<mozilla::SerializedStructuredCloneBuffer>

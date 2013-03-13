@@ -22,12 +22,12 @@
 #endif
 #include "assembler/wtf/Platform.h"
 #include "gc/Marking.h"
-#include "gc/Root.h"
 #ifdef JS_ION
 #include "ion/IonCompartment.h"
 #include "ion/Ion.h"
 #endif
 #include "js/MemoryMetrics.h"
+#include "js/RootingAPI.h"
 #include "methodjit/MethodJIT.h"
 #include "methodjit/PolyIC.h"
 #include "methodjit/MonoIC.h"
@@ -52,10 +52,6 @@ JSCompartment::JSCompartment(JSRuntime *rt)
     global_(NULL),
     enterCompartmentDepth(0),
     allocator(this),
-#ifdef JSGC_GENERATIONAL
-    gcNursery(),
-    gcStoreBuffer(&gcNursery),
-#endif
     ionUsingBarriers_(false),
     gcScheduled(false),
     gcState(NoGC),
@@ -66,8 +62,8 @@ JSCompartment::JSCompartment(JSRuntime *rt)
     hold(false),
     isSystem(false),
     lastCodeRelease(0),
-    analysisLifoAlloc(LIFO_ALLOC_PRIMARY_CHUNK_SIZE),
-    typeLifoAlloc(LIFO_ALLOC_PRIMARY_CHUNK_SIZE),
+    analysisLifoAlloc(ANALYSIS_LIFO_ALLOC_PRIMARY_CHUNK_SIZE),
+    typeLifoAlloc(TYPE_LIFO_ALLOC_PRIMARY_CHUNK_SIZE),
     data(NULL),
     active(false),
     scheduledForDestruction(false),
@@ -126,7 +122,7 @@ JSCompartment::init(JSContext *cx)
     activeAnalysis = false;
     types.init(cx);
 
-    if (!crossCompartmentWrappers.init())
+    if (!crossCompartmentWrappers.init(0))
         return false;
 
     if (!regExps.init(cx))
@@ -135,28 +131,11 @@ JSCompartment::init(JSContext *cx)
     if (cx)
         InitRandom(cx->runtime, &rngState);
 
-#ifdef JSGC_GENERATIONAL
-    /*
-     * If we are in the middle of post-barrier verification, we need to
-     * immediately begin collecting verification data on new compartments.
-     */
-    if (rt->gcVerifyPostData) {
-        if (!gcNursery.enable())
-            return false;
-
-        if (!gcStoreBuffer.enable())
-            return false;
-    } else {
-        gcNursery.disable();
-        gcStoreBuffer.disable();
-    }
-#endif
-
     enumerators = NativeIterator::allocateSentinel(cx);
     if (!enumerators)
         return false;
 
-    return debuggees.init();
+    return debuggees.init(0);
 }
 
 void
@@ -231,18 +210,18 @@ JSCompartment::ensureIonCompartmentExists(JSContext *cx)
 #endif
 
 static bool
-WrapForSameCompartment(JSContext *cx, HandleObject obj, Value *vp)
+WrapForSameCompartment(JSContext *cx, HandleObject obj, MutableHandleValue vp)
 {
     JS_ASSERT(cx->compartment == obj->compartment());
     if (!cx->runtime->sameCompartmentWrapObjectCallback) {
-        vp->setObject(*obj);
+        vp.setObject(*obj);
         return true;
     }
 
     JSObject *wrapped = cx->runtime->sameCompartmentWrapObjectCallback(cx, obj);
     if (!wrapped)
         return false;
-    vp->setObject(*wrapped);
+    vp.setObject(*wrapped);
     return true;
 }
 
@@ -261,13 +240,12 @@ JSCompartment::putWrapper(const CrossCompartmentKey &wrapped, const js::Value &w
 }
 
 bool
-JSCompartment::wrap(JSContext *cx, Value *vp, JSObject *existingArg)
+JSCompartment::wrap(JSContext *cx, MutableHandleValue vp, HandleObject existingArg)
 {
-    RootedObject existing(cx, existingArg);
     JS_ASSERT(cx->compartment == this);
-    JS_ASSERT_IF(existing, existing->compartment() == cx->compartment);
-    JS_ASSERT_IF(existing, vp->isObject());
-    JS_ASSERT_IF(existing, IsDeadProxyObject(existing));
+    JS_ASSERT_IF(existingArg, existingArg->compartment() == cx->compartment);
+    JS_ASSERT_IF(existingArg, vp.isObject());
+    JS_ASSERT_IF(existingArg, IsDeadProxyObject(existingArg));
 
     unsigned flags = 0;
 
@@ -284,19 +262,19 @@ JSCompartment::wrap(JSContext *cx, Value *vp, JSObject *existingArg)
 #endif
 
     /* Only GC things have to be wrapped or copied. */
-    if (!vp->isMarkable())
+    if (!vp.isMarkable())
         return true;
 
-    if (vp->isString()) {
-        JSString *str = vp->toString();
+    if (vp.isString()) {
+        RawString str = vp.toString();
 
         /* If the string is already in this compartment, we are done. */
-        if (str->compartment() == this)
+        if (str->zone() == zone())
             return true;
 
         /* If the string is an atom, we don't have to copy. */
         if (str->isAtom()) {
-            JS_ASSERT(str->compartment() == cx->runtime->atomsCompartment);
+            JS_ASSERT(str->zone() == cx->runtime->atomsCompartment->zone());
             return true;
         }
     }
@@ -311,22 +289,18 @@ JSCompartment::wrap(JSContext *cx, Value *vp, JSObject *existingArg)
     HandleObject global = cx->global();
 
     /* Unwrap incoming objects. */
-    if (vp->isObject()) {
-        RootedObject obj(cx, &vp->toObject());
+    if (vp.isObject()) {
+        RootedObject obj(cx, &vp.toObject());
 
         if (obj->compartment() == this)
             return WrapForSameCompartment(cx, obj, vp);
 
         /* Translate StopIteration singleton. */
-        if (obj->isStopIteration()) {
-            RootedValue vvp(cx, *vp);
-            bool result = js_FindClassObject(cx, JSProto_StopIteration, &vvp);
-            *vp = vvp;
-            return result;
-        }
+        if (obj->isStopIteration())
+            return js_FindClassObject(cx, JSProto_StopIteration, vp);
 
         /* Unwrap the object, but don't unwrap outer windows. */
-        obj = UnwrapObject(&vp->toObject(), /* stopAtOuter = */ true, &flags);
+        obj = UnwrapObject(obj, /* stopAtOuter = */ true, &flags);
 
         if (obj->compartment() == this)
             return WrapForSameCompartment(cx, obj, vp);
@@ -339,7 +313,7 @@ JSCompartment::wrap(JSContext *cx, Value *vp, JSObject *existingArg)
 
         if (obj->compartment() == this)
             return WrapForSameCompartment(cx, obj, vp);
-        vp->setObject(*obj);
+        vp.setObject(*obj);
 
 #ifdef DEBUG
         {
@@ -349,29 +323,30 @@ JSCompartment::wrap(JSContext *cx, Value *vp, JSObject *existingArg)
 #endif
     }
 
-    RootedValue key(cx, *vp);
+    RootedValue key(cx, vp);
 
     /* If we already have a wrapper for this value, use it. */
     if (WrapperMap::Ptr p = crossCompartmentWrappers.lookup(key)) {
-        *vp = p->value;
-        if (vp->isObject()) {
-            RootedObject obj(cx, &vp->toObject());
+        vp.set(p->value);
+        if (vp.isObject()) {
+            RawObject obj = &vp.toObject();
             JS_ASSERT(obj->isCrossCompartmentWrapper());
             JS_ASSERT(obj->getParent() == global);
         }
         return true;
     }
 
-    if (vp->isString()) {
-        RootedValue orig(cx, *vp);
-        Rooted<JSStableString *> str(cx, vp->toString()->ensureStable(cx));
+    if (vp.isString()) {
+        Rooted<JSLinearString *> str(cx, vp.toString()->ensureLinear(cx));
         if (!str)
             return false;
-        RootedString wrapped(cx, js_NewStringCopyN<CanGC>(cx, str->chars().get(), str->length()));
+
+        RawString wrapped = js_NewStringCopyN<CanGC>(cx, str->chars(), str->length());
         if (!wrapped)
             return false;
-        vp->setString(wrapped);
-        if (!putWrapper(orig, *vp))
+
+        vp.setString(wrapped);
+        if (!putWrapper(key, vp))
             return false;
 
         if (str->zone()->isGCMarking()) {
@@ -389,9 +364,9 @@ JSCompartment::wrap(JSContext *cx, Value *vp, JSObject *existingArg)
         return true;
     }
 
-    RootedObject obj(cx, &vp->toObject());
-
-    JSObject *proto = Proxy::LazyProto;
+    RootedObject proto(cx, Proxy::LazyProto);
+    RootedObject obj(cx, &vp.toObject());
+    RootedObject existing(cx, existingArg);
     if (existing) {
         /* Is it possible to reuse |existing|? */
         if (!existing->getTaggedProto().isLazy() ||
@@ -417,19 +392,15 @@ JSCompartment::wrap(JSContext *cx, Value *vp, JSObject *existingArg)
     // map is always directly wrapped by the value.
     JS_ASSERT(Wrapper::wrappedObject(wrapper) == &key.get().toObject());
 
-    vp->setObject(*wrapper);
-
-    if (!putWrapper(key, *vp))
-        return false;
-
-    return true;
+    vp.setObject(*wrapper);
+    return putWrapper(key, vp);
 }
 
 bool
 JSCompartment::wrap(JSContext *cx, JSString **strp)
 {
     RootedValue value(cx, StringValue(*strp));
-    if (!wrap(cx, value.address()))
+    if (!wrap(cx, &value))
         return false;
     *strp = value.get().toString();
     return true;
@@ -439,19 +410,20 @@ bool
 JSCompartment::wrap(JSContext *cx, HeapPtrString *strp)
 {
     RootedValue value(cx, StringValue(*strp));
-    if (!wrap(cx, value.address()))
+    if (!wrap(cx, &value))
         return false;
     *strp = value.get().toString();
     return true;
 }
 
 bool
-JSCompartment::wrap(JSContext *cx, JSObject **objp, JSObject *existing)
+JSCompartment::wrap(JSContext *cx, JSObject **objp, JSObject *existingArg)
 {
     if (!*objp)
         return true;
     RootedValue value(cx, ObjectValue(**objp));
-    if (!wrap(cx, value.address(), existing))
+    RootedObject existing(cx, existingArg);
+    if (!wrap(cx, &value, existing))
         return false;
     *objp = &value.get().toObject();
     return true;
@@ -460,10 +432,11 @@ JSCompartment::wrap(JSContext *cx, JSObject **objp, JSObject *existing)
 bool
 JSCompartment::wrapId(JSContext *cx, jsid *idp)
 {
+    MOZ_ASSERT(*idp != JSID_VOID, "JSID_VOID is an out-of-band sentinel value");
     if (JSID_IS_INT(*idp))
         return true;
     RootedValue value(cx, IdToValue(*idp));
-    if (!wrap(cx, value.address()))
+    if (!wrap(cx, &value))
         return false;
     RootedId id(cx);
     if (!ValueToId<CanGC>(cx, value.get(), &id))
@@ -476,30 +449,43 @@ JSCompartment::wrapId(JSContext *cx, jsid *idp)
 bool
 JSCompartment::wrap(JSContext *cx, PropertyOp *propp)
 {
-    Value v = CastAsObjectJsval(*propp);
-    if (!wrap(cx, &v))
+    RootedValue value(cx, CastAsObjectJsval(*propp));
+    if (!wrap(cx, &value))
         return false;
-    *propp = CastAsPropertyOp(v.toObjectOrNull());
+    *propp = CastAsPropertyOp(value.toObjectOrNull());
     return true;
 }
 
 bool
 JSCompartment::wrap(JSContext *cx, StrictPropertyOp *propp)
 {
-    Value v = CastAsObjectJsval(*propp);
-    if (!wrap(cx, &v))
+    RootedValue value(cx, CastAsObjectJsval(*propp));
+    if (!wrap(cx, &value))
         return false;
-    *propp = CastAsStrictPropertyOp(v.toObjectOrNull());
+    *propp = CastAsStrictPropertyOp(value.toObjectOrNull());
     return true;
 }
 
 bool
 JSCompartment::wrap(JSContext *cx, PropertyDescriptor *desc)
 {
-    return wrap(cx, &desc->obj) &&
-           (!(desc->attrs & JSPROP_GETTER) || wrap(cx, &desc->getter)) &&
-           (!(desc->attrs & JSPROP_SETTER) || wrap(cx, &desc->setter)) &&
-           wrap(cx, &desc->value);
+    if (!wrap(cx, &desc->obj))
+        return false;
+
+    if (desc->attrs & JSPROP_GETTER) {
+        if (!wrap(cx, &desc->getter))
+            return false;
+    }
+    if (desc->attrs & JSPROP_SETTER) {
+        if (!wrap(cx, &desc->setter))
+            return false;
+    }
+
+    RootedValue value(cx, desc->value);
+    if (!wrap(cx, &value))
+        return false;
+    desc->value = value.get();
+    return true;
 }
 
 bool
@@ -635,15 +621,6 @@ JSCompartment::discardJitCode(FreeOp *fop, bool discardConstraints)
 #endif /* JS_METHODJIT */
 }
 
-bool
-JSCompartment::isDiscardingJitCode(JSTracer *trc)
-{
-    if (!IS_GC_MARKING_TRACER(trc))
-        return false;
-
-    return !gcPreserveCode;
-}
-
 void
 JSCompartment::sweep(FreeOp *fop, bool releaseTypes)
 {
@@ -651,7 +628,7 @@ JSCompartment::sweep(FreeOp *fop, bool releaseTypes)
 
     {
         gcstats::AutoPhase ap(rt->gcStats, gcstats::PHASE_SWEEP_DISCARD_CODE);
-        discardJitCode(fop, !gcPreserveCode);
+        discardJitCode(fop, !zone()->isPreservingCode());
     }
 
     /* This function includes itself in PHASE_SWEEP_TABLES. */
@@ -691,7 +668,7 @@ JSCompartment::sweep(FreeOp *fop, bool releaseTypes)
         WeakMapBase::sweepCompartment(this);
     }
 
-    if (!gcPreserveCode) {
+    if (!zone()->isPreservingCode()) {
         JS_ASSERT(!types.constrainedOutputs);
         gcstats::AutoPhase ap(rt->gcStats, gcstats::PHASE_DISCARD_ANALYSIS);
 
@@ -796,13 +773,13 @@ JSCompartment::purge()
 }
 
 void
-JSCompartment::resetGCMallocBytes()
+Zone::resetGCMallocBytes()
 {
     gcMallocBytes = ptrdiff_t(gcMaxMallocBytes);
 }
 
 void
-JSCompartment::setGCMaxMallocBytes(size_t value)
+Zone::setGCMaxMallocBytes(size_t value)
 {
     /*
      * For compatibility treat any value that exceeds PTRDIFF_T_MAX to
@@ -813,9 +790,9 @@ JSCompartment::setGCMaxMallocBytes(size_t value)
 }
 
 void
-JSCompartment::onTooMuchMalloc()
+Zone::onTooMuchMalloc()
 {
-    TriggerZoneGC(zone(), gcreason::TOO_MUCH_MALLOC);
+    TriggerZoneGC(this, gcreason::TOO_MUCH_MALLOC);
 }
 
 bool
@@ -1036,5 +1013,5 @@ JSCompartment::sizeOfIncludingThis(JSMallocSizeOfFun mallocSizeOf, size_t *compa
 void
 JSCompartment::adoptWorkerAllocator(Allocator *workerAllocator)
 {
-    allocator.arenas.adoptArenas(rt, &workerAllocator->arenas);
+    zone()->allocator.arenas.adoptArenas(rt, &workerAllocator->arenas);
 }

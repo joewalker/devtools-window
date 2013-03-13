@@ -14,7 +14,6 @@
 #include "nsContentUtils.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(TableSection)
-DOMCI_NODE_DATA(HTMLTableSectionElement, mozilla::dom::HTMLTableSectionElement)
 
 namespace mozilla {
 namespace dom {
@@ -22,10 +21,9 @@ namespace dom {
 // you will see the phrases "rowgroup" and "section" used interchangably
 
 JSObject*
-HTMLTableSectionElement::WrapNode(JSContext *aCx, JSObject *aScope,
-                                  bool *aTriedToWrap)
+HTMLTableSectionElement::WrapNode(JSContext *aCx, JSObject *aScope)
 {
-  return HTMLTableSectionElementBinding::Wrap(aCx, aScope, this, aTriedToWrap);
+  return HTMLTableSectionElementBinding::Wrap(aCx, aScope, this);
 }
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLTableSectionElement,
@@ -42,7 +40,7 @@ NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLTableSectionElement)
                                    nsIDOMHTMLTableSectionElement)
   NS_HTML_CONTENT_INTERFACE_TABLE_TO_MAP_SEGUE(HTMLTableSectionElement,
                                                nsGenericHTMLElement)
-NS_HTML_CONTENT_INTERFACE_TABLE_TAIL_CLASSINFO(HTMLTableSectionElement)
+NS_HTML_CONTENT_INTERFACE_MAP_END
 
 
 NS_IMPL_ELEMENT_CLONE(HTMLTableSectionElement)

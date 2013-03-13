@@ -53,25 +53,26 @@ class Configuration:
                 entry.append({})
             self.descriptors.extend([Descriptor(self, iface, x) for x in entry])
 
-        # Mark the descriptors for which only a single nativeType implements
-        # an interface.
+        # Mark the descriptors for which the nativeType corresponds to exactly
+        # one interface.
         for descriptor in self.descriptors:
-            intefaceName = descriptor.interface.identifier.name
-            otherDescriptors = [d for d in self.descriptors
-                                if d.interface.identifier.name == intefaceName]
-            descriptor.uniqueImplementation = len(otherDescriptors) == 1
+            descriptor.unsharedImplementation = all(
+                d.nativeType != descriptor.nativeType or d == descriptor
+                for d in self.descriptors)
 
         self.enums = [e for e in parseData if e.isEnum()]
 
         # Figure out what our main-thread and worker dictionaries and callbacks
         # are.
         mainTypes = set()
-        for descriptor in self.getDescriptors(workers=False, isExternal=False):
+        for descriptor in ([self.getDescriptor("DummyInterface", workers=False)] +
+                           self.getDescriptors(workers=False, isExternal=False, skipGen=False)):
             mainTypes |= set(getFlatTypes(getTypesFromDescriptor(descriptor)))
         (mainCallbacks, mainDictionaries) = findCallbacksAndDictionaries(mainTypes)
 
         workerTypes = set();
-        for descriptor in self.getDescriptors(workers=True, isExternal=False):
+        for descriptor in ([self.getDescriptor("DummyInterfaceWorkers", workers=True)] +
+                           self.getDescriptors(workers=True, isExternal=False, skipGen=False)):
             workerTypes |= set(getFlatTypes(getTypesFromDescriptor(descriptor)))
         (workerCallbacks, workerDictionaries) = findCallbacksAndDictionaries(workerTypes)
 
@@ -208,7 +209,6 @@ class Descriptor(DescriptorProvider):
                 nativeTypeDefault = "mozilla::dom::" + ifaceName
 
         self.nativeType = desc.get('nativeType', nativeTypeDefault)
-        self.hasInstanceInterface = desc.get('hasInstanceInterface', None)
 
         # Do something sane for JSObject
         if self.nativeType == "JSObject":
@@ -230,16 +230,6 @@ class Descriptor(DescriptorProvider):
 
         self.skipGen = desc.get('skipGen', False)
 
-        if (self.interface.isCallback() or self.interface.isExternal() or
-            self.skipGen):
-            if 'castable' in desc:
-                raise TypeError("%s is external or callback or skipGen but has "
-                                "a castable setting" %
-                                self.interface.identifier.name)
-            self.castable = False
-        else:
-            self.castable = desc.get('castable', True)
-
         self.notflattened = desc.get('notflattened', False)
         self.register = desc.get('register', True)
 
@@ -259,7 +249,8 @@ class Descriptor(DescriptorProvider):
             'NamedSetter': None,
             'NamedCreator': None,
             'NamedDeleter': None,
-            'Stringifier': None
+            'Stringifier': None,
+            'LegacyCaller': None
             }
         if self.concrete:
             self.proxy = False
@@ -272,6 +263,16 @@ class Descriptor(DescriptorProvider):
             for m in iface.members:
                 if m.isMethod() and m.isStringifier():
                     addOperation('Stringifier', m)
+                # Don't worry about inheriting legacycallers either: in
+                # practice these are on most-derived prototypes.
+                if m.isMethod() and m.isLegacycaller():
+                    if not m.isIdentifierLess():
+                        raise TypeError("We don't support legacycaller with "
+                                        "identifier.\n%s" % m.location);
+                    if len(m.signatures()) != 1:
+                        raise TypeError("We don't support overloaded "
+                                        "legacycaller.\n%s" % m.location)
+                    addOperation('LegacyCaller', m)
             while iface:
                 for m in iface.members:
                     if not m.isMethod():
@@ -294,6 +295,10 @@ class Descriptor(DescriptorProvider):
                         addIndexedOrNamedOperation('Creator', m)
                     if m.isDeleter():
                         addIndexedOrNamedOperation('Deleter', m)
+                    if m.isLegacycaller() and iface != self.interface:
+                        raise TypeError("We don't support legacycaller on "
+                                        "non-leaf interface %s.\n%s" %
+                                        (iface, iface.location))
 
                 iface.setUserData('hasConcreteDescendant', True)
                 iface = iface.parent
@@ -313,16 +318,15 @@ class Descriptor(DescriptorProvider):
                     raise SyntaxError("%s supports named properties but does "
                                       "not have a named getter.\n%s" %
                                       (self.interface, self.interface.location))
+                if operations['LegacyCaller']:
+                    raise SyntaxError("%s has a legacy caller but is a proxy; "
+                                      "we don't support that yet.\n%s" %
+                                      (self.interface, self.interface.location))
                 iface = self.interface
                 while iface:
                     iface.setUserData('hasProxyDescendant', True)
                     iface = iface.parent
         self.operations = operations
-
-        if self.interface.isExternal() and 'prefable' in desc:
-            raise TypeError("%s is external but has a prefable setting" %
-                            self.interface.identifier.name)
-        self.prefable = desc.get('prefable', False)
 
         if self.workers:
             if desc.get('nativeOwnership', 'worker') != 'worker':
@@ -342,10 +346,6 @@ class Descriptor(DescriptorProvider):
                              (self.workers or
                               (self.nativeOwnership != 'owned' and
                                desc.get('wrapperCache', True))))
-
-        if not self.wrapperCache and self.prefable:
-            raise TypeError("Descriptor for %s is prefable but not wrappercached" %
-                            self.interface.identifier.name)
 
         def make_name(name):
             return name + "_workers" if self.workers else name
@@ -380,6 +380,10 @@ class Descriptor(DescriptorProvider):
             addExtendedAttribute(attribute, desc.get(attribute, {}))
 
         self.binaryNames = desc.get('binaryNames', {})
+        if '__legacycaller' not in self.binaryNames:
+            self.binaryNames["__legacycaller"] = "LegacyCall"
+        if '__stringifier' not in self.binaryNames:
+            self.binaryNames["__stringifier"] = "Stringify"
 
         # Build the prototype chain.
         self.prototypeChain = []
@@ -441,7 +445,7 @@ class Descriptor(DescriptorProvider):
 
     def needsConstructHookHolder(self):
         assert self.interface.hasInterfaceObject()
-        return not self.hasInstanceInterface and not self.interface.isCallback()
+        return False
 
 # Some utility methods
 def getTypesFromDescriptor(descriptor):

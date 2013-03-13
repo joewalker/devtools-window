@@ -11,6 +11,7 @@
 #include "jscntxt.h"
 #include "jscompartment.h"
 #include "IonCode.h"
+#include "CompileInfo.h"
 #include "jsinfer.h"
 #include "jsinterp.h"
 
@@ -18,6 +19,7 @@ namespace js {
 namespace ion {
 
 class TempAllocator;
+class ParallelCompileContext; // in ParallelArrayAnalysis.h
 
 // Possible register allocators which may be used.
 enum IonRegisterAllocator {
@@ -97,10 +99,10 @@ struct IonOptions
     uint32_t usesBeforeCompileNoJaeger;
 
     // How many invocations or loop iterations are needed before calls
-    // are inlined.
+    // are inlined, as a fraction of usesBeforeCompile.
     //
-    // Default: 10,240
-    uint32_t usesBeforeInlining;
+    // Default: .125
+    double usesBeforeInliningFactor;
 
     // How many actual arguments are accepted on the C stack.
     //
@@ -131,15 +133,6 @@ struct IonOptions
     // Default: 100
     uint32_t smallFunctionMaxBytecodeLength;
 
-    // The inlining limit for small functions.
-    //
-    // This value has been arrived at empirically via benchmarking.
-    // We may want to revisit this tuning after other optimizations have
-    // gone in.
-    //
-    // Default: usesBeforeInlining / 4
-    uint32_t smallFunctionUsesBeforeInlining;
-
     // The maximum number of functions to polymorphically inline at a call site.
     //
     // Default: 4
@@ -147,7 +140,7 @@ struct IonOptions
 
     // The maximum total bytecode size of an inline call site.
     //
-    // Default: 800
+    // Default: 1000
     uint32_t inlineMaxTotalBytecodeLength;
 
     // Minimal ratio between the use counts of the caller and the callee to
@@ -173,13 +166,14 @@ struct IonOptions
     // Default: 5
     uint32_t slowCallIncUseCount;
 
+    // How many uses of a parallel kernel before we attempt compilation.
+    //
+    // Default: 1
+    uint32_t usesBeforeCompileParallel;
+
     void setEagerCompilation() {
         eagerCompilation = true;
         usesBeforeCompile = usesBeforeCompileNoJaeger = 0;
-
-        // Eagerly inline calls to improve test coverage.
-        usesBeforeInlining = 0;
-        smallFunctionUsesBeforeInlining = 0;
 
         parallelCompilation = false;
     }
@@ -198,19 +192,23 @@ struct IonOptions
         parallelCompilation(false),
         usesBeforeCompile(10240),
         usesBeforeCompileNoJaeger(40),
-        usesBeforeInlining(usesBeforeCompile),
+        usesBeforeInliningFactor(.125),
         maxStackArgs(4096),
         maxInlineDepth(3),
         smallFunctionMaxInlineDepth(10),
         smallFunctionMaxBytecodeLength(100),
-        smallFunctionUsesBeforeInlining(usesBeforeInlining / 4),
         polyInlineMax(4),
-        inlineMaxTotalBytecodeLength(800),
+        inlineMaxTotalBytecodeLength(1000),
         inlineUseCountRatio(128),
         eagerCompilation(false),
         slowCallLimit(512),
-        slowCallIncUseCount(5)
+        slowCallIncUseCount(5),
+        usesBeforeCompileParallel(1)
     {
+    }
+
+    uint32_t usesBeforeInlining() {
+        return usesBeforeCompile * usesBeforeInliningFactor;
     }
 };
 
@@ -263,8 +261,7 @@ bool SetIonContext(IonContext *ctx);
 
 MethodStatus CanEnterAtBranch(JSContext *cx, JSScript *script,
                               AbstractFramePtr fp, jsbytecode *pc, bool isConstructing);
-MethodStatus CanEnter(JSContext *cx, JSScript *script, AbstractFramePtr fp,
-                      bool isConstructing, bool newType);
+MethodStatus CanEnter(JSContext *cx, JSScript *script, AbstractFramePtr fp, bool isConstructing);
 MethodStatus CanEnterUsingFastInvoke(JSContext *cx, HandleScript script, uint32_t numActualArgs);
 
 enum IonExecStatus
@@ -301,7 +298,8 @@ IonExecStatus FastInvoke(JSContext *cx, HandleFunction fun, CallArgsList &args);
 void Invalidate(types::TypeCompartment &types, FreeOp *fop,
                 const Vector<types::RecompileInfo> &invalid, bool resetUses = true);
 void Invalidate(JSContext *cx, const Vector<types::RecompileInfo> &invalid, bool resetUses = true);
-bool Invalidate(JSContext *cx, UnrootedScript script, bool resetUses = true);
+bool Invalidate(JSContext *cx, RawScript script, ExecutionMode mode, bool resetUses = true);
+bool Invalidate(JSContext *cx, RawScript script, bool resetUses = true);
 
 void MarkValueFromIon(JSRuntime *rt, Value *vp);
 void MarkShapeFromIon(JSRuntime *rt, Shape **shapep);
@@ -315,20 +313,20 @@ class CodeGenerator;
 CodeGenerator *CompileBackEnd(MIRGenerator *mir);
 void AttachFinishedCompilations(JSContext *cx);
 void FinishOffThreadBuilder(IonBuilder *builder);
-MethodStatus TestIonCompile(JSContext *cx, HandleScript script, HandleFunction fun, jsbytecode *osrPc, bool constructing);
 
 static inline bool IsEnabled(JSContext *cx)
 {
-    return cx->hasRunOption(JSOPTION_ION) && cx->typeInferenceEnabled();
+    return cx->hasOption(JSOPTION_ION) && cx->typeInferenceEnabled();
 }
 
-void ForbidCompilation(JSContext *cx, UnrootedScript script);
-uint32_t UsesBeforeIonRecompile(UnrootedScript script, jsbytecode *pc);
+void ForbidCompilation(JSContext *cx, RawScript script);
+void ForbidCompilation(JSContext *cx, RawScript script, ExecutionMode mode);
+uint32_t UsesBeforeIonRecompile(RawScript script, jsbytecode *pc);
 
-void PurgeCaches(UnrootedScript script, JSCompartment *c);
-size_t MemoryUsed(UnrootedScript script, JSMallocSizeOfFun mallocSizeOf);
-void DestroyIonScripts(FreeOp *fop, UnrootedScript script);
-void TraceIonScripts(JSTracer* trc, UnrootedScript script);
+void PurgeCaches(RawScript script, JSCompartment *c);
+size_t MemoryUsed(RawScript script, JSMallocSizeOfFun mallocSizeOf);
+void DestroyIonScripts(FreeOp *fop, RawScript script);
+void TraceIonScripts(JSTracer* trc, RawScript script);
 
 } // namespace ion
 } // namespace js

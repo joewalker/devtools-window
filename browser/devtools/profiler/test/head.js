@@ -20,6 +20,14 @@ registerCleanupFunction(function () {
   DebuggerServer.destroy();
 });
 
+function getProfileInternals(uid) {
+  let profile = (uid != null) ? gPanel.profiles.get(uid) : gPanel.activeProfile;
+  let win = profile.iframe.contentWindow;
+  let doc = win.document;
+
+  return [win, doc];
+}
+
 function loadTab(url, callback) {
   let tab = gBrowser.addTab();
   gBrowser.selectedTab = tab;
@@ -46,10 +54,8 @@ function openProfiler(tab, callback) {
 
 function closeProfiler(tab, callback) {
   let target = TargetFactory.forTab(tab);
-  let panel = gDevTools.getToolbox(target).getPanel("jsprofiler");
-  panel.once("destroyed", callback);
-
-  gDevTools.closeToolbox(target);
+  let toolbox = gDevTools.getToolbox(target);
+  toolbox.destroy().then(callback);
 }
 
 function setUp(url, callback=function(){}) {

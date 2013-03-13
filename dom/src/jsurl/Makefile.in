@@ -18,11 +18,6 @@ MODULE_NAME	= javascript__protocol
 GRE_MODULE	= 1
 LIBXUL_LIBRARY	= 1
 
-
-XPIDLSRCS	= \
-		$(NULL)
-
-
 CPPSRCS		= nsJSProtocolHandler.cpp
 
 EXPORTS		= $(srcdir)/nsJSProtocolHandler.h
@@ -35,9 +30,6 @@ LOCAL_INCLUDES += \
 ifdef BUILD_DEBUG_GC
 DEFINES		+= -DDEBUG_GC
 endif
-
-DIRS            = $(NULL)
-TEST_DIRS += test
 
 include $(topsrcdir)/config/rules.mk
 

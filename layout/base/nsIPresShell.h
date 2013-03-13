@@ -38,6 +38,7 @@
 #include "nsInterfaceHashtable.h"
 #include "nsEventStates.h"
 #include "nsPresArena.h"
+#include "nsIImageLoadingContent.h"
 
 class nsIContent;
 class nsIDocument;
@@ -120,10 +121,10 @@ typedef struct CapturingContentInfo {
   nsIContent* mContent;
 } CapturingContentInfo;
 
-// da75e297-2c23-43c4-8d7f-96a668e96ba9
+// bf539e0a-c314-4ea7-ba7c-ebd34e8a4065
 #define NS_IPRESSHELL_IID \
-{ 0xda75e297, 0x2c23, 0x43c4, \
-  { 0x8d, 0x7f, 0x96, 0xa6, 0x68, 0xe9, 0x6b, 0xa9 } }
+{ 0xbf539e0a, 0xc314, 0x4ea7, \
+  { 0xba, 0x7c, 0xeb, 0xd3, 0x4e, 0x8a, 0x40, 0x65 } }
 
 // debug VerifyReflow flags
 #define VERIFY_REFLOW_ON                    0x01
@@ -496,6 +497,11 @@ public:
   virtual NS_HIDDEN_(void) FrameNeedsReflow(nsIFrame *aFrame,
                                             IntrinsicDirty aIntrinsicDirty,
                                             nsFrameState aBitToAdd) = 0;
+
+  /**
+   * Calls FrameNeedsReflow on all fixed position children of the root frame.
+   */
+  virtual void MarkFixedFramesForReflow(IntrinsicDirty aIntrinsicDirty);
 
   /**
    * Tell the presshell that the given frame's reflow was interrupted.  This
@@ -1086,12 +1092,12 @@ public:
   enum {
     FORCE_DRAW = 0x01
   };
-  virtual nsresult AddCanvasBackgroundColorItem(nsDisplayListBuilder& aBuilder,
-                                                nsDisplayList& aList,
-                                                nsIFrame* aFrame,
-                                                const nsRect& aBounds,
-                                                nscolor aBackstopColor = NS_RGBA(0,0,0,0),
-                                                uint32_t aFlags = 0) = 0;
+  virtual void AddCanvasBackgroundColorItem(nsDisplayListBuilder& aBuilder,
+                                            nsDisplayList& aList,
+                                            nsIFrame* aFrame,
+                                            const nsRect& aBounds,
+                                            nscolor aBackstopColor = NS_RGBA(0,0,0,0),
+                                            uint32_t aFlags = 0) = 0;
 
 
   /**
@@ -1099,10 +1105,10 @@ public:
    * bounds aBounds representing the dark grey background behind the page of a
    * print preview presentation.
    */
-  virtual nsresult AddPrintPreviewBackgroundItem(nsDisplayListBuilder& aBuilder,
-                                                 nsDisplayList& aList,
-                                                 nsIFrame* aFrame,
-                                                 const nsRect& aBounds) = 0;
+  virtual void AddPrintPreviewBackgroundItem(nsDisplayListBuilder& aBuilder,
+                                             nsDisplayList& aList,
+                                             nsIFrame* aFrame,
+                                             const nsRect& aBounds) = 0;
 
   /**
    * Computes the backstop color for the view: transparent if in a transparent
@@ -1320,6 +1326,16 @@ public:
 
   void InvalidatePresShellIfHidden();
 
+  // Schedule an update of the list of visible images.
+  virtual void ScheduleImageVisibilityUpdate() = 0;
+
+  // Clears the current list of visible images on this presshell and replaces it
+  // with images that are in the display list aList.
+  virtual void RebuildImageVisibility(const nsDisplayList& aList) = 0;
+
+  // Ensures the image is in the list of visible images.
+  virtual void EnsureImageInVisibleList(nsIImageLoadingContent* aImage) = 0;
+
   /**
    * Refresh observer management.
    */
@@ -1370,6 +1386,11 @@ public:
     return mScrollPositionClampingScrollPortSize;
   }
 
+  void SetContentDocumentFixedPositionMargins(const nsMargin& aMargins);
+  const nsMargin& GetContentDocumentFixedPositionMargins() {
+    return mContentDocumentFixedPositionMargins;
+  }
+
   virtual void WindowSizeMoveDone() = 0;
   virtual void SysColorChanged() = 0;
   virtual void ThemeChanged() = 0;
@@ -1416,6 +1437,12 @@ protected:
   uint64_t                  mPaintCount;
 
   nsSize                    mScrollPositionClampingScrollPortSize;
+
+  // This margin is intended to be used when laying out fixed position children
+  // on this PresShell's viewport frame. See the documentation of
+  // nsIDOMWindowUtils.setContentDocumentFixedPositionMargins for details of
+  // their use.
+  nsMargin                  mContentDocumentFixedPositionMargins;
 
   // A list of weak frames. This is a pointer to the last item in the list.
   nsWeakFrame*              mWeakFrames;

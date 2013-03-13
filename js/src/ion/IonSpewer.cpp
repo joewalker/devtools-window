@@ -10,6 +10,8 @@
 #include "Ion.h"
 #include "IonSpewer.h"
 
+#include "jsscriptinlines.h"
+
 #ifndef ION_SPEW_DIR
 # if defined(_WIN32)
 #  define ION_SPEW_DIR ""
@@ -132,7 +134,7 @@ IonSpewer::beginFunction(MIRGraph *graph, HandleScript function)
     if (!inited_)
         return;
 
-    if (!FilterContainsLocation(function->filename, function->lineno)) {
+    if (!FilterContainsLocation(function->filename(), function->lineno)) {
         JS_ASSERT(!this->graph);
         // filter out logs during the compilation.
         filteredOutCompilations++;
@@ -236,6 +238,7 @@ ion::CheckLogging()
             "  pools      Literal Pools (ARM only for now)\n"
             "  cacheflush Instruction Cache flushes (ARM only for now)\n"
             "  logs       C1 and JSON visualization logging\n"
+            "  trace      Generate calls to js::ion::Trace() for effectful instructions\n"
             "  all        Everything\n"
             "\n"
         );
@@ -278,6 +281,8 @@ ion::CheckLogging()
         EnableChannel(IonSpew_CacheFlush);
     if (ContainsFlag(env, "logs"))
         EnableIonDebugLogging();
+    if (ContainsFlag(env, "trace"))
+        EnableChannel(IonSpew_Trace);
     if (ContainsFlag(env, "all"))
         LoggingBits = uint32_t(-1);
 

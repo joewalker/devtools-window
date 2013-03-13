@@ -99,15 +99,13 @@ public:
 
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
 
-  virtual nsXPCClassInfo* GetClassInfo();
-
   virtual nsIDOMNode* AsDOMNode() { return this; }
 
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED_NO_UNLINK(HTMLTableRowElement,
                                                      nsGenericHTMLElement)
 
 protected:
-  JSObject* WrapNode(JSContext *aCx, JSObject *aScope, bool *aTriedToWrap);
+  JSObject* WrapNode(JSContext *aCx, JSObject *aScope) MOZ_OVERRIDE;
 
   already_AddRefed<nsIDOMHTMLTableSectionElement> GetSection() const;
   HTMLTableElement* GetTable() const;

@@ -122,6 +122,11 @@ public:
 
   virtual nsresult PreHandleEvent(nsEventChainPreVisitor& aVisitor);
   virtual nsresult PostHandleEvent(nsEventChainPostVisitor& aVisitor);
+  void PostHandleEventForRangeThumb(nsEventChainPostVisitor& aVisitor);
+  void StartRangeThumbDrag(nsGUIEvent* aEvent);
+  void FinishRangeThumbDrag(nsGUIEvent* aEvent = nullptr);
+  void CancelRangeThumbDrag();
+  void SetValueOfRangeForUserEvent(double aValue);
 
   virtual nsresult BindToTree(nsIDocument* aDocument, nsIContent* aParent,
                               nsIContent* aBindingParent,
@@ -142,7 +147,6 @@ public:
   NS_IMETHOD_(int32_t) GetCols();
   NS_IMETHOD_(int32_t) GetWrapCols();
   NS_IMETHOD_(int32_t) GetRows();
-  NS_IMETHOD_(void) GetDefaultValueFromContent(nsAString& aValue);
   NS_IMETHOD_(bool) ValueChanged() const;
   NS_IMETHOD_(void) GetTextEditorValue(nsAString& aValue, bool aIgnoreWrap) const;
   NS_IMETHOD_(nsIEditor*) GetTextEditor();
@@ -283,6 +287,34 @@ public:
    * Fires change event if mFocusedValue and current value held are unequal.
    */
   void FireChangeEventIfNeeded();
+
+  /**
+   * Returns the input element's value as a double-precision float.
+   * Returns NaN if the current element's value is not a floating point number.
+   *
+   * @return the input element's value as a double-precision float.
+   */
+  double GetValueAsDouble() const;
+
+  /**
+   * Returns the input's "minimum" (as defined by the HTML5 spec) as a double.
+   * Note this takes account of any default minimum that the type may have.
+   * Returns NaN if the min attribute isn't a valid floating point number and
+   * the input's type does not have a default minimum.
+   *
+   * NOTE: Only call this if you know DoesMinMaxApply() returns true.
+   */
+  double GetMinimum() const;
+
+  /**
+   * Returns the input's "maximum" (as defined by the HTML5 spec) as a double.
+   * Note this takes account of any default maximum that the type may have.
+   * Returns NaN if the max attribute isn't a valid floating point number and
+   * the input's type does not have a default maximum.
+   *
+   * NOTE:Only call this if you know DoesMinMaxApply() returns true.
+   */
+  double GetMaximum() const;
 
 protected:
   // Pull IsSingleLineTextControl into our scope, otherwise it'd be hidden
@@ -486,7 +518,7 @@ protected:
   /**
    * Returns if the step attribute apply for the current type.
    */
-  bool DoesStepApply() const { return DoesMinMaxApply() && mType != NS_FORM_INPUT_TIME; }
+  bool DoesStepApply() const { return DoesMinMaxApply(); }
 
   /**
    * Returns if stepDown and stepUp methods apply for the current type.
@@ -571,14 +603,6 @@ protected:
   nsIRadioGroupContainer* GetRadioGroupContainer() const;
 
   /**
-   * Returns the input element's value as a double-precision float.
-   * Returns NaN if the current element's value is not a floating point number.
-   *
-   * @return the input element's value as a double-precision float.
-   */
-  double GetValueAsDouble() const;
-
-  /**
    * Convert a string to a number in a type specific way,
    * http://www.whatwg.org/specs/web-apps/current-work/multipage/the-input-element.html#concept-input-value-string-number
    * ie parse a date string to a timestamp if type=date,
@@ -660,26 +684,6 @@ protected:
    */
   void UpdateHasRange();
 
-  /**
-   * Returns the input's "minimum" (as defined by the HTML5 spec) as a double.
-   * Note this takes account of any default minimum that the type may have.
-   * Returns NaN if the min attribute isn't a valid floating point number and
-   * the input's type does not have a default minimum.
-   *
-   * NOTE: Only call this if you know DoesMinMaxApply() returns true.
-   */
-  double GetMinimum() const;
-
-  /**
-   * Returns the input's "maximum" (as defined by the HTML5 spec) as a double.
-   * Note this takes account of any default maximum that the type may have.
-   * Returns NaN if the max attribute isn't a valid floating point number and
-   * the input's type does not have a default maximum.
-   *
-   * NOTE:Only call this if you know DoesMinMaxApply() returns true.
-   */
-  double GetMaximum() const;
-
    /**
     * Get the step scale value for the current type.
     * See:
@@ -702,6 +706,12 @@ protected:
    * @return The step base.
    */
   double GetStepBase() const;
+
+  /**
+   * Returns the default step for the current type.
+   * @return the default step for the current type.
+   */
+  double GetDefaultStep() const;
 
   /**
    * Apply a step change from stepUp or stepDown by multiplying aStep by the
@@ -734,7 +744,7 @@ protected:
     /**
      * The current value of the input if it has been changed from the default
      */
-    char*                    mValue;
+    PRUnichar*               mValue;
     /**
      * The state of the text editor associated with the text/password input
      */
@@ -765,13 +775,26 @@ protected:
    */
   nsString mFocusedValue;  
 
+  /**
+   * If mIsDraggingRange is true, this is the value that the input had before
+   * the drag started. Used to reset the input to its old value if the drag is
+   * canceled.
+   */
+  double mRangeThumbDragStartValue;
+
   // Step scale factor values, for input types that have one.
   static const double kStepScaleFactorDate;
-  static const double kStepScaleFactorNumber;
+  static const double kStepScaleFactorNumberRange;
+  static const double kStepScaleFactorTime;
 
   // Default step base value when a type do not have specific one.
   static const double kDefaultStepBase;
-  // Float alue returned by GetStep() when the step attribute is set to 'any'.
+
+  // Default step used when there is no specified step.
+  static const double kDefaultStep;
+  static const double kDefaultStepTime;
+
+  // Float value returned by GetStep() when the step attribute is set to 'any'.
   static const double kStepAny;
 
   /**
@@ -793,6 +816,7 @@ protected:
   bool                     mCanShowValidUI      : 1;
   bool                     mCanShowInvalidUI    : 1;
   bool                     mHasRange            : 1;
+  bool                     mIsDraggingRange     : 1;
 
 private:
   struct nsFilePickerFilter {

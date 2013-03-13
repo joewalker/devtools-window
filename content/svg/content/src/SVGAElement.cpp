@@ -7,15 +7,11 @@
 
 #include "mozilla/dom/SVGAElement.h"
 #include "mozilla/dom/SVGAElementBinding.h"
-#include "nsIDOMSVGAElement.h"
-#include "nsIDOMSVGURIReference.h"
 #include "nsILink.h"
 #include "nsSVGString.h"
 #include "nsCOMPtr.h"
 #include "nsGkAtoms.h"
 #include "nsContentUtils.h"
-
-DOMCI_NODE_DATA(SVGAElement, mozilla::dom::SVGAElement)
 
 NS_IMPL_NS_NEW_NAMESPACED_SVG_ELEMENT(A)
 
@@ -23,9 +19,9 @@ namespace mozilla {
 namespace dom {
 
 JSObject*
-SVGAElement::WrapNode(JSContext *aCx, JSObject *aScope, bool *aTriedToWrap)
+SVGAElement::WrapNode(JSContext *aCx, JSObject *aScope)
 {
-  return SVGAElementBinding::Wrap(aCx, aScope, this, aTriedToWrap);
+  return SVGAElementBinding::Wrap(aCx, aScope, this);
 }
 
 nsSVGElement::StringInfo SVGAElement::sStringInfo[2] =
@@ -38,20 +34,12 @@ nsSVGElement::StringInfo SVGAElement::sStringInfo[2] =
 //----------------------------------------------------------------------
 // nsISupports methods
 
-NS_IMPL_ADDREF_INHERITED(SVGAElement, SVGAElementBase)
-NS_IMPL_RELEASE_INHERITED(SVGAElement, SVGAElementBase)
-
-NS_INTERFACE_TABLE_HEAD(SVGAElement)
-  NS_NODE_INTERFACE_TABLE7(SVGAElement,
-                           nsIDOMNode,
-                           nsIDOMElement,
-                           nsIDOMSVGElement,
-                           nsIDOMSVGAElement,
-                           nsIDOMSVGURIReference,
-                           nsILink,
-                           Link)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(SVGAElement)
-NS_INTERFACE_MAP_END_INHERITING(SVGAElementBase)
+NS_IMPL_ISUPPORTS_INHERITED5(SVGAElement, SVGAElementBase,
+                             nsIDOMNode,
+                             nsIDOMElement,
+                             nsIDOMSVGElement,
+                             nsILink,
+                             Link)
 
 
 //----------------------------------------------------------------------
@@ -64,26 +52,11 @@ SVGAElement::SVGAElement(already_AddRefed<nsINodeInfo> aNodeInfo)
   SetIsDOMBinding();
 }
 
-//----------------------------------------------------------------------
-// nsIDOMSVGURIReference methods
-
-/* readonly attribute nsIDOMSVGAnimatedString href; */
-NS_IMETHODIMP
-SVGAElement::GetHref(nsIDOMSVGAnimatedString * *aHref)
-{
-  *aHref = Href().get();
-  return NS_OK;
-}
-
 already_AddRefed<nsIDOMSVGAnimatedString>
 SVGAElement::Href()
 {
-  nsCOMPtr<nsIDOMSVGAnimatedString> href;
-  mStringAttributes[HREF].ToDOMAnimatedString(getter_AddRefs(href), this);
-  return href.forget();
+  return mStringAttributes[HREF].ToDOMAnimatedString(this);
 }
-
-NS_IMPL_STRING_ATTR(SVGAElement, Download, download)
 
 //----------------------------------------------------------------------
 // nsINode methods
@@ -107,25 +80,24 @@ NS_IMPL_ELEMENT_CLONE_WITH_INIT(SVGAElement)
 
 
 //----------------------------------------------------------------------
-// nsIDOMSVGAElement methods
-
-/* readonly attribute nsIDOMSVGAnimatedString target; */
-NS_IMETHODIMP
-SVGAElement::GetTarget(nsIDOMSVGAnimatedString * *aTarget)
-{
-  *aTarget = Target().get();
-  return NS_OK;
-}
 
 already_AddRefed<nsIDOMSVGAnimatedString>
 SVGAElement::Target()
 {
-  nsCOMPtr<nsIDOMSVGAnimatedString> target;
-  mStringAttributes[TARGET].ToDOMAnimatedString(getter_AddRefs(target), this);
-  return target.forget();
+  return mStringAttributes[TARGET].ToDOMAnimatedString(this);
 }
 
+void
+SVGAElement::GetDownload(nsAString & aDownload)
+{
+  GetAttr(kNameSpaceID_None, nsGkAtoms::download, aDownload);
+}
 
+void
+SVGAElement::SetDownload(const nsAString & aDownload, ErrorResult& rv)
+{
+  rv = SetAttr(kNameSpaceID_None, nsGkAtoms::download, aDownload, true);
+}
 
 //----------------------------------------------------------------------
 // nsIContent methods

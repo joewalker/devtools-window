@@ -80,6 +80,7 @@
 #include "vm/ForkJoin.h"
 #include "vm/Shape.h"
 #include "vm/String.h"
+#include "vm/ForkJoin.h"
 #include "ion/IonCode.h"
 #ifdef JS_ION
 # include "ion/IonMacroAssembler.h"
@@ -194,32 +195,23 @@ static const AllocKind FinalizePhaseIonCode[] = {
     FINALIZE_IONCODE
 };
 
-static const AllocKind FinalizePhaseShapes[] = {
-    FINALIZE_SHAPE,
-    FINALIZE_BASE_SHAPE,
-    FINALIZE_TYPE_OBJECT
-};
-
 static const AllocKind* FinalizePhases[] = {
     FinalizePhaseStrings,
     FinalizePhaseScripts,
-    FinalizePhaseIonCode,
-    FinalizePhaseShapes
+    FinalizePhaseIonCode
 };
 static const int FinalizePhaseCount = sizeof(FinalizePhases) / sizeof(AllocKind*);
 
 static const int FinalizePhaseLength[] = {
     sizeof(FinalizePhaseStrings) / sizeof(AllocKind),
     sizeof(FinalizePhaseScripts) / sizeof(AllocKind),
-    sizeof(FinalizePhaseIonCode) / sizeof(AllocKind),
-    sizeof(FinalizePhaseShapes) / sizeof(AllocKind)
+    sizeof(FinalizePhaseIonCode) / sizeof(AllocKind)
 };
 
 static const gcstats::Phase FinalizePhaseStatsPhase[] = {
     gcstats::PHASE_SWEEP_STRING,
     gcstats::PHASE_SWEEP_SCRIPT,
-    gcstats::PHASE_SWEEP_IONCODE,
-    gcstats::PHASE_SWEEP_SHAPE
+    gcstats::PHASE_SWEEP_IONCODE
 };
 
 /*
@@ -240,15 +232,23 @@ static const AllocKind BackgroundPhaseStrings[] = {
     FINALIZE_STRING
 };
 
+static const AllocKind BackgroundPhaseShapes[] = {
+    FINALIZE_SHAPE,
+    FINALIZE_BASE_SHAPE,
+    FINALIZE_TYPE_OBJECT
+};
+
 static const AllocKind* BackgroundPhases[] = {
     BackgroundPhaseObjects,
-    BackgroundPhaseStrings
+    BackgroundPhaseStrings,
+    BackgroundPhaseShapes
 };
 static const int BackgroundPhaseCount = sizeof(BackgroundPhases) / sizeof(AllocKind*);
 
 static const int BackgroundPhaseLength[] = {
     sizeof(BackgroundPhaseObjects) / sizeof(AllocKind),
-    sizeof(BackgroundPhaseStrings) / sizeof(AllocKind)
+    sizeof(BackgroundPhaseStrings) / sizeof(AllocKind),
+    sizeof(BackgroundPhaseShapes) / sizeof(AllocKind)
 };
 
 #ifdef DEBUG
@@ -266,7 +266,7 @@ ArenaHeader::checkSynchronizedWithFreeList() const
      * list in the zone can mutate at any moment. We cannot do any
      * checks in this case.
      */
-    if (IsBackgroundFinalized(getAllocKind()) && !zone->rt->isHeapBusy())
+    if (IsBackgroundFinalized(getAllocKind()) && zone->rt->gcHelperThread.onBackgroundThread())
         return;
 
     FreeSpan firstSpan = FreeSpan::decodeOffsets(arenaAddress(), firstFreeSpanOffsets);
@@ -281,6 +281,12 @@ ArenaHeader::checkSynchronizedWithFreeList() const
      * empty and also points to this arena. Thus they must the same.
      */
     JS_ASSERT(firstSpan.isSameNonEmptySpan(list));
+}
+
+bool
+js::gc::Cell::isTenured() const
+{
+    return true;
 }
 #endif
 
@@ -604,7 +610,7 @@ Chunk::allocate(JSRuntime *rt)
 
     if (!chunk)
         return NULL;
-    chunk->init();
+    chunk->init(rt);
     rt->gcStats.count(gcstats::STAT_NEW_CHUNK);
     return chunk;
 }
@@ -635,7 +641,7 @@ Chunk::prepareToBeFreed(JSRuntime *rt)
 }
 
 void
-Chunk::init()
+Chunk::init(JSRuntime *rt)
 {
     JS_POISON(this, JS_FREE_PATTERN, ChunkSize);
 
@@ -654,6 +660,7 @@ Chunk::init()
     info.numArenasFree = ArenasPerChunk;
     info.numArenasFreeCommitted = ArenasPerChunk;
     info.age = 0;
+    info.runtime = rt;
 
     /* Initialize the arena header state. */
     for (unsigned i = 0; i < ArenasPerChunk; i++) {
@@ -971,6 +978,11 @@ js_InitGC(JSRuntime *rt, uint32_t maxbytes)
     rt->gcJitReleaseTime = PRMJ_Now() + JIT_SCRIPT_RELEASE_TYPES_INTERVAL;
 #endif
 
+#ifdef JSGC_GENERATIONAL
+    if (!rt->gcStoreBuffer.enable())
+        return false;
+#endif
+
 #ifdef JS_GC_ZEAL
     if (!InitGCZeal(rt))
         return false;
@@ -1179,20 +1191,20 @@ PushArenaAllocatedDuringSweep(JSRuntime *runtime, ArenaHeader *arena)
 }
 
 void *
-ArenaLists::parallelAllocate(JSCompartment *comp, AllocKind thingKind, size_t thingSize)
+ArenaLists::parallelAllocate(Zone *zone, AllocKind thingKind, size_t thingSize)
 {
     /*
-     * During parallel Rivertrail sections, no GC is permitted. If no
-     * existing arena can satisfy the allocation, then a new one is
-     * allocated. If that fails, then we return NULL which will cause
-     * the parallel section to abort.
+     * During parallel Rivertrail sections, if no existing arena can
+     * satisfy the allocation, then a new one is allocated. If that
+     * fails, then we return NULL which will cause the parallel
+     * section to abort.
      */
 
     void *t = allocateFromFreeList(thingKind, thingSize);
     if (t)
         return t;
 
-    return allocateFromArena(comp, thingKind);
+    return allocateFromArena(zone, thingKind);
 }
 
 inline void *
@@ -1465,9 +1477,9 @@ ArenaLists::queueShapesForSweep(FreeOp *fop)
 {
     gcstats::AutoPhase ap(fop->runtime()->gcStats, gcstats::PHASE_SWEEP_SHAPE);
 
-    queueForForegroundSweep(fop, FINALIZE_SHAPE);
-    queueForForegroundSweep(fop, FINALIZE_BASE_SHAPE);
-    queueForForegroundSweep(fop, FINALIZE_TYPE_OBJECT);
+    queueForBackgroundSweep(fop, FINALIZE_SHAPE);
+    queueForBackgroundSweep(fop, FINALIZE_BASE_SHAPE);
+    queueForBackgroundSweep(fop, FINALIZE_TYPE_OBJECT);
 }
 
 static void *
@@ -1477,7 +1489,7 @@ RunLastDitchGC(JSContext *cx, JS::Zone *zone, AllocKind thingKind)
      * In parallel sections, we do not attempt to refill the free list
      * and hence do not encounter last ditch GC.
      */
-    JS_ASSERT(!ForkJoinSlice::InParallelSection());
+    JS_ASSERT(!InParallelSection());
 
     PrepareZoneForGC(zone);
 
@@ -1609,7 +1621,7 @@ js::InitTracer(JSTracer *trc, JSRuntime *rt, JSTraceCallback callback)
     trc->debugPrinter = NULL;
     trc->debugPrintArg = NULL;
     trc->debugPrintIndex = size_t(-1);
-    trc->eagerlyTraceWeakMaps = true;
+    trc->eagerlyTraceWeakMaps = TraceWeakMapValues;
 #ifdef JS_GC_ZEAL
     trc->realLocation = NULL;
 #endif
@@ -1688,7 +1700,7 @@ GCMarker::start()
      * The GC is recomputing the liveness of WeakMap entries, so we delay
      * visting entries.
      */
-    eagerlyTraceWeakMaps = JS_FALSE;
+    eagerlyTraceWeakMaps = DoNotTraceWeakMaps;
 }
 
 void
@@ -1841,8 +1853,8 @@ void
 GCMarker::startBufferingGrayRoots()
 {
     JS_ASSERT(!grayFailed);
-    for (GCCompartmentsIter c(runtime); !c.done(); c.next())
-        JS_ASSERT(c->gcGrayRoots.empty());
+    for (GCZonesIter zone(runtime); !zone.done(); zone.next())
+        JS_ASSERT(zone->gcGrayRoots.empty());
 
     JS_ASSERT(!callback);
     callback = GrayCallback;
@@ -1860,18 +1872,18 @@ GCMarker::endBufferingGrayRoots()
 void
 GCMarker::resetBufferedGrayRoots()
 {
-    for (GCCompartmentsIter c(runtime); !c.done(); c.next())
-        c->gcGrayRoots.clearAndFree();
+    for (GCZonesIter zone(runtime); !zone.done(); zone.next())
+        zone->gcGrayRoots.clearAndFree();
     grayFailed = false;
 }
 
 void
-GCMarker::markBufferedGrayRoots(JSCompartment *comp)
+GCMarker::markBufferedGrayRoots(JS::Zone *zone)
 {
     JS_ASSERT(!grayFailed);
-    JS_ASSERT(comp->isGCMarkingGray());
+    JS_ASSERT(zone->isGCMarkingGray());
 
-    for (GrayRoot *elem = comp->gcGrayRoots.begin(); elem != comp->gcGrayRoots.end(); elem++) {
+    for (GrayRoot *elem = zone->gcGrayRoots.begin(); elem != zone->gcGrayRoots.end(); elem++) {
 #ifdef DEBUG
         debugPrinter = elem->debugPrinter;
         debugPrintArg = elem->debugPrintArg;
@@ -1899,10 +1911,10 @@ GCMarker::appendGrayRoot(void *thing, JSGCTraceKind kind)
     root.debugPrintIndex = debugPrintIndex;
 #endif
 
-    JSCompartment *comp = static_cast<Cell *>(thing)->compartment();
-    if (comp->isCollecting()) {
-        comp->maybeAlive = true;
-        if (!comp->gcGrayRoots.append(root)) {
+    Zone *zone = static_cast<Cell *>(thing)->zone();
+    if (zone->isCollecting()) {
+        zone->maybeAlive = true;
+        if (!zone->gcGrayRoots.append(root)) {
             grayFailed = true;
             resetBufferedGrayRoots();
         }
@@ -1920,8 +1932,8 @@ size_t
 GCMarker::sizeOfExcludingThis(JSMallocSizeOfFun mallocSizeOf) const
 {
     size_t size = stack.sizeOfExcludingThis(mallocSizeOf);
-    for (CompartmentsIter c(runtime); !c.done(); c.next())
-        size += c->gcGrayRoots.sizeOfExcludingThis(mallocSizeOf);
+    for (ZonesIter zone(runtime); !zone.done(); zone.next())
+        size += zone->gcGrayRoots.sizeOfExcludingThis(mallocSizeOf);
     return size;
 }
 
@@ -2014,7 +2026,7 @@ js::MaybeGC(JSContext *cx)
         return;
     }
 
-    double factor = rt->gcHighFrequencyGC ? 0.75 : 0.9;
+    double factor = rt->gcHighFrequencyGC ? 0.85 : 0.9;
     Zone *zone = cx->zone();
     if (zone->gcBytes > 1024 * 1024 &&
         zone->gcBytes >= factor * zone->gcTriggerBytes &&
@@ -2504,6 +2516,16 @@ GCHelperThread::doSweep()
 }
 #endif /* JS_THREADSAFE */
 
+bool
+GCHelperThread::onBackgroundThread()
+{
+#ifdef JS_THREADSAFE
+    return PR_GetCurrentThread() == getThread();
+#else
+    return false;
+#endif
+}
+
 static bool
 ReleaseObservedTypes(JSRuntime *rt)
 {
@@ -2538,7 +2560,7 @@ SweepCompartments(FreeOp *fop, bool lastGC)
     while (read < end) {
         JSCompartment *compartment = *read++;
 
-        if (!compartment->hold && compartment->wasGCStarted() &&
+        if (!compartment->hold && compartment->zone()->wasGCStarted() &&
             (compartment->zone()->allocator.arenas.arenaListsAreEmpty() || lastGC))
         {
             compartment->zone()->allocator.arenas.checkEmptyFreeLists();
@@ -2557,8 +2579,8 @@ SweepCompartments(FreeOp *fop, bool lastGC)
 static void
 PurgeRuntime(JSRuntime *rt)
 {
-    for (GCZonesIter zone(rt); !zone.done(); zone.next())
-        zone->purge();
+    for (GCCompartmentsIter comp(rt); !comp.done(); comp.next())
+        comp->purge();
 
     rt->freeLifoAlloc.transferUnusedFrom(&rt->tempLifoAlloc);
 
@@ -2663,17 +2685,12 @@ BeginMarkPhase(JSRuntime *rt)
     int64_t currentTime = PRMJ_Now();
 
 #ifdef DEBUG
-    CheckForCompartmentMismatches(rt);
+    if (rt->gcFullCompartmentChecks)
+        CheckForCompartmentMismatches(rt);
 #endif
 
     rt->gcIsFull = true;
     bool any = false;
-    for (CompartmentsIter c(rt); !c.done(); c.next()) {
-        JS_ASSERT(!c->gcLiveArrayBuffers);
-        c->setPreservingCode(ShouldPreserveJITCode(c, currentTime));
-        c->scheduledForDestruction = false;
-        c->maybeAlive = false;
-    }
 
     for (ZonesIter zone(rt); !zone.done(); zone.next()) {
         /* Assert that zone state is as we expect */
@@ -2690,6 +2707,16 @@ BeginMarkPhase(JSRuntime *rt)
         } else {
             rt->gcIsFull = false;
         }
+
+        zone->scheduledForDestruction = false;
+        zone->maybeAlive = false;
+        zone->setPreservingCode(false);
+    }
+
+    for (CompartmentsIter c(rt); !c.done(); c.next()) {
+        JS_ASSERT(!c->gcLiveArrayBuffers);
+        if (ShouldPreserveJITCode(c, currentTime))
+            c->zone()->setPreservingCode(true);
     }
 
     /* Check that at least one zone is scheduled for collection. */
@@ -2770,19 +2797,19 @@ BeginMarkPhase(JSRuntime *rt)
     BufferGrayRoots(gcmarker);
 
     /*
-     * This code ensures that if a compartment is "dead", then it will be
-     * collected in this GC. A compartment is considered dead if its maybeAlive
+     * This code ensures that if a zone is "dead", then it will be
+     * collected in this GC. A zone is considered dead if its maybeAlive
      * flag is false. The maybeAlive flag is set if:
-     *   (1) the compartment has incoming cross-compartment edges, or
-     *   (2) an object in the compartment was marked during root marking, either
+     *   (1) the zone has incoming cross-compartment edges, or
+     *   (2) an object in the zone was marked during root marking, either
      *       as a black root or a gray root.
      * If the maybeAlive is false, then we set the scheduledForDestruction flag.
      * At any time later in the GC, if we try to mark an object whose
-     * compartment is scheduled for destruction, we will assert.
+     * zone is scheduled for destruction, we will assert.
      * NOTE: Due to bug 811587, we only assert if gcManipulatingDeadCompartments
      * is true (e.g., if we're doing a brain transplant).
      *
-     * The purpose of this check is to ensure that a compartment that we would
+     * The purpose of this check is to ensure that a zone that we would
      * normally destroy is not resurrected by a read barrier or an
      * allocation. This might happen during a function like JS_TransplantObject,
      * which iterates over all compartments, live or dead, and operates on their
@@ -2792,22 +2819,22 @@ BeginMarkPhase(JSRuntime *rt)
      * regress.
      *
      * Note that there are certain cases where allocations or read barriers in
-     * dead compartments are difficult to avoid. We detect such cases (via the
+     * dead zone are difficult to avoid. We detect such cases (via the
      * gcObjectsMarkedInDeadCompartment counter) and redo any ongoing GCs after
      * the JS_TransplantObject function has finished. This ensures that the dead
-     * compartments will be cleaned up. See AutoMarkInDeadCompartment and
-     * AutoMaybeTouchDeadCompartments for details.
+     * zones will be cleaned up. See AutoMarkInDeadZone and
+     * AutoMaybeTouchDeadZones for details.
      */
 
     /* Set the maybeAlive flag based on cross-compartment edges. */
     for (CompartmentsIter c(rt); !c.done(); c.next()) {
         for (JSCompartment::WrapperEnum e(c); !e.empty(); e.popFront()) {
             Cell *dst = e.front().key.wrapped;
-            dst->compartment()->maybeAlive = true;
+            dst->zone()->maybeAlive = true;
         }
 
         if (c->hold)
-            c->maybeAlive = true;
+            c->zone()->maybeAlive = true;
     }
 
     /*
@@ -2815,9 +2842,9 @@ BeginMarkPhase(JSRuntime *rt)
      * during MarkRuntime.
      */
 
-    for (GCCompartmentsIter c(rt); !c.done(); c.next()) {
-        if (!c->maybeAlive)
-            c->scheduledForDestruction = true;
+    for (GCZonesIter zone(rt); !zone.done(); zone.next()) {
+        if (!zone->maybeAlive)
+            zone->scheduledForDestruction = true;
     }
     rt->gcFoundBlackGrayEdges = false;
 
@@ -2857,7 +2884,7 @@ MarkWeakReferencesInCurrentGroup(JSRuntime *rt, gcstats::Phase phase)
     MarkWeakReferences<GCCompartmentGroupIter>(rt, phase);
 }
 
-template <class CompartmentIterT>
+template <class ZoneIterT, class CompartmentIterT>
 static void
 MarkGrayReferences(JSRuntime *rt)
 {
@@ -2868,8 +2895,8 @@ MarkGrayReferences(JSRuntime *rt)
         gcstats::AutoPhase ap1(rt->gcStats, gcstats::PHASE_SWEEP_MARK_GRAY);
         gcmarker->setMarkColorGray();
         if (gcmarker->hasBufferedGrayRoots()) {
-            for (CompartmentIterT c(rt); !c.done(); c.next())
-                gcmarker->markBufferedGrayRoots(c);
+            for (ZoneIterT zone(rt); !zone.done(); zone.next())
+                gcmarker->markBufferedGrayRoots(zone);
         } else {
             JS_ASSERT(!rt->gcIsIncremental);
             if (JSTraceDataOp op = rt->gcGrayRootsTraceOp)
@@ -2889,7 +2916,7 @@ MarkGrayReferences(JSRuntime *rt)
 static void
 MarkGrayReferencesInCurrentGroup(JSRuntime *rt)
 {
-    MarkGrayReferences<GCCompartmentGroupIter>(rt);
+    MarkGrayReferences<GCZoneGroupIter, GCCompartmentGroupIter>(rt);
 }
 
 #ifdef DEBUG
@@ -2903,7 +2930,7 @@ MarkAllWeakReferences(JSRuntime *rt, gcstats::Phase phase)
 static void
 MarkAllGrayReferences(JSRuntime *rt)
 {
-    MarkGrayReferences<GCCompartmentsIter>(rt);
+    MarkGrayReferences<GCZonesIter, GCCompartmentsIter>(rt);
 }
 
 class js::gc::MarkingValidator
@@ -2958,7 +2985,7 @@ js::gc::MarkingValidator::nonIncrementalMark()
         if (!entry)
             return;
 
-        memcpy(entry->bitmap, bitmap->bitmap, sizeof(bitmap->bitmap));
+        memcpy((void *)entry->bitmap, (void *)bitmap->bitmap, sizeof(bitmap->bitmap));
         if (!map.putNew(r.front(), entry))
             return;
     }
@@ -3258,12 +3285,12 @@ GetNextZoneGroup(JSRuntime *rt)
             JS_ASSERT(zone->isGCMarking());
             zone->setNeedsBarrier(false, Zone::UpdateIon);
             zone->setGCState(Zone::NoGC);
+            zone->gcGrayRoots.clearAndFree();
         }
 
         for (GCCompartmentGroupIter comp(rt); !comp.done(); comp.next()) {
             ArrayBufferObject::resetArrayBufferList(comp);
             ResetGrayList(comp);
-            comp->gcGrayRoots.clearAndFree();
         }
 
         rt->gcAbortSweepAfterCurrentGroup = false;
@@ -3279,16 +3306,14 @@ GetNextZoneGroup(JSRuntime *rt)
  *
  * This means that when marking things gray we must not allow marking to leave
  * the current compartment group, as that could result in things being marked
- * grey when they might subsequently be marked black.  To acheive this, when we
+ * grey when they might subsequently be marked black.  To achieve this, when we
  * find a cross compartment pointer we don't mark the referent but add it to a
  * singly-linked list of incoming gray pointers that is stored with each
  * compartment.
  *
- * The list head is stored in JSCompartment::gcIncomingGrayPointers and can
- * contain both cross compartment wrapper objects and debugger env, object or
- * script wrappers. The next pointer is stored in a slot on the on the object,
- * either the second extra slot for cross compartment wrappers, or a dedicated
- * slot for debugger objects.
+ * The list head is stored in JSCompartment::gcIncomingGrayPointers and contains
+ * cross compartment wrapper objects. The next pointer is stored in the second
+ * extra slot of the cross compartment wrapper.
  *
  * The list is created during gray marking when one of the
  * MarkCrossCompartmentXXX functions is called for a pointer that leaves the
@@ -3300,38 +3325,34 @@ GetNextZoneGroup(JSRuntime *rt)
  */
 
 static bool
-IsGrayListObject(RawObject o)
+IsGrayListObject(RawObject obj)
 {
-    JS_ASSERT(o);
-    return (IsCrossCompartmentWrapper(o) && !IsDeadProxyObject(o)) ||
-           Debugger::isDebugWrapper(o);
+    JS_ASSERT(obj);
+    return IsCrossCompartmentWrapper(obj) && !IsDeadProxyObject(obj);
 }
 
 const unsigned JSSLOT_GC_GRAY_LINK = JSSLOT_PROXY_EXTRA + 1;
 
 static unsigned
-GrayLinkSlot(RawObject o)
+GrayLinkSlot(RawObject obj)
 {
-    JS_ASSERT(IsGrayListObject(o));
-    return IsCrossCompartmentWrapper(o) ? JSSLOT_GC_GRAY_LINK : Debugger::gcGrayLinkSlot();
+    JS_ASSERT(IsGrayListObject(obj));
+    return JSSLOT_GC_GRAY_LINK;
 }
 
 #ifdef DEBUG
 static void
-AssertNotOnGrayList(RawObject o)
+AssertNotOnGrayList(RawObject obj)
 {
-    JS_ASSERT_IF(IsGrayListObject(o), o->getReservedSlot(GrayLinkSlot(o)).isUndefined());
+    JS_ASSERT_IF(IsGrayListObject(obj), obj->getReservedSlot(GrayLinkSlot(obj)).isUndefined());
 }
 #endif
 
 static Cell *
-CrossCompartmentPointerReferent(RawObject o)
+CrossCompartmentPointerReferent(RawObject obj)
 {
-    JS_ASSERT(IsGrayListObject(o));
-    if (IsCrossCompartmentWrapper(o))
-        return (Cell *)GetProxyPrivate(o).toGCThing();
-    else
-        return (Cell *)o->getPrivate();
+    JS_ASSERT(IsGrayListObject(obj));
+    return (Cell *)GetProxyPrivate(obj).toGCThing();
 }
 
 static RawObject
@@ -3355,11 +3376,11 @@ js::DelayCrossCompartmentGrayMarking(RawObject src)
     /* Called from MarkCrossCompartmentXXX functions. */
     unsigned slot = GrayLinkSlot(src);
     Cell *dest = CrossCompartmentPointerReferent(src);
-    JSCompartment *c = dest->compartment();
+    JSCompartment *comp = dest->compartment();
 
     if (src->getReservedSlot(slot).isUndefined()) {
-        src->setCrossCompartmentSlot(slot, ObjectOrNullValue(c->gcIncomingGrayPointers));
-        c->gcIncomingGrayPointers = src;
+        src->setCrossCompartmentSlot(slot, ObjectOrNullValue(comp->gcIncomingGrayPointers));
+        comp->gcIncomingGrayPointers = src;
     } else {
         JS_ASSERT(src->getReservedSlot(slot).isObjectOrNull());
     }
@@ -3369,12 +3390,12 @@ js::DelayCrossCompartmentGrayMarking(RawObject src)
      * Assert that the object is in our list, also walking the list to check its
      * integrity.
      */
-    RawObject o = c->gcIncomingGrayPointers;
+    RawObject obj = comp->gcIncomingGrayPointers;
     bool found = false;
-    while (o) {
-        if (o == src)
+    while (obj) {
+        if (obj == src)
             found = true;
-        o = NextIncomingCrossCompartmentPointer(o, false);
+        obj = NextIncomingCrossCompartmentPointer(obj, false);
     }
     JS_ASSERT(found);
 #endif
@@ -3401,8 +3422,8 @@ MarkIncomingCrossCompartmentPointers(JSRuntime *rt, const uint32_t color)
 
         for (RawObject src = c->gcIncomingGrayPointers;
              src;
-             src = NextIncomingCrossCompartmentPointer(src, unlinkList)) {
-
+             src = NextIncomingCrossCompartmentPointer(src, unlinkList))
+        {
             Cell *dst = CrossCompartmentPointerReferent(src);
             JS_ASSERT(dst->compartment() == c);
 
@@ -3438,10 +3459,10 @@ RemoveFromGrayList(RawObject wrapper)
     RawObject tail = wrapper->getReservedSlot(slot).toObjectOrNull();
     wrapper->setReservedSlot(slot, UndefinedValue());
 
-    JSCompartment *c = CrossCompartmentPointerReferent(wrapper)->compartment();
-    RawObject obj = c->gcIncomingGrayPointers;
+    JSCompartment *comp = CrossCompartmentPointerReferent(wrapper)->compartment();
+    RawObject obj = comp->gcIncomingGrayPointers;
     if (obj == wrapper) {
-        c->gcIncomingGrayPointers = tail;
+        comp->gcIncomingGrayPointers = tail;
         return true;
     }
 
@@ -3460,7 +3481,7 @@ RemoveFromGrayList(RawObject wrapper)
 }
 
 static void
-ResetGrayList(JSCompartment* comp)
+ResetGrayList(JSCompartment *comp)
 {
     RawObject src = comp->gcIncomingGrayPointers;
     while (src)
@@ -3469,13 +3490,13 @@ ResetGrayList(JSCompartment* comp)
 }
 
 void
-js::NotifyGCNukeWrapper(RawObject o)
+js::NotifyGCNukeWrapper(RawObject obj)
 {
     /*
      * References to target of wrapper are being removed, we no longer have to
      * remember to mark it.
      */
-    RemoveFromGrayList(o);
+    RemoveFromGrayList(obj);
 }
 
 enum {
@@ -3633,6 +3654,8 @@ BeginSweepingZoneGroup(JSRuntime *rt)
     for (GCZoneGroupIter zone(rt); !zone.done(); zone.next()) {
         gcstats::AutoSCC scc(rt->gcStats, rt->gcZoneGroupIndex);
         zone->allocator.arenas.queueShapesForSweep(&fop);
+        zone->allocator.arenas.gcShapeArenasToSweep =
+            zone->allocator.arenas.arenaListsToSweep[FINALIZE_SHAPE];
     }
 
     rt->gcSweepPhase = 0;
@@ -3728,6 +3751,7 @@ SweepPhase(JSRuntime *rt, SliceBudget &sliceBudget)
         return false;
 
     for (;;) {
+        /* Finalize foreground finalized things. */
         for (; rt->gcSweepPhase < FinalizePhaseCount ; ++rt->gcSweepPhase) {
             gcstats::AutoPhase ap(rt->gcStats, FinalizePhaseStatsPhase[rt->gcSweepPhase]);
 
@@ -3745,6 +3769,27 @@ SweepPhase(JSRuntime *rt, SliceBudget &sliceBudget)
                 rt->gcSweepKindIndex = 0;
             }
             rt->gcSweepZone = rt->gcCurrentZoneGroup;
+        }
+
+        /* Remove dead shapes from the shape tree, but don't finalize them yet. */
+        {
+            gcstats::AutoPhase ap(rt->gcStats, gcstats::PHASE_SWEEP_SHAPE);
+
+            for (; rt->gcSweepZone; rt->gcSweepZone = rt->gcSweepZone->nextNodeInGroup()) {
+                Zone *zone = rt->gcSweepZone;
+                while (ArenaHeader *arena = zone->allocator.arenas.gcShapeArenasToSweep) {
+                    for (CellIterUnderGC i(arena); !i.done(); i.next()) {
+                        Shape *shape = i.get<Shape>();
+                        if (!shape->isMarked())
+                            shape->sweep();
+                    }
+
+                    zone->allocator.arenas.gcShapeArenasToSweep = arena->next;
+                    sliceBudget.step(Arena::thingsPerArena(Arena::thingSize(FINALIZE_SHAPE)));
+                    if (sliceBudget.isOverBudget())
+                        return false;  /* Yield to the mutator. */
+                }
+            }
         }
 
         EndSweepingZoneGroup(rt);
@@ -3807,7 +3852,7 @@ EndSweepPhase(JSRuntime *rt, JSGCInvocationKind gckind, bool lastGC)
          * script's filename. See bug 323267.
          */
         if (rt->gcIsFull)
-            SweepScriptFilenames(rt);
+            SweepScriptData(rt);
 
         /* Clear out any small pools that we're hanging on to. */
         if (JSC::ExecutableAllocator *execAlloc = rt->maybeExecAlloc())
@@ -3946,11 +3991,10 @@ AutoGCSession::~AutoGCSession()
 #endif
 
     /* Clear gcMallocBytes for all compartments */
-    for (CompartmentsIter c(runtime); !c.done(); c.next())
-        c->resetGCMallocBytes();
-
-    for (ZonesIter zone(runtime); !zone.done(); zone.next())
+    for (ZonesIter zone(runtime); !zone.done(); zone.next()) {
+        zone->resetGCMallocBytes();
         zone->unscheduleGC();
+    }
 
     runtime->resetGCMallocBytes();
 }
@@ -4009,8 +4053,8 @@ ResetIncrementalGC(JSRuntime *rt, const char *reason)
       case SWEEP:
         rt->gcMarker.reset();
 
-        for (CompartmentsIter c(rt); !c.done(); c.next())
-            c->scheduledForDestruction = false;
+        for (ZonesIter zone(rt); !zone.done(); zone.next())
+            zone->scheduledForDestruction = false;
 
         /* Finish sweeping the current zone group, then abort. */
         rt->gcAbortSweepAfterCurrentGroup = true;
@@ -4276,10 +4320,8 @@ BudgetIncrementalGC(JSRuntime *rt, int64_t *budget)
         {
             reset = true;
         }
-    }
 
-    for (CompartmentsIter c(rt); !c.done(); c.next()) {
-        if (c->isTooMuchMalloc()) {
+        if (zone->isTooMuchMalloc()) {
             *budget = SliceBudget::Unlimited;
             rt->gcStats.nonincremental("malloc bytes trigger");
         }
@@ -4299,19 +4341,12 @@ static JS_NEVER_INLINE void
 GCCycle(JSRuntime *rt, bool incremental, int64_t budget, JSGCInvocationKind gckind, gcreason::Reason reason)
 {
     /* If we attempt to invoke the GC while we are running in the GC, assert. */
-    AutoAssertNoGC nogc;
+    JS_ASSERT(!rt->isHeapBusy());
 
 #ifdef DEBUG
     for (ZonesIter zone(rt); !zone.done(); zone.next())
         JS_ASSERT_IF(rt->gcMode == JSGC_MODE_GLOBAL, zone->isGCScheduled());
 #endif
-
-    /*
-     * Don't GC if we are reporting an OOM or in an interactive debugging
-     * session.
-     */
-    if (rt->mainThread.suppressGC)
-        return;
 
     AutoGCSession gcsession(rt);
 
@@ -4378,9 +4413,12 @@ Collect(JSRuntime *rt, bool incremental, int64_t budget,
         JSGCInvocationKind gckind, gcreason::Reason reason)
 {
     /* GC shouldn't be running in parallel execution mode */
-    JS_ASSERT(!ForkJoinSlice::InParallelSection());
+    JS_ASSERT(!InParallelSection());
 
     JS_AbortIfWrongThread(rt);
+
+    if (rt->mainThread.suppressGC)
+        return;
 
 #if JS_TRACE_LOGGING
     AutoTraceLog logger(TraceLogging::defaultLogger(),
@@ -4483,14 +4521,12 @@ Collect(JSRuntime *rt, bool incremental, int64_t budget,
 void
 js::GC(JSRuntime *rt, JSGCInvocationKind gckind, gcreason::Reason reason)
 {
-    AssertCanGC();
     Collect(rt, false, SliceBudget::Unlimited, gckind, reason);
 }
 
 void
 js::GCSlice(JSRuntime *rt, JSGCInvocationKind gckind, gcreason::Reason reason, int64_t millis)
 {
-    AssertCanGC();
     int64_t sliceBudget;
     if (millis)
         sliceBudget = SliceBudget::TimeBudget(millis);
@@ -4505,7 +4541,6 @@ js::GCSlice(JSRuntime *rt, JSGCInvocationKind gckind, gcreason::Reason reason, i
 void
 js::GCFinalSlice(JSRuntime *rt, JSGCInvocationKind gckind, gcreason::Reason reason)
 {
-    AssertCanGC();
     Collect(rt, true, SliceBudget::Unlimited, gckind, reason);
 }
 
@@ -4522,7 +4557,6 @@ ZonesSelected(JSRuntime *rt)
 void
 js::GCDebugSlice(JSRuntime *rt, bool limit, int64_t objCount)
 {
-    AssertCanGC();
     int64_t budget = limit ? SliceBudget::WorkBudget(objCount) : SliceBudget::Unlimited;
     if (!ZonesSelected(rt)) {
         if (IsIncrementalGCInProgress(rt))
@@ -4553,6 +4587,12 @@ JS::ShrinkGCBuffers(JSRuntime *rt)
         rt->gcHelperThread.startBackgroundShrink();
 }
 
+void
+js::gc::FinishBackgroundFinalize(JSRuntime *rt)
+{
+    rt->gcHelperThread.waitBackgroundSweepEnd();
+}
+
 AutoFinishGC::AutoFinishGC(JSRuntime *rt)
 {
     if (IsIncrementalGCInProgress(rt)) {
@@ -4560,7 +4600,7 @@ AutoFinishGC::AutoFinishGC(JSRuntime *rt)
         FinishIncrementalGC(rt, gcreason::API);
     }
 
-    rt->gcHelperThread.waitBackgroundSweepEnd();
+    gc::FinishBackgroundFinalize(rt);
 }
 
 AutoPrepareForTracing::AutoPrepareForTracing(JSRuntime *rt)
@@ -4669,6 +4709,13 @@ gc::SetValidateGC(JSContext *cx, bool enabled)
 {
     JSRuntime *rt = cx->runtime;
     rt->gcValidate = enabled;
+}
+
+void
+gc::SetFullCompartmentChecks(JSContext *cx, bool enabled)
+{
+    JSRuntime *rt = cx->runtime;
+    rt->gcFullCompartmentChecks = enabled;
 }
 
 #ifdef DEBUG
@@ -4882,30 +4929,30 @@ ArenaLists::containsArena(JSRuntime *rt, ArenaHeader *needle)
 }
 
 
-AutoMaybeTouchDeadCompartments::AutoMaybeTouchDeadCompartments(JSContext *cx)
+AutoMaybeTouchDeadZones::AutoMaybeTouchDeadZones(JSContext *cx)
   : runtime(cx->runtime),
-    markCount(runtime->gcObjectsMarkedInDeadCompartments),
+    markCount(runtime->gcObjectsMarkedInDeadZones),
     inIncremental(IsIncrementalGCInProgress(runtime)),
-    manipulatingDeadCompartments(runtime->gcManipulatingDeadCompartments)
+    manipulatingDeadZones(runtime->gcManipulatingDeadZones)
 {
-    runtime->gcManipulatingDeadCompartments = true;
+    runtime->gcManipulatingDeadZones = true;
 }
 
-AutoMaybeTouchDeadCompartments::AutoMaybeTouchDeadCompartments(JSObject *obj)
+AutoMaybeTouchDeadZones::AutoMaybeTouchDeadZones(JSObject *obj)
   : runtime(obj->compartment()->rt),
-    markCount(runtime->gcObjectsMarkedInDeadCompartments),
+    markCount(runtime->gcObjectsMarkedInDeadZones),
     inIncremental(IsIncrementalGCInProgress(runtime)),
-    manipulatingDeadCompartments(runtime->gcManipulatingDeadCompartments)
+    manipulatingDeadZones(runtime->gcManipulatingDeadZones)
 {
-    runtime->gcManipulatingDeadCompartments = true;
+    runtime->gcManipulatingDeadZones = true;
 }
 
-AutoMaybeTouchDeadCompartments::~AutoMaybeTouchDeadCompartments()
+AutoMaybeTouchDeadZones::~AutoMaybeTouchDeadZones()
 {
-    if (inIncremental && runtime->gcObjectsMarkedInDeadCompartments != markCount) {
+    if (inIncremental && runtime->gcObjectsMarkedInDeadZones != markCount) {
         PrepareForFullGC(runtime);
         js::GC(runtime, GC_NORMAL, gcreason::TRANSPLANT);
     }
 
-    runtime->gcManipulatingDeadCompartments = manipulatingDeadCompartments;
+    runtime->gcManipulatingDeadZones = manipulatingDeadZones;
 }

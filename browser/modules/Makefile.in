@@ -11,17 +11,13 @@ include $(DEPTH)/config/autoconf.mk
 
 include $(topsrcdir)/config/config.mk
 
-TEST_DIRS += test
-
 EXTRA_JS_MODULES = \
 	AboutHomeUtils.jsm \
 	BrowserNewTabPreloader.jsm \
 	openLocationLastURL.jsm \
 	NetworkPrioritizer.jsm \
-	NewTabUtils.jsm \
 	offlineAppCache.jsm \
 	SignInToWebsite.jsm \
-	TelemetryTimestamps.jsm \
 	webappsUI.jsm \
 	webrtcUI.jsm \
 	KeywordURLResetPrompter.jsm \

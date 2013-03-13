@@ -801,7 +801,7 @@ jsval InterfaceToJsval(nsPIDOMWindow* aWindow, nsISupports* aObject, const nsIID
     return JSVAL_NULL;
   }
 
-  JSContext *cx = scriptContext->GetNativeContext();
+  AutoPushJSContext cx(scriptContext->GetNativeContext());
   if (!cx) {
     return JSVAL_NULL;
   }
@@ -853,7 +853,7 @@ jsval StringToJsval(nsPIDOMWindow* aWindow, nsAString& aString)
     return JSVAL_NULL;
   }
 
-  JSContext *cx = scriptContext->GetNativeContext();
+  AutoPushJSContext cx(scriptContext->GetNativeContext());
   if (!cx) {
     return JSVAL_NULL;
   }
@@ -1818,11 +1818,9 @@ NS_IMPL_CYCLE_COLLECTION_5(DeviceStorageRequest,
                            mListener)
 
 
-NS_IMPL_CYCLE_COLLECTION_INHERITED_0(nsDOMDeviceStorage, nsDOMEventTargetHelper)
-
 DOMCI_DATA(DeviceStorage, nsDOMDeviceStorage)
 
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION_INHERITED(nsDOMDeviceStorage)
+NS_INTERFACE_MAP_BEGIN(nsDOMDeviceStorage)
   NS_INTERFACE_MAP_ENTRY(nsIDOMDeviceStorage)
   NS_INTERFACE_MAP_ENTRY(nsIObserver)
   NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(DeviceStorage)
@@ -1839,6 +1837,9 @@ nsDOMDeviceStorage::nsDOMDeviceStorage()
 nsresult
 nsDOMDeviceStorage::Init(nsPIDOMWindow* aWindow, const nsAString &aType)
 {
+  DebugOnly<FileUpdateDispatcher*> observer = FileUpdateDispatcher::GetSingleton();
+  NS_ASSERTION(observer, "FileUpdateDispatcher is null");
+
   NS_ASSERTION(aWindow, "Must have a content dom");
 
   SetRootDirectoryForType(aType);
@@ -2163,7 +2164,7 @@ static PRTime
 ExtractDateFromOptions(JSContext* aCx, const JS::Value& aOptions)
 {
   PRTime result = 0;
-  DeviceStorageEnumerationParameters params;
+  mozilla::idl::DeviceStorageEnumerationParameters params;
   if (!JSVAL_IS_VOID(aOptions) && !aOptions.isNull()) {
     nsresult rv = params.Init(aCx, &aOptions);
     if (NS_SUCCEEDED(rv) && !JSVAL_IS_VOID(params.since) && !params.since.isNull() && params.since.isObject()) {
@@ -2262,7 +2263,7 @@ void
 nsDOMDeviceStorage::DispatchMountChangeEvent(nsAString& aType)
 {
   nsCOMPtr<nsIDOMEvent> event;
-  NS_NewDOMDeviceStorageChangeEvent(getter_AddRefs(event), nullptr, nullptr);
+  NS_NewDOMDeviceStorageChangeEvent(getter_AddRefs(event), this, nullptr, nullptr);
 
   nsCOMPtr<nsIDOMDeviceStorageChangeEvent> ce = do_QueryInterface(event);
   nsresult rv = ce->InitDeviceStorageChangeEvent(NS_LITERAL_STRING("change"),
@@ -2358,7 +2359,8 @@ nsDOMDeviceStorage::Notify(const char* aReason, DeviceStorageFile* aFile)
   nsDependentSubstring newPath (fullpath, len, fullpath.Length() - len);
 
   nsCOMPtr<nsIDOMEvent> event;
-  NS_NewDOMDeviceStorageChangeEvent(getter_AddRefs(event), nullptr, nullptr);
+  NS_NewDOMDeviceStorageChangeEvent(getter_AddRefs(event), this,
+                                    nullptr, nullptr);
 
   nsCOMPtr<nsIDOMDeviceStorageChangeEvent> ce = do_QueryInterface(event);
 

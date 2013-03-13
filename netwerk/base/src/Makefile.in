@@ -14,9 +14,7 @@ include $(DEPTH)/config/autoconf.mk
 MODULE		= necko
 LIBRARY_NAME	= neckobase_s
 LIBXUL_LIBRARY  = 1
-ifndef _MSC_VER
 FAIL_ON_WARNINGS := 1
-endif # !_MSC_VER
 
 EXPORTS = \
 		nsMIMEInputStream.h \
@@ -62,6 +60,7 @@ CPPSRCS		= \
 		nsSocketTransport2.cpp \
 		nsSocketTransportService2.cpp \
 		nsServerSocket.cpp \
+		nsUDPServerSocket.cpp \
 		nsStreamListenerTee.cpp \
 		nsStreamLoader.cpp \
 		nsSyncStreamListener.cpp \
@@ -81,6 +80,12 @@ CPPSRCS		= \
 		Dashboard.cpp \
 		NetworkActivityMonitor.cpp \
 		$(NULL)
+
+ifdef MOZ_MEDIA
+CPPSRCS		+= \
+		nsMediaFragmentURIParser.cpp \
+		$(NULL)
+endif
 
 LOCAL_INCLUDES	+= -I$(topsrcdir)/dom/base
 

@@ -14,7 +14,7 @@
 #include "nsGkAtoms.h"
 #include "nsFrameManager.h"
 #include "nsIDOMNode.h"
-#include "nsIDOMNamedNodeMap.h"
+#include "nsIDOMMozNamedAttrMap.h"
 #include "nsIDOMAttr.h"
 #include "nsITheme.h"
 #include "nsIServiceManager.h"
@@ -67,20 +67,19 @@ nsBox::ListBox(nsAutoString& aResult)
     // add on all the set attributes
     if (content) {
       nsCOMPtr<nsIDOMNode> node(do_QueryInterface(content));
-      nsCOMPtr<nsIDOMNamedNodeMap> namedMap;
+      nsCOMPtr<nsIDOMMozNamedAttrMap> namedMap;
 
       node->GetAttributes(getter_AddRefs(namedMap));
       uint32_t length;
       namedMap->GetLength(&length);
 
-      nsCOMPtr<nsIDOMNode> attribute;
+      nsCOMPtr<nsIDOMAttr> attribute;
       for (uint32_t i = 0; i < length; ++i)
       {
         namedMap->Item(i, getter_AddRefs(attribute));
-        nsCOMPtr<nsIDOMAttr> attr(do_QueryInterface(attribute));
-        attr->GetName(name);
+        attribute->GetName(name);
         nsAutoString value;
-        attr->GetValue(value);
+        attribute->GetValue(value);
         AppendAttribute(name, value, aResult);
       }
     }
@@ -308,7 +307,7 @@ nsBox::GetBorder(nsMargin& aMargin)
 {
   aMargin.SizeTo(0,0,0,0);
     
-  const nsStyleDisplay* disp = GetStyleDisplay();
+  const nsStyleDisplay* disp = StyleDisplay();
   if (disp->mAppearance && gTheme) {
     // Go to the theme for the border.
     nsPresContext *context = PresContext();
@@ -324,7 +323,7 @@ nsBox::GetBorder(nsMargin& aMargin)
     }
   }
 
-  aMargin = GetStyleBorder()->GetComputedBorder();
+  aMargin = StyleBorder()->GetComputedBorder();
 
   return NS_OK;
 }
@@ -332,7 +331,7 @@ nsBox::GetBorder(nsMargin& aMargin)
 NS_IMETHODIMP
 nsBox::GetPadding(nsMargin& aMargin)
 {
-  const nsStyleDisplay *disp = GetStyleDisplay();
+  const nsStyleDisplay *disp = StyleDisplay();
   if (disp->mAppearance && gTheme) {
     // Go to the theme for the padding.
     nsPresContext *context = PresContext();
@@ -354,7 +353,7 @@ nsBox::GetPadding(nsMargin& aMargin)
   }
 
   aMargin.SizeTo(0,0,0,0);
-  GetStylePadding()->GetPadding(aMargin);
+  StylePadding()->GetPadding(aMargin);
 
   return NS_OK;
 }
@@ -363,7 +362,7 @@ NS_IMETHODIMP
 nsBox::GetMargin(nsMargin& aMargin)
 {
   aMargin.SizeTo(0,0,0,0);
-  GetStyleMargin()->GetMargin(aMargin);
+  StyleMargin()->GetMargin(aMargin);
 
   return NS_OK;
 }
@@ -466,7 +465,7 @@ nsBox::GetFlex(nsBoxLayoutState& aState)
 uint32_t
 nsIFrame::GetOrdinal()
 {
-  uint32_t ordinal = GetStyleXUL()->mBoxOrdinal;
+  uint32_t ordinal = StyleXUL()->mBoxOrdinal;
 
   // When present, attribute value overrides CSS.
   nsIContent* content = GetContent();
@@ -495,7 +494,7 @@ nsBox::GetBoxAscent(nsBoxLayoutState& aState)
 bool
 nsBox::IsCollapsed()
 {
-  return GetStyleVisibility()->mVisible == NS_STYLE_VISIBILITY_COLLAPSE;
+  return StyleVisibility()->mVisible == NS_STYLE_VISIBILITY_COLLAPSE;
 }
 
 nsresult
@@ -518,7 +517,7 @@ nsIFrame::Layout(nsBoxLayoutState& aState)
 bool
 nsBox::DoesClipChildren()
 {
-  const nsStyleDisplay* display = GetStyleDisplay();
+  const nsStyleDisplay* display = StyleDisplay();
   NS_ASSERTION((display->mOverflowY == NS_STYLE_OVERFLOW_CLIP) ==
                (display->mOverflowX == NS_STYLE_OVERFLOW_CLIP),
                "If one overflow is clip, the other should be too");
@@ -603,7 +602,7 @@ nsIFrame::AddCSSPrefSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &a
     aHeightSet = false;
 
     // add in the css min, max, pref
-    const nsStylePosition* position = aBox->GetStylePosition();
+    const nsStylePosition* position = aBox->StylePosition();
 
     // see if the width or height was specifically set
     // XXX Handle eStyleUnit_Enumerated?
@@ -679,7 +678,7 @@ nsIFrame::AddCSSMinSize(nsBoxLayoutState& aState, nsIFrame* aBox, nsSize& aSize,
     bool canOverride = true;
 
     // See if a native theme wants to supply a minimum size.
-    const nsStyleDisplay* display = aBox->GetStyleDisplay();
+    const nsStyleDisplay* display = aBox->StyleDisplay();
     if (display->mAppearance) {
       nsITheme *theme = aState.PresContext()->GetTheme();
       if (theme && theme->ThemeSupportsWidget(aState.PresContext(), aBox, display->mAppearance)) {
@@ -701,7 +700,7 @@ nsIFrame::AddCSSMinSize(nsBoxLayoutState& aState, nsIFrame* aBox, nsSize& aSize,
     }
 
     // add in the css min, max, pref
-    const nsStylePosition* position = aBox->GetStylePosition();
+    const nsStylePosition* position = aBox->StylePosition();
 
     // same for min size. Unfortunately min size is always set to 0. So for now
     // we will assume 0 (as a coord) means not set.
@@ -786,7 +785,7 @@ nsIFrame::AddCSSMaxSize(nsIFrame* aBox, nsSize& aSize, bool &aWidthSet, bool &aH
     aHeightSet = false;
 
     // add in the css min, max, pref
-    const nsStylePosition* position = aBox->GetStylePosition();
+    const nsStylePosition* position = aBox->StylePosition();
 
     // and max
     // see if the width or height was specifically set
@@ -844,7 +843,7 @@ nsIFrame::AddCSSFlex(nsBoxLayoutState& aState, nsIFrame* aBox, nscoord& aFlex)
     bool flexSet = false;
 
     // get the flexibility
-    aFlex = aBox->GetStyleXUL()->mBoxFlex;
+    aFlex = aBox->StyleXUL()->mBoxFlex;
 
     // attribute value overrides CSS
     nsIContent* content = aBox->GetContent();

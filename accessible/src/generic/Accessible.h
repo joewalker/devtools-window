@@ -46,6 +46,7 @@ class Relation;
 class TableAccessible;
 class TableCellAccessible;
 class TextLeafAccessible;
+class XULLabelAccessible;
 class XULTreeAccessible;
 
 /**
@@ -487,6 +488,7 @@ public:
   bool IsHTMLListItem() const { return mType == eHTMLLiType; }
   HTMLLIAccessible* AsHTMLListItem();
 
+  bool IsHTMLTable() const { return mType == eHTMLTableType; }
   bool IsHTMLTableRow() const { return mType == eHTMLTableRowType; }
 
   bool IsImage() const { return mType == eImageType; }
@@ -514,11 +516,16 @@ public:
   virtual TableAccessible* AsTable() { return nullptr; }
 
   virtual TableCellAccessible* AsTableCell() { return nullptr; }
+  const TableCellAccessible* AsTableCell() const
+    { return const_cast<Accessible*>(this)->AsTableCell(); }
 
   bool IsTableRow() const { return HasGenericType(eTableRow); }
 
   bool IsTextLeaf() const { return mType == eTextLeafType; }
   TextLeafAccessible* AsTextLeaf();
+
+  bool IsXULLabel() const { return mType == eXULLabelType; }
+  XULLabelAccessible* AsXULLabel();
 
   bool IsXULTabpanels() const { return mType == eXULTabpanelsType; }
 
@@ -889,7 +896,7 @@ protected:
 
   static const uint8_t kChildrenFlagsBits = 2;
   static const uint8_t kStateFlagsBits = 5;
-  static const uint8_t kTypeBits = 5;
+  static const uint8_t kTypeBits = 6;
   static const uint8_t kGenericTypesBits = 12;
 
   /**

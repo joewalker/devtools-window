@@ -12,13 +12,31 @@
 #include <assert.h>
 #include <commctrl.h>
 #include <windowsx.h>
+#include <algorithm>
 #include <sstream>
+#include <vector>
 
 namespace mozilla {
 namespace plugins {
 
+struct WinInfo
+{
+  WinInfo(HWND aHwnd, POINT& aPos, SIZE& aSize)
+    :hwnd(aHwnd)
+  {
+    pos.x = aPos.x;
+    pos.y = aPos.y;
+    size.cx = aSize.cx;
+    size.cy = aSize.cy;
+  }
+  HWND  hwnd;
+  POINT pos;
+  SIZE  size;
+};
+typedef std::vector<WinInfo> WinInfoVec;
+
 PluginHangUIChild* PluginHangUIChild::sSelf = nullptr;
-const int PluginHangUIChild::kExpectedMinimumArgc = 9;
+const int PluginHangUIChild::kExpectedMinimumArgc = 10;
 const DWORD PluginHangUIChild::kProcessTimeout = 1200000U;
 const DWORD PluginHangUIChild::kShmTimeout = 5000U;
 
@@ -68,6 +86,18 @@ PluginHangUIChild::Init(int aArgc, wchar_t* aArgv[])
   if (!issProc) {
     return false;
   }
+  // Only set the App User Model ID if it's present in the args
+  if (wcscmp(aArgv[++i], L"-")) {
+    HMODULE shell32 = LoadLibrary(L"shell32.dll");
+    if (shell32) {
+      SETAPPUSERMODELID fSetAppUserModelID = (SETAPPUSERMODELID)
+        GetProcAddress(shell32, "SetCurrentProcessExplicitAppUserModelID");
+      if (fSetAppUserModelID) {
+        fSetAppUserModelID(aArgv[i]);
+      }
+      FreeLibrary(shell32);
+    }
+  }
 
   nsresult rv = mMiniShm.Init(this,
                               std::wstring(aArgv[++i]),
@@ -112,6 +142,95 @@ PluginHangUIChild::SHangUIDlgProc(HWND aDlgHandle, UINT aMsgCode,
   return FALSE;
 }
 
+void
+PluginHangUIChild::ResizeButtons()
+{
+  // Control IDs are specified right-to-left as they appear in the dialog
+  UINT ids[] = { IDC_STOP, IDC_CONTINUE };
+  UINT numIds = sizeof(ids)/sizeof(ids[0]);
+
+  // Pass 1: Compute the ideal size
+  bool needResizing = false;
+  SIZE idealSize = {0};
+  WinInfoVec winInfo;
+  for (UINT i = 0; i < numIds; ++i) {
+    HWND wnd = GetDlgItem(mDlgHandle, ids[i]);
+    if (!wnd) {
+      return;
+    }
+
+    // Get the button's dimensions in screen coordinates
+    RECT curRect;
+    if (!GetWindowRect(wnd, &curRect)) {
+      return;
+    }
+
+    // Get (x,y) position of the button in client coordinates
+    POINT pt;
+    pt.x = curRect.left;
+    pt.y = curRect.top;
+    if (!ScreenToClient(mDlgHandle, &pt)) {
+      return;
+    }
+
+    // Request the button's text margins
+    RECT margins;
+    if (!Button_GetTextMargin(wnd, &margins)) {
+      return;
+    }
+
+    // Compute the button's width and height
+    SIZE curSize;
+    curSize.cx = curRect.right - curRect.left;
+    curSize.cy = curRect.bottom - curRect.top;
+
+    // Request the button's ideal width and height and add in the margins
+    SIZE size = {0};
+    if (!Button_GetIdealSize(wnd, &size)) {
+      return;
+    }
+    size.cx += margins.left + margins.right;
+    size.cy += margins.top + margins.bottom;
+
+    // Size all buttons to be the same width as the longest button encountered
+    idealSize.cx = std::max(idealSize.cx, size.cx);
+    idealSize.cy = std::max(idealSize.cy, size.cy);
+
+    // We won't bother resizing unless we need extra space
+    if (idealSize.cx > curSize.cx) {
+      needResizing = true;
+    }
+
+    // Save the relevant info for the resize, if any. We do this even if 
+    // needResizing is false because another button may trigger a resize later.
+    winInfo.push_back(WinInfo(wnd, pt, curSize));
+  }
+
+  if (!needResizing) {
+    return;
+  }
+
+  // Pass 2: Resize the windows
+  int deltaX = 0;
+  HDWP hwp = BeginDeferWindowPos((int) winInfo.size());
+  if (!hwp) {
+    return;
+  }
+  for (WinInfoVec::const_iterator itr = winInfo.begin();
+       itr != winInfo.end(); ++itr) {
+    // deltaX accumulates the size changes so that each button's x coordinate 
+    // can compensate for the width increases
+    deltaX += idealSize.cx - itr->size.cx;
+    hwp = DeferWindowPos(hwp, itr->hwnd, NULL, itr->pos.x - deltaX, itr->pos.y,
+                         idealSize.cx, itr->size.cy,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+    if (!hwp) {
+      return;
+    }
+  }
+  EndDeferWindowPos(hwp);
+}
+
 INT_PTR
 PluginHangUIChild::HangUIDlgProc(HWND aDlgHandle, UINT aMsgCode, WPARAM aWParam,
                                  LPARAM aLParam)
@@ -119,10 +238,6 @@ PluginHangUIChild::HangUIDlgProc(HWND aDlgHandle, UINT aMsgCode, WPARAM aWParam,
   mDlgHandle = aDlgHandle;
   switch (aMsgCode) {
     case WM_INITDIALOG: {
-      // Disentangle our input queue from the hung Firefox process
-      AttachThreadInput(GetCurrentThreadId(),
-                        GetWindowThreadProcessId(mParentWindow, nullptr),
-                        FALSE);
       // Register a wait on the Firefox process so that we will be informed
       // if it dies while the dialog is showing
       RegisterWaitForSingleObject(&mRegWaitProcess,
@@ -136,16 +251,19 @@ PluginHangUIChild::HangUIDlgProc(HWND aDlgHandle, UINT aMsgCode, WPARAM aWParam,
       SetDlgItemText(aDlgHandle, IDC_NOFUTURE, mNoFutureText);
       SetDlgItemText(aDlgHandle, IDC_CONTINUE, mWaitBtnText);
       SetDlgItemText(aDlgHandle, IDC_STOP, mKillBtnText);
+      ResizeButtons();
       HANDLE icon = LoadImage(NULL, IDI_QUESTION, IMAGE_ICON, 0, 0,
                               LR_DEFAULTSIZE | LR_SHARED);
       if (icon) {
         SendDlgItemMessage(aDlgHandle, IDC_DLGICON, STM_SETICON, (WPARAM)icon, 0);
       }
+      EnableWindow(mParentWindow, FALSE);
       return TRUE;
     }
     case WM_CLOSE: {
       mResponseBits |= HANGUI_USER_RESPONSE_CANCEL;
       EndDialog(aDlgHandle, 0);
+      SetWindowLongPtr(aDlgHandle, DWLP_MSGRESULT, 0);
       return TRUE;
     }
     case WM_COMMAND: {
@@ -154,6 +272,7 @@ PluginHangUIChild::HangUIDlgProc(HWND aDlgHandle, UINT aMsgCode, WPARAM aWParam,
           if (HIWORD(aWParam) == BN_CLICKED) {
             mResponseBits |= HANGUI_USER_RESPONSE_CONTINUE;
             EndDialog(aDlgHandle, 1);
+            SetWindowLongPtr(aDlgHandle, DWLP_MSGRESULT, 0);
             return TRUE;
           }
           break;
@@ -161,6 +280,7 @@ PluginHangUIChild::HangUIDlgProc(HWND aDlgHandle, UINT aMsgCode, WPARAM aWParam,
           if (HIWORD(aWParam) == BN_CLICKED) {
             mResponseBits |= HANGUI_USER_RESPONSE_STOP;
             EndDialog(aDlgHandle, 1);
+            SetWindowLongPtr(aDlgHandle, DWLP_MSGRESULT, 0);
             return TRUE;
           }
           break;
@@ -173,16 +293,23 @@ PluginHangUIChild::HangUIDlgProc(HWND aDlgHandle, UINT aMsgCode, WPARAM aWParam,
               mResponseBits &=
                 ~static_cast<DWORD>(HANGUI_USER_RESPONSE_DONT_SHOW_AGAIN);
             }
+            SetWindowLongPtr(aDlgHandle, DWLP_MSGRESULT, 0);
             return TRUE;
           }
+          break;
         default:
           break;
       }
-      return FALSE;
+      break;
+    }
+    case WM_DESTROY: {
+      EnableWindow(mParentWindow, TRUE);
+      break;
     }
     default:
-      return FALSE;
+      break;
   }
+  return FALSE;
 }
 
 // static
@@ -207,7 +334,7 @@ PluginHangUIChild::Show()
 {
   INT_PTR dlgResult = DialogBox(GetModuleHandle(NULL),
                                 MAKEINTRESOURCE(IDD_HANGUIDLG),
-                                mParentWindow,
+                                NULL,
                                 &SHangUIDlgProc);
   mDlgHandle = NULL;
   assert(dlgResult != -1);

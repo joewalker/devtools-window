@@ -22,11 +22,12 @@ extern PRLogModuleInfo* GetDataChannelLog();
 #include "nsIDOMFile.h"
 #include "nsIJSNativeInitializer.h"
 #include "nsIDOMDataChannel.h"
+#include "nsIDOMRTCPeerConnection.h"
 #include "nsIDOMMessageEvent.h"
 #include "nsDOMClassInfo.h"
 #include "nsDOMEventTargetHelper.h"
 
-#include "jsval.h"
+#include "js/Value.h"
 
 #include "nsError.h"
 #include "nsAutoPtr.h"
@@ -44,6 +45,8 @@ extern PRLogModuleInfo* GetDataChannelLog();
 #undef GetBinaryType
 #endif
 
+using namespace mozilla;
+
 class nsDOMDataChannel : public nsDOMEventTargetHelper,
                          public nsIDOMDataChannel,
                          public mozilla::DataChannelListener
@@ -53,6 +56,14 @@ public:
     : mDataChannel(aDataChannel)
     , mBinaryType(DC_BINARY_TYPE_BLOB)
   {}
+
+  ~nsDOMDataChannel()
+  {
+    // Don't call us anymore!  Likely isn't an issue (or maybe just less of
+    // one) once we block GC until all the (appropriate) onXxxx handlers
+    // are dropped. (See WebRTC spec)
+    mDataChannel->SetListener(nullptr, nullptr);
+  }
 
   nsresult Init(nsPIDOMWindow* aDOMWindow);
 
@@ -101,6 +112,11 @@ private:
 };
 
 DOMCI_DATA(DataChannel, nsDOMDataChannel)
+// A bit of a hack for RTCPeerConnection, since it doesn't have a .cpp file of
+// its own.  Note that it's not castable to anything in particular other than
+// nsIDOMRTCPeerConnection, so we can just use nsIDOMRTCPeerConnection as the
+// "class".
+DOMCI_DATA(RTCPeerConnection, nsIDOMRTCPeerConnection)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(nsDOMDataChannel,
                                                   nsDOMEventTargetHelper)
@@ -379,7 +395,7 @@ nsDOMDataChannel::DoOnMessageAvailable(const nsACString& aData,
   nsIScriptContext* sc = sgo->GetContext();
   NS_ENSURE_TRUE(sc, NS_ERROR_FAILURE);
 
-  JSContext* cx = sc->GetNativeContext();
+  AutoPushJSContext cx(sc->GetNativeContext());
   NS_ENSURE_TRUE(cx, NS_ERROR_FAILURE);
 
   JSAutoRequest ar(cx);
@@ -407,7 +423,7 @@ nsDOMDataChannel::DoOnMessageAvailable(const nsACString& aData,
   }
 
   nsCOMPtr<nsIDOMEvent> event;
-  rv = NS_NewDOMMessageEvent(getter_AddRefs(event), nullptr, nullptr);
+  rv = NS_NewDOMMessageEvent(getter_AddRefs(event), this, nullptr, nullptr);
   NS_ENSURE_SUCCESS(rv,rv);
 
   nsCOMPtr<nsIDOMMessageEvent> messageEvent = do_QueryInterface(event);
@@ -453,7 +469,7 @@ nsDOMDataChannel::OnSimpleEvent(nsISupports* aContext, const nsAString& aName)
   }
 
   nsCOMPtr<nsIDOMEvent> event;
-  rv = NS_NewDOMEvent(getter_AddRefs(event), nullptr, nullptr);
+  rv = NS_NewDOMEvent(getter_AddRefs(event), this, nullptr, nullptr);
   NS_ENSURE_SUCCESS(rv,rv);
 
   rv = event->InitEvent(aName, false, false);

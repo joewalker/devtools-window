@@ -174,8 +174,6 @@ public class TabsProvider extends ContentProvider {
             debug("Upgrading tabs.db: " + db.getPath() + " from " +
                     oldVersion + " to " + newVersion);
 
-            db.beginTransaction();
-
             // We have to do incremental upgrades until we reach the current
             // database schema version.
             for (int v = oldVersion + 1; v <= newVersion; v++) {
@@ -185,14 +183,19 @@ public class TabsProvider extends ContentProvider {
                         break;
                  }
              }
-
-             db.setTransactionSuccessful();
-             db.endTransaction();
         }
 
         @Override
         public void onOpen(SQLiteDatabase db) {
             debug("Opening tabs.db: " + db.getPath());
+
+            Cursor cursor = null;
+            try {
+                cursor = db.rawQuery("PRAGMA synchronous=OFF", null);
+            } finally {
+                if (cursor != null)
+                    cursor.close();
+            }
 
             // From Honeycomb on, it's possible to run several db
             // commands in parallel using multiple connections.
@@ -200,13 +203,6 @@ public class TabsProvider extends ContentProvider {
                 db.enableWriteAheadLogging();
             } else {
                 // Pre-Honeycomb, we can do some lesser optimizations.
-                Cursor cursor = null;
-                try {
-                    cursor = db.rawQuery("PRAGMA synchronous=NORMAL", null);
-                } finally {
-                    if (cursor != null)
-                        cursor.close();
-                }
                 cursor = null;
                 try {
                     cursor = db.rawQuery("PRAGMA journal_mode=PERSIST", null);
@@ -299,6 +295,7 @@ public class TabsProvider extends ContentProvider {
         debug("Creating TabsProvider");
 
         GeckoBackgroundThread.post(new Runnable() {
+            @Override
             public void run() {
                 // Kick this off early. It is synchronized so that other callers will wait
                 try {

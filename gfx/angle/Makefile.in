@@ -56,6 +56,7 @@ DEFINES += -DCOMPILER_IMPLEMENTATION
 VPATH += $(srcdir)/src/compiler
 # src/compiler:
 CPPSRCS += \
+  ArrayBoundsClamper.cpp \
   BuiltInFunctionEmulator.cpp \
   Compiler.cpp \
   compiler_debug.cpp \
@@ -128,9 +129,6 @@ CPPSRCS += \
 # src/libGLESv2/Makefile.in
 
 ifdef MOZ_ANGLE_RENDERER
-
-# libEGL depends on (links against!) libGLESv2!
-DIRS = src/libGLESv2 src/libEGL
 
 libs::
 ifdef MOZ_D3DCOMPILER_CAB

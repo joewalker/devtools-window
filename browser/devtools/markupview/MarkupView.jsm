@@ -121,8 +121,7 @@ MarkupView.prototype = {
           return Ci.nsIDOMNodeFilter.FILTER_ACCEPT;
         }
         return Ci.nsIDOMNodeFilter.FILTER_SKIP;
-      },
-      false
+      }
     );
     walker.currentNode = this._selectedContainer.elt;
     return walker;
@@ -150,10 +149,24 @@ MarkupView.prototype = {
         this.navigate(this._containers.get(this._rootNode.firstChild));
         break;
       case Ci.nsIDOMKeyEvent.DOM_VK_LEFT:
-        this.collapseNode(this._selectedContainer.node);
+        if (this._selectedContainer.expanded) {
+          this.collapseNode(this._selectedContainer.node);
+        } else {
+          let parent = this._selectionWalker().parentNode();
+          if (parent) {
+            this.navigate(parent.container);
+          }
+        }
         break;
       case Ci.nsIDOMKeyEvent.DOM_VK_RIGHT:
-        this.expandNode(this._selectedContainer.node);
+        if (!this._selectedContainer.expanded) {
+          this.expandNode(this._selectedContainer.node);
+        } else {
+          let next = this._selectionWalker().nextNode();
+          if (next) {
+            this.navigate(next.container);
+          }
+        }
         break;
       case Ci.nsIDOMKeyEvent.DOM_VK_UP:
         let prev = this._selectionWalker().previousNode();
@@ -631,7 +644,7 @@ MarkupView.prototype = {
     delete this._boundFocus;
 
     this._frame.contentWindow.removeEventListener("scroll", this._boundUpdatePreview, true);
-    this._frame.contentWindow.removeEventListener("resize", this._boundUpdatePreview, true);
+    this._frame.contentWindow.removeEventListener("resize", this._boundResizePreview, true);
     this._frame.contentWindow.removeEventListener("overflow", this._boundResizePreview, true);
     this._frame.contentWindow.removeEventListener("underflow", this._boundResizePreview, true);
     delete this._boundUpdatePreview;
@@ -1084,7 +1097,7 @@ ElementEditor.prototype = {
 
   _createAttribute: function EE_createAttribute(aAttr, aBefore)
   {
-    if (aAttr.name in this.attrs) {
+    if (this.attrs.indexOf(aAttr.name) !== -1) {
       var attr = this.attrs[aAttr.name];
       var name = attr.querySelector(".attrname");
       var val = attr.querySelector(".attrvalue");
@@ -1316,7 +1329,7 @@ RootContainer.prototype = {
 };
 
 function documentWalker(node) {
-  return new DocumentWalker(node, Ci.nsIDOMNodeFilter.SHOW_ALL, whitespaceTextFilter, false);
+  return new DocumentWalker(node, Ci.nsIDOMNodeFilter.SHOW_ALL, whitespaceTextFilter);
 }
 
 function nodeDocument(node) {
@@ -1329,11 +1342,10 @@ function nodeDocument(node) {
  *
  * See TreeWalker documentation for explanations of the methods.
  */
-function DocumentWalker(aNode, aShow, aFilter, aExpandEntityReferences)
+function DocumentWalker(aNode, aShow, aFilter)
 {
   let doc = nodeDocument(aNode);
-  this.walker = doc.createTreeWalker(nodeDocument(aNode),
-    aShow, aFilter, aExpandEntityReferences);
+  this.walker = doc.createTreeWalker(nodeDocument(aNode), aShow, aFilter);
   this.walker.currentNode = aNode;
   this.filter = aFilter;
 }

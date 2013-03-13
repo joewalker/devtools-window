@@ -29,12 +29,24 @@
 #include "js/Vector.h"
 #include "js/TemplateLib.h"
 
+struct JSAtom;
 struct JSCompartment;
+struct JSFunction;
+struct JSFlatString;
+struct JSLinearString;
 
 namespace js {
 
+class ArgumentsObject;
+class ArrayBufferObject;
+class BaseShape;
+class DebugScopeObject;
 class GCHelperThread;
+class GlobalObject;
+class PropertyName;
+class ScopeObject;
 class Shape;
+class UnownedBaseShape;
 struct SliceBudget;
 
 enum HeapState {
@@ -117,6 +129,26 @@ MapAllocToTraceKind(AllocKind kind)
     return map[kind];
 }
 
+template <typename T> struct MapTypeToTraceKind {};
+template <> struct MapTypeToTraceKind<JSObject>         { const static JSGCTraceKind kind = JSTRACE_OBJECT; };
+template <> struct MapTypeToTraceKind<JSFunction>       { const static JSGCTraceKind kind = JSTRACE_OBJECT; };
+template <> struct MapTypeToTraceKind<ArgumentsObject>  { const static JSGCTraceKind kind = JSTRACE_OBJECT; };
+template <> struct MapTypeToTraceKind<ArrayBufferObject>{ const static JSGCTraceKind kind = JSTRACE_OBJECT; };
+template <> struct MapTypeToTraceKind<DebugScopeObject> { const static JSGCTraceKind kind = JSTRACE_OBJECT; };
+template <> struct MapTypeToTraceKind<GlobalObject>     { const static JSGCTraceKind kind = JSTRACE_OBJECT; };
+template <> struct MapTypeToTraceKind<ScopeObject>      { const static JSGCTraceKind kind = JSTRACE_OBJECT; };
+template <> struct MapTypeToTraceKind<JSScript>         { const static JSGCTraceKind kind = JSTRACE_SCRIPT; };
+template <> struct MapTypeToTraceKind<Shape>            { const static JSGCTraceKind kind = JSTRACE_SHAPE; };
+template <> struct MapTypeToTraceKind<BaseShape>        { const static JSGCTraceKind kind = JSTRACE_BASE_SHAPE; };
+template <> struct MapTypeToTraceKind<UnownedBaseShape> { const static JSGCTraceKind kind = JSTRACE_BASE_SHAPE; };
+template <> struct MapTypeToTraceKind<types::TypeObject>{ const static JSGCTraceKind kind = JSTRACE_TYPE_OBJECT; };
+template <> struct MapTypeToTraceKind<JSAtom>           { const static JSGCTraceKind kind = JSTRACE_STRING; };
+template <> struct MapTypeToTraceKind<JSString>         { const static JSGCTraceKind kind = JSTRACE_STRING; };
+template <> struct MapTypeToTraceKind<JSFlatString>     { const static JSGCTraceKind kind = JSTRACE_STRING; };
+template <> struct MapTypeToTraceKind<JSLinearString>   { const static JSGCTraceKind kind = JSTRACE_STRING; };
+template <> struct MapTypeToTraceKind<PropertyName>     { const static JSGCTraceKind kind = JSTRACE_STRING; };
+template <> struct MapTypeToTraceKind<ion::IonCode>     { const static JSGCTraceKind kind = JSTRACE_IONCODE; };
+
 #ifdef JSGC_GENERATIONAL
 static inline bool
 IsNurseryAllocable(AllocKind kind)
@@ -139,8 +171,8 @@ IsNurseryAllocable(AllocKind kind)
         false,     /* FINALIZE_SHAPE */
         false,     /* FINALIZE_BASE_SHAPE */
         false,     /* FINALIZE_TYPE_OBJECT */
-        true,      /* FINALIZE_SHORT_STRING */
-        true,      /* FINALIZE_STRING */
+        false,     /* FINALIZE_SHORT_STRING */
+        false,     /* FINALIZE_STRING */
         false,     /* FINALIZE_EXTERNAL_STRING */
         false,     /* FINALIZE_IONCODE */
     };
@@ -167,9 +199,9 @@ IsBackgroundFinalized(AllocKind kind)
         false,     /* FINALIZE_OBJECT16 */
         true,      /* FINALIZE_OBJECT16_BACKGROUND */
         false,     /* FINALIZE_SCRIPT */
-        false,     /* FINALIZE_SHAPE */
-        false,     /* FINALIZE_BASE_SHAPE */
-        false,     /* FINALIZE_TYPE_OBJECT */
+        true,      /* FINALIZE_SHAPE */
+        true,      /* FINALIZE_BASE_SHAPE */
+        true,      /* FINALIZE_TYPE_OBJECT */
         true,      /* FINALIZE_SHORT_STRING */
         true,      /* FINALIZE_STRING */
         false,     /* FINALIZE_EXTERNAL_STRING */
@@ -253,6 +285,9 @@ struct ArenaLists {
     /* For each arena kind, a list of arenas remaining to be swept. */
     ArenaHeader *arenaListsToSweep[FINALIZE_LIMIT];
 
+    /* Shape areneas to be swept in the foreground. */
+    ArenaHeader *gcShapeArenasToSweep;
+
   public:
     ArenaLists() {
         for (size_t i = 0; i != FINALIZE_LIMIT; ++i)
@@ -261,6 +296,7 @@ struct ArenaLists {
             backgroundFinalizeState[i] = BFS_DONE;
         for (size_t i = 0; i != FINALIZE_LIMIT; ++i)
             arenaListsToSweep[i] = NULL;
+        gcShapeArenasToSweep = NULL;
     }
 
     ~ArenaLists() {
@@ -276,6 +312,11 @@ struct ArenaLists {
                 aheader->chunk()->releaseArena(aheader);
             }
         }
+    }
+
+    static uintptr_t getFreeListOffset(AllocKind thingKind) {
+        uintptr_t offset = offsetof(ArenaLists, freeLists);
+        return offset + thingKind * sizeof(FreeSpan);
     }
 
     const FreeSpan *getFreeList(AllocKind thingKind) const {
@@ -323,6 +364,10 @@ struct ArenaLists {
     bool doneBackgroundFinalize(AllocKind kind) const {
         return backgroundFinalizeState[kind] == BFS_DONE ||
                backgroundFinalizeState[kind] == BFS_JUST_FINISHED;
+    }
+
+    bool needBackgroundFinalizeWait(AllocKind kind) const {
+        return backgroundFinalizeState[kind] != BFS_DONE;
     }
 
     /*
@@ -445,7 +490,7 @@ struct ArenaLists {
      * thread-local, but the compartment |comp| is shared between all
      * threads.
      */
-    void *parallelAllocate(JSCompartment *comp, AllocKind thingKind, size_t thingSize);
+    void *parallelAllocate(JS::Zone *zone, AllocKind thingKind, size_t thingSize);
 
   private:
     inline void finalizeNow(FreeOp *fop, AllocKind thingKind);
@@ -710,6 +755,8 @@ class GCHelperThread {
     PRThread *getThread() const {
         return thread;
     }
+
+    bool onBackgroundThread();
 
     /*
      * Outside the GC lock may give true answer when in fact the sweeping has
@@ -1049,7 +1096,7 @@ struct GCMarker : public JSTracer {
     void startBufferingGrayRoots();
     void endBufferingGrayRoots();
     void resetBufferedGrayRoots();
-    void markBufferedGrayRoots(JSCompartment *comp);
+    void markBufferedGrayRoots(JS::Zone *zone);
 
     static void GrayCallback(JSTracer *trc, void **thing, JSGCTraceKind kind);
 
@@ -1175,6 +1222,13 @@ SetDeterministicGC(JSContext *cx, bool enabled);
 
 void
 SetValidateGC(JSContext *cx, bool enabled);
+
+void
+SetFullCompartmentChecks(JSContext *cx, bool enabled);
+
+/* Wait for the background thread to finish sweeping if it is running. */
+void
+FinishBackgroundFinalize(JSRuntime *rt);
 
 const int ZealPokeValue = 1;
 const int ZealAllocValue = 2;

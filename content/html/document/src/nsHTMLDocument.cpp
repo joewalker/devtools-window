@@ -32,7 +32,6 @@
 #include "nsIContentViewer.h"
 #include "nsIMarkupDocumentViewer.h"
 #include "nsIDocShell.h"
-#include "nsIDocShellTreeItem.h"
 #include "nsDocShellLoadTypes.h"
 #include "nsIWebNavigation.h"
 #include "nsIBaseWindow.h"
@@ -83,12 +82,12 @@
 //AHMED 12-2
 #include "nsBidiUtils.h"
 
+#include "mozilla/dom/EncodingUtils.h"
 #include "nsIEditingSession.h"
 #include "nsIEditor.h"
 #include "nsNodeInfoManager.h"
 #include "nsIPlaintextEditor.h"
 #include "nsIHTMLEditor.h"
-#include "nsIEditorDocShell.h"
 #include "nsIEditorStyleSheets.h"
 #include "nsIInlineSpellChecker.h"
 #include "nsRange.h"
@@ -330,7 +329,7 @@ nsHTMLDocument::TryHintCharset(nsIMarkupDocumentViewer* aMarkupDV,
       if(requestCharsetSource <= aCharsetSource)
         return;
 
-      if(NS_SUCCEEDED(rv) && IsAsciiCompatible(requestCharset)) {
+      if(NS_SUCCEEDED(rv) && EncodingUtils::IsAsciiCompatible(requestCharset)) {
         aCharsetSource = requestCharsetSource;
         aCharset = requestCharset;
 
@@ -354,7 +353,7 @@ nsHTMLDocument::TryUserForcedCharset(nsIMarkupDocumentViewer* aMarkupDV,
     return;
 
   // mCharacterSet not updated yet for channel, so check aCharset, too.
-  if (WillIgnoreCharsetOverride() || !IsAsciiCompatible(aCharset)) {
+  if (WillIgnoreCharsetOverride() || !EncodingUtils::IsAsciiCompatible(aCharset)) {
     return;
   }
 
@@ -366,7 +365,7 @@ nsHTMLDocument::TryUserForcedCharset(nsIMarkupDocumentViewer* aMarkupDV,
 
   if(NS_SUCCEEDED(rv) &&
      !forceCharsetFromDocShell.IsEmpty() &&
-     IsAsciiCompatible(forceCharsetFromDocShell)) {
+     EncodingUtils::IsAsciiCompatible(forceCharsetFromDocShell)) {
     aCharset = forceCharsetFromDocShell;
     aCharsetSource = kCharsetFromUserForced;
     return;
@@ -379,7 +378,7 @@ nsHTMLDocument::TryUserForcedCharset(nsIMarkupDocumentViewer* aMarkupDV,
     if (csAtom) {
       nsAutoCString charset;
       csAtom->ToUTF8String(charset);
-      if (!IsAsciiCompatible(charset)) {
+      if (!EncodingUtils::IsAsciiCompatible(charset)) {
         return;
       }
       aCharset = charset;
@@ -402,12 +401,12 @@ nsHTMLDocument::TryCacheCharset(nsICachingChannel* aCachingChannel,
 
   nsCString cachedCharset;
   rv = aCachingChannel->GetCacheTokenCachedCharset(cachedCharset);
-  // Check IsAsciiCompatible() even in the cache case, because the value
+  // Check EncodingUtils::IsAsciiCompatible() even in the cache case, because the value
   // might be stale and in the case of a stale charset that is not a rough
   // ASCII superset, the parser has no way to recover.
   if (NS_SUCCEEDED(rv) &&
       !cachedCharset.IsEmpty() &&
-      IsAsciiCompatible(cachedCharset))
+      EncodingUtils::IsAsciiCompatible(cachedCharset))
   {
     aCharset = cachedCharset;
     aCharsetSource = kCharsetFromCache;
@@ -425,16 +424,6 @@ CheckSameOrigin(nsINode* aNode1, nsINode* aNode2)
     NS_SUCCEEDED(aNode1->NodePrincipal()->
                    Equals(aNode2->NodePrincipal(), &equal)) &&
     equal;
-}
-
-bool
-nsHTMLDocument::IsAsciiCompatible(const nsACString& aPreferredName)
-{
-  return !(aPreferredName.LowerCaseEqualsLiteral("utf-16") ||
-           aPreferredName.LowerCaseEqualsLiteral("utf-16be") ||
-           aPreferredName.LowerCaseEqualsLiteral("utf-16le") ||
-           aPreferredName.LowerCaseEqualsLiteral("utf-7") ||
-           aPreferredName.LowerCaseEqualsLiteral("x-imap4-modified-utf7"));
 }
 
 void
@@ -462,8 +451,8 @@ nsHTMLDocument::TryParentCharset(nsIDocShell*  aDocShell,
   if (kCharsetFromParentForced == parentSource ||
       kCharsetFromUserForced == parentSource) {
     if (WillIgnoreCharsetOverride() ||
-        !IsAsciiCompatible(aCharset) || // if channel said UTF-16
-        !IsAsciiCompatible(parentCharset)) {
+        !EncodingUtils::IsAsciiCompatible(aCharset) || // if channel said UTF-16
+        !EncodingUtils::IsAsciiCompatible(parentCharset)) {
       return;
     }
     aCharset.Assign(parentCharset);
@@ -479,7 +468,7 @@ nsHTMLDocument::TryParentCharset(nsIDocShell*  aDocShell,
     // Make sure that's OK
     if (!aParentDocument ||
         !CheckSameOrigin(this, aParentDocument) ||
-        !IsAsciiCompatible(parentCharset)) {
+        !EncodingUtils::IsAsciiCompatible(parentCharset)) {
       return;
     }
 
@@ -498,7 +487,7 @@ nsHTMLDocument::TryParentCharset(nsIDocShell*  aDocShell,
     // Make sure that's OK
     if (!aParentDocument ||
         !CheckSameOrigin(this, aParentDocument) ||
-        !IsAsciiCompatible(parentCharset)) {
+        !EncodingUtils::IsAsciiCompatible(parentCharset)) {
       return;
     }
 
@@ -519,10 +508,12 @@ nsHTMLDocument::TryWeakDocTypeDefault(int32_t& aCharsetSource,
 
   // Don't let the user break things by setting intl.charset.default to
   // not a rough ASCII superset
-  if (!defCharset.IsEmpty() && IsAsciiCompatible(defCharset)) {
-    aCharset = defCharset;
+  nsAutoCString canonical;
+  if (EncodingUtils::FindEncodingForLabel(defCharset, canonical) &&
+      EncodingUtils::IsAsciiCompatible(canonical)) {
+    aCharset = canonical;
   } else {
-    aCharset.AssignLiteral("ISO-8859-1");
+    aCharset.AssignLiteral("windows-1252");
   }
   aCharsetSource = kCharsetFromWeakDocTypeDefault;
   return;
@@ -540,7 +531,7 @@ nsHTMLDocument::TryDefaultCharset( nsIMarkupDocumentViewer* aMarkupDV,
   if (aMarkupDV) {
     nsresult rv =
       aMarkupDV->GetDefaultCharacterSet(defaultCharsetFromDocShell);
-    if(NS_SUCCEEDED(rv) && IsAsciiCompatible(defaultCharsetFromDocShell)) {
+    if(NS_SUCCEEDED(rv) && EncodingUtils::IsAsciiCompatible(defaultCharsetFromDocShell)) {
       aCharset = defaultCharsetFromDocShell;
       aCharsetSource = kCharsetFromUserDefault;
     }
@@ -683,12 +674,9 @@ nsHTMLDocument::StartDocumentLoad(const char* aCommand,
   // but if we get a null pointer, that's perfectly legal for parent
   // and parentContentViewer
   nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(aContainer));
-
-  nsCOMPtr<nsIDocShellTreeItem> docShellAsItem(do_QueryInterface(docShell));
-
   nsCOMPtr<nsIDocShellTreeItem> parentAsItem;
-  if (docShellAsItem) {
-    docShellAsItem->GetSameTypeParent(getter_AddRefs(parentAsItem));
+  if (docShell) {
+    docShell->GetSameTypeParent(getter_AddRefs(parentAsItem));
   }
 
   nsCOMPtr<nsIDocShell> parent(do_QueryInterface(parentAsItem));
@@ -751,7 +739,7 @@ nsHTMLDocument::StartDocumentLoad(const char* aCommand,
     parserCharsetSource = charsetSource;
     parserCharset = charset;
   } else {
-    NS_ASSERTION(docShell && docShellAsItem, "Unexpected null value");
+    NS_ASSERTION(docShell, "Unexpected null value");
 
     charsetSource = kCharsetUninitialized;
     wyciwygChannel = do_QueryInterface(aChannel);
@@ -2614,14 +2602,10 @@ nsHTMLDocument::DeferredContentEditableCountChange(nsIContent *aElement)
       if (!docshell)
         return;
 
-      nsCOMPtr<nsIEditorDocShell> editorDocShell =
-        do_QueryInterface(docshell, &rv);
-      NS_ENSURE_SUCCESS_VOID(rv);
-
       nsCOMPtr<nsIEditor> editor;
-      editorDocShell->GetEditor(getter_AddRefs(editor));
+      docshell->GetEditor(getter_AddRefs(editor));
       if (editor) {
-        nsRefPtr<nsRange> range = new nsRange();
+        nsRefPtr<nsRange> range = new nsRange(aElement);
         rv = range->SelectNode(node);
         if (NS_FAILED(rv)) {
           // The node might be detached from the document at this point,
@@ -2891,11 +2875,7 @@ nsHTMLDocument::EditingStateChanged()
     }
 
     // XXX Need to call TearDownEditorOnWindow for all failures.
-    nsCOMPtr<nsIEditorDocShell> editorDocShell =
-      do_QueryInterface(docshell, &rv);
-    NS_ENSURE_SUCCESS(rv, rv);
-
-    editorDocShell->GetEditor(getter_AddRefs(editor));
+    docshell->GetEditor(getter_AddRefs(editor));
     if (!editor)
       return NS_ERROR_FAILURE;
 
@@ -3821,7 +3801,7 @@ nsHTMLDocument::WillIgnoreCharsetOverride()
   if (mCharacterSetSource == kCharsetFromByteOrderMark) {
     return true;
   }
-  if (!IsAsciiCompatible(mCharacterSet)) {
+  if (!EncodingUtils::IsAsciiCompatible(mCharacterSet)) {
     return true;
   }
   nsCOMPtr<nsIWyciwygChannel> wyciwyg = do_QueryInterface(mChannel);

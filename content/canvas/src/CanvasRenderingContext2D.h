@@ -139,8 +139,7 @@ public:
   CanvasRenderingContext2D();
   virtual ~CanvasRenderingContext2D();
 
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope,
-                               bool *triedToWrap);
+  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
 
   HTMLCanvasElement* GetCanvas() const
   {
@@ -716,6 +715,11 @@ protected:
   uint32_t mInvalidateCount;
   static const uint32_t kCanvasMaxInvalidateCount = 100;
 
+
+#ifdef USE_SKIA
+  nsRefPtr<gl::GLContext> mGLContext;
+#endif
+
   /**
     * Returns true if a shadow should be drawn along with a
     * drawing operation.
@@ -902,11 +906,11 @@ protected:
   friend class AdjustedTarget;
 
   // other helpers
-  void GetAppUnitsValues(uint32_t *perDevPixel, uint32_t *perCSSPixel)
+  void GetAppUnitsValues(int32_t *perDevPixel, int32_t *perCSSPixel)
   {
     // If we don't have a canvas element, we just return something generic.
-    uint32_t devPixel = 60;
-    uint32_t cssPixel = 60;
+    int32_t devPixel = 60;
+    int32_t cssPixel = 60;
 
     nsIPresShell *ps = GetPresShell();
     nsPresContext *pc;

@@ -7,6 +7,7 @@
 
 #include "UnreachableCodeElimination.h"
 #include "IonAnalysis.h"
+#include "AliasAnalysis.h"
 
 using namespace js;
 using namespace ion;
@@ -35,21 +36,47 @@ UnreachableCodeElimination::analyze()
     // Pass 1: Identify unreachable blocks (if any).
     if (!prunePointlessBranchesAndMarkReachableBlocks())
         return false;
+
+    return removeUnmarkedBlocksAndCleanup();
+}
+
+bool
+UnreachableCodeElimination::removeUnmarkedBlocks(size_t marked)
+{
+    marked_ = marked;
+    return removeUnmarkedBlocksAndCleanup();
+}
+
+bool
+UnreachableCodeElimination::removeUnmarkedBlocksAndCleanup()
+{
+    // Everything is reachable, no work required.
+    JS_ASSERT(marked_ <= graph_.numBlocks());
     if (marked_ == graph_.numBlocks()) {
-        // Everything is reachable.
         graph_.unmarkBlocks();
         return true;
     }
 
-    // Pass 2: Remove unmarked blocks.
+    // Pass 2: Remove unmarked blocks (see analyze() above).
     if (!removeUnmarkedBlocksAndClearDominators())
         return false;
     graph_.unmarkBlocks();
+
+    AssertGraphCoherency(graph_);
+
+    IonSpewPass("UCEMidPoint");
 
     // Pass 3: Recompute dominators and tweak phis.
     BuildDominatorTree(graph_);
     if (redundantPhis_ && !EliminatePhis(mir_, graph_, ConservativeObservability))
         return false;
+
+    // Pass 4: Rerun alias analysis
+    if (rerunAliasAnalysis_) {
+        AliasAnalysis analysis(mir_, graph_);
+        if (!analysis.analyze())
+            return false;
+    }
 
     return true;
 }
@@ -109,8 +136,13 @@ UnreachableCodeElimination::prunePointlessBranchesAndMarkReachableBlocks()
 }
 
 void
-UnreachableCodeElimination::removeUsesFromUnmarkedBlocks(MDefinition *instr)
+UnreachableCodeElimination::checkDependencyAndRemoveUsesFromUnmarkedBlocks(MDefinition *instr)
 {
+    // When the instruction depends on removed block,
+    // alias analysis needs to get rerun to have the right dependency.
+    if (instr->dependency() && !instr->dependency()->block()->isMarked())
+        rerunAliasAnalysis_ = true;
+
     for (MUseIterator iter(instr->usesBegin()); iter != instr->usesEnd(); ) {
         if (!iter->consumer()->block()->isMarked())
             iter = instr->removeUse(iter);
@@ -142,9 +174,9 @@ UnreachableCodeElimination::removeUnmarkedBlocksAndClearDominators()
         if (block->isMarked()) {
             block->setId(--id);
             for (MPhiIterator iter(block->phisBegin()); iter != block->phisEnd(); iter++)
-                removeUsesFromUnmarkedBlocks(*iter);
+                checkDependencyAndRemoveUsesFromUnmarkedBlocks(*iter);
             for (MInstructionIterator iter(block->begin()); iter != block->end(); iter++)
-                removeUsesFromUnmarkedBlocks(*iter);
+                checkDependencyAndRemoveUsesFromUnmarkedBlocks(*iter);
         } else {
             if (block->numPredecessors() > 1) {
                 // If this block had phis, then any reachable

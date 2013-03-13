@@ -106,9 +106,6 @@ private:
   bool mDefer;
 };
 
-MOZ_STATIC_ASSERT(sizeof(SVGPreserveAspectRatio) <= 4,
-                  "The compiler didn't pack SVGPreserveAspectRatio well");
-
 namespace dom {
 
 class DOMSVGPreserveAspectRatio MOZ_FINAL : public nsISupports,
@@ -129,7 +126,7 @@ public:
 
   // WebIDL
   nsSVGElement* GetParentObject() const { return mSVGElement; }
-  virtual JSObject* WrapObject(JSContext* aCx, JSObject* aScope, bool* aTriedToWrap);
+  virtual JSObject* WrapObject(JSContext* aCx, JSObject* aScope) MOZ_OVERRIDE;
 
   uint16_t Align();
   void SetAlign(uint16_t aAlign, ErrorResult& rv);

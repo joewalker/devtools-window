@@ -196,10 +196,15 @@ destroying the MediaDecoder object.
 #include "AbstractMediaDecoder.h"
 
 class nsIStreamListener;
-class nsTimeRanges;
 class nsIMemoryReporter;
 class nsIPrincipal;
 class nsITimer;
+
+namespace mozilla {
+namespace dom {
+class TimeRanges;
+}
+}
 
 using namespace mozilla::dom;
 
@@ -235,7 +240,6 @@ class MediaDecoder : public nsIObserver,
 {
 public:
   typedef mozilla::layers::Image Image;
-  class DecodedStreamMainThreadListener;
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSIOBSERVER
@@ -340,7 +344,7 @@ public:
   // replaying after the input as ended. In the latter case, the new source is
   // not connected to streams created by captureStreamUntilEnded.
 
-  struct DecodedStreamData {
+  struct DecodedStreamData MOZ_FINAL : public MainThreadMediaStreamListener {
     DecodedStreamData(MediaDecoder* aDecoder,
                       int64_t aInitialTime, SourceMediaStream* aStream);
     ~DecodedStreamData();
@@ -358,6 +362,7 @@ public:
     // Therefore video packets starting at or after this time need to be copied
     // to the output stream.
     int64_t mNextVideoTime; // microseconds
+    MediaDecoder* mDecoder;
     // The last video image sent to the stream. Useful if we need to replicate
     // the image.
     nsRefPtr<Image> mLastVideoImage;
@@ -372,12 +377,11 @@ public:
     // The decoder is responsible for calling Destroy() on this stream.
     // Can be read from any thread.
     const nsRefPtr<SourceMediaStream> mStream;
-    // A listener object that receives notifications when mStream's
-    // main-thread-visible state changes. Used on the main thread only.
-    const nsRefPtr<DecodedStreamMainThreadListener> mMainThreadListener;
     // True when we've explicitly blocked this stream because we're
     // not in PLAY_STATE_PLAYING. Used on the main thread only.
     bool mHaveBlockedForPlayState;
+
+    virtual void NotifyMainThreadStateChanged() MOZ_OVERRIDE;
   };
   struct OutputStreamData {
     void Init(ProcessedMediaStream* aStream, bool aFinishWhenEnded)
@@ -421,16 +425,6 @@ public:
     GetReentrantMonitor().AssertCurrentThreadIn();
     return mDecodedStream;
   }
-  class DecodedStreamMainThreadListener : public MainThreadMediaStreamListener {
-  public:
-    DecodedStreamMainThreadListener(MediaDecoder* aDecoder)
-      : mDecoder(aDecoder) {}
-    virtual void NotifyMainThreadStateChanged()
-    {
-      mDecoder->NotifyDecodedStreamMainThreadStateChanged();
-    }
-    MediaDecoder* mDecoder;
-  };
 
   // Add an output stream. All decoder output will be sent to the stream.
   // The stream is initially blocked. The decoder is responsible for unblocking
@@ -511,7 +505,7 @@ public:
   virtual bool IsTransportSeekable();
 
   // Return the time ranges that can be seeked into.
-  virtual nsresult GetSeekable(nsTimeRanges* aSeekable);
+  virtual nsresult GetSeekable(TimeRanges* aSeekable);
 
   // Set the end time of the media resource. When playback reaches
   // this point the media pauses. aTime is in seconds.
@@ -571,7 +565,7 @@ public:
 
   // Constructs the time ranges representing what segments of the media
   // are buffered and playable.
-  virtual nsresult GetBuffered(nsTimeRanges* aBuffered);
+  virtual nsresult GetBuffered(TimeRanges* aBuffered);
 
   // Returns the size, in bytes, of the heap memory used by the currently
   // queued decoded video and audio data.
@@ -911,6 +905,11 @@ public:
   // Volume that playback should start at.  0.0 = muted. 1.0 = full
   // volume.  Readable/Writeable from the main thread.
   double mInitialVolume;
+
+  // PlaybackRate and pitch preservation status we should start at.
+  // Readable/Writeable from the main thread.
+  double mInitialPlaybackRate;
+  bool mInitialPreservesPitch;
 
   // Position to seek to when the seek notification is received by the
   // decode thread. Written by the main thread and read via the

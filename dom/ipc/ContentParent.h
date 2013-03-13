@@ -15,6 +15,7 @@
 #include "mozilla/ipc/GeckoChildProcessHost.h"
 #include "mozilla/dom/ipc/Blob.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/HalTypes.h"
 
 #include "nsFrameMessageManager.h"
 #include "nsIObserver.h"
@@ -30,13 +31,9 @@
 
 #define CHILD_PROCESS_SHUTDOWN_MESSAGE NS_LITERAL_STRING("child-process-shutdown")
 
-#define CONTENT_PARENT_NO_CHILD_ID 0
-#define CONTENT_PARENT_UNKNOWN_CHILD_ID -1
-
 class mozIApplication;
 class nsConsoleService;
 class nsIDOMBlob;
-class nsDOMFileBase;
 
 namespace mozilla {
 
@@ -87,9 +84,13 @@ public:
     static ContentParent* GetNewOrUsed(bool aForBrowserElement = false);
 
     /**
-     * Get or create a content process for the given TabContext.
+     * Get or create a content process for the given TabContext.  aFrameElement
+     * should be the frame/iframe element with which this process will
+     * associated.
      */
-    static TabParent* CreateBrowserOrApp(const TabContext& aContext);
+    static TabParent*
+    CreateBrowserOrApp(const TabContext& aContext,
+                       nsIDOMElement* aFrameElement);
 
     static void GetAll(nsTArray<ContentParent*>& aArray);
 
@@ -133,9 +134,8 @@ public:
         return mSendPermissionUpdates;
     }
 
-    bool GetParamsForBlob(nsDOMFileBase* aBlob,
-                          BlobConstructorParams* aOutParams);
     BlobParent* GetOrCreateActorForBlob(nsIDOMBlob* aBlob);
+
     /**
      * Kill our subprocess and make sure it dies.  Should only be used
      * in emergency situations since it bypasses the normal shutdown
@@ -150,8 +150,6 @@ protected:
     virtual void ActorDestroy(ActorDestroyReason why);
 
 private:
-    typedef base::ChildPrivileges ChildOSPrivileges;
-
     static nsDataHashtable<nsStringHashKey, ContentParent*> *gAppContentParents;
     static nsTArray<ContentParent*>* gNonAppContentParents;
     static nsTArray<ContentParent*>* gPrivateContent;
@@ -162,7 +160,17 @@ private:
     static void PreallocateAppProcess();
     static void DelayedPreallocateAppProcess();
     static void ScheduleDelayedPreallocateAppProcess();
-    static already_AddRefed<ContentParent> MaybeTakePreallocatedAppProcess();
+
+    // Take the preallocated process and transform it into a "real" app process,
+    // for the specified manifest URL.  If there is no preallocated process (or
+    // if it's dead), this returns false.
+    static already_AddRefed<ContentParent>
+    MaybeTakePreallocatedAppProcess(const nsAString& aAppManifestURL,
+                                    ChildPrivileges aPrivs,
+                                    hal::ProcessPriority aInitialPriority);
+
+    static hal::ProcessPriority GetInitialProcessPriority(nsIDOMElement* aFrameElement);
+
     static void FirstIdle();
 
     // Hide the raw constructor methods since we don't want client code
@@ -171,14 +179,32 @@ private:
     using PContentParent::SendPTestShellConstructor;
 
     ContentParent(const nsAString& aAppManifestURL, bool aIsForBrowser,
-                  ChildOSPrivileges aOSPrivileges = base::PRIVILEGES_DEFAULT);
+                  ChildPrivileges aOSPrivileges = base::PRIVILEGES_DEFAULT,
+                  hal::ProcessPriority aInitialPriority = hal::PROCESS_PRIORITY_FOREGROUND);
     virtual ~ContentParent();
 
     void Init();
 
+    // Set the child process's priority.  Once the child starts up, it will
+    // manage its own priority via the ProcessPriorityManager.
+    void SetProcessPriority(hal::ProcessPriority aInitialPriority);
+
+    // If the frame element indicates that the child process is "critical" and
+    // has a pending system message, this function acquires the CPU wake lock on
+    // behalf of the child.  We'll release the lock when the system message is
+    // handled or after a timeout, whichever comes first.
+    void MaybeTakeCPUWakeLock(nsIDOMElement* aFrameElement);
+
+    // Set the child process's priority and then check whether the child is
+    // still alive.  Returns true if the process is still alive, and false
+    // otherwise.  If you pass a FOREGROUND* priority here, it's (hopefully)
+    // unlikely that the process will be killed after this point.
+    bool SetPriorityAndCheckIsAlive(hal::ProcessPriority aPriority);
+
     // Transform a pre-allocated app process into a "real" app
-    // process, for the specified manifest URL.
-    void TransformPreallocatedIntoApp(const nsAString& aAppManifestURL,
+    // process, for the specified manifest URL.  If this returns false, the
+    // child process has died.
+    bool TransformPreallocatedIntoApp(const nsAString& aAppManifestURL,
                                       ChildPrivileges aPrivs);
 
     /**
@@ -223,6 +249,9 @@ private:
     virtual bool RecvPCrashReporterConstructor(PCrashReporterParent* actor,
                                                const NativeThreadId& tid,
                                                const uint32_t& processType);
+
+    virtual bool RecvGetRandomValues(const uint32_t& length,
+                                     InfallibleTArray<uint8_t>* randomValues);
 
     virtual PHalParent* AllocPHal() MOZ_OVERRIDE;
     virtual bool DeallocPHal(PHalParent*) MOZ_OVERRIDE;
@@ -313,7 +342,8 @@ private:
                                           const nsString& aFilePath,
                                           const nsCString& aReason);
 
-    virtual bool RecvAddGeolocationListener(const IPC::Principal& aPrincipal);
+    virtual bool RecvAddGeolocationListener(const IPC::Principal& aPrincipal,
+                                            const bool& aHighAccuracy);
     virtual bool RecvRemoveGeolocationListener();
     virtual bool RecvSetGeolocationHigherAccuracy(const bool& aEnable);
 
@@ -345,10 +375,12 @@ private:
 
     virtual bool RecvRecordingDeviceEvents(const nsString& aRecordingStatus);
 
+    virtual bool RecvSystemMessageHandled() MOZ_OVERRIDE;
+
     virtual void ProcessingError(Result what) MOZ_OVERRIDE;
 
     GeckoChildProcessHost* mSubprocess;
-    ChildOSPrivileges mOSPrivileges;
+    base::ChildPrivileges mOSPrivileges;
 
     uint64_t mChildID;
     int32_t mGeolocationWatchID;

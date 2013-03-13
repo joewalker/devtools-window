@@ -112,7 +112,7 @@ HTML_TAG("aside", "");
 HTML_TAG("b", "");
 HTML_TAG("base", "Base");
 HTML_TAG("bdo", "");
-HTML_TAG("bgsound", "Span");
+HTML_TAG("bgsound", "Unknown");
 HTML_TAG("big", "");
 HTML_TAG("blink", "");
 HTML_TAG("blockquote", "Quote");
@@ -126,6 +126,7 @@ HTML_TAG("cite", "");
 HTML_TAG("code", "");
 HTML_TAG("col", "TableCol");
 HTML_TAG("colgroup", "TableCol");
+HTML_TAG("data", "Data");
 HTML_TAG("datalist", "DataList");
 HTML_TAG("dd", "");
 HTML_TAG("del", "Mod");
@@ -158,7 +159,7 @@ HTML_TAG("html", "Html");
 HTML_TAG("i", "");
 HTML_TAG("iframe", "IFrame", [ "nsIDOMGetSVGDocument", "nsIDOMMozBrowserFrame" ],
                              [ "nsIFrameLoaderOwner" ]);
-HTML_TAG("image", "Span");
+HTML_TAG("image", "");
 HTML_TAG("img", "Image", [ "nsIImageLoadingContent" ], []);
 HTML_TAG("input", "Input", [], [ "imgINotificationObserver",
                                  "nsIImageLoadingContent",
@@ -178,7 +179,7 @@ HTML_TAG("marquee", "Div");
 HTML_TAG("menu", "Menu");
 HTML_TAG("meta", "Meta");
 HTML_TAG("meter", "Meter");
-HTML_TAG("multicol", "Span");
+HTML_TAG("multicol", "Unknown");
 HTML_TAG("nav", "")
 HTML_TAG("nobr", "");
 HTML_TAG("noembed", "");
@@ -213,6 +214,7 @@ HTML_TAG("textarea", "TextArea", [], [ "nsIDOMNSEditableElement" ]);
 HTML_TAG("tfoot", "TableSection");
 HTML_TAG("th", "TableCell");
 HTML_TAG("thead", "TableSection");
+HTML_TAG("time", "Time");
 HTML_TAG("title", "Title");
 HTML_TAG("tr", "TableRow");
 HTML_TAG("tt", "");
@@ -242,10 +244,18 @@ for (var tag of allTags) {
      "Unexpected classname for " + tagName(tag));
   is(node instanceof window[classInfoString], true,
      tagName(tag) + " not an instance of " + classInfos[tag]);
-  is(node instanceof HTMLUnknownElement, false,
-     tagName(tag) + " is an instance of HTMLUnknownElement");
-  is(node instanceof SpecialPowers.Ci.nsIDOMHTMLUnknownElement, false,
-     tagName(tag) + " is an instance of nsIDOMHTMLUnknownElement");
+
+  if (classInfoString != 'HTMLUnknownElement') {
+    is(node instanceof HTMLUnknownElement, false,
+       tagName(tag) + " is an instance of HTMLUnknownElement");
+    is(node instanceof SpecialPowers.Ci.nsIDOMHTMLUnknownElement, false,
+       tagName(tag) + " is an instance of nsIDOMHTMLUnknownElement");
+  } else {
+    is(node instanceof HTMLUnknownElement, true,
+       tagName(tag) + " is an instance of HTMLUnknownElement");
+    is(node instanceof SpecialPowers.Ci.nsIDOMHTMLUnknownElement, true,
+       tagName(tag) + " is an instance of nsIDOMHTMLUnknownElement");
+  }
 
   // Check that each node QIs to all the things we expect it to QI to
   for (var iface of interfaces[tag].concat(interfacesNonClassinfo[tag])) {
@@ -253,28 +263,6 @@ for (var tag of allTags) {
        iface + " not in Components.interfaces");
     is(node instanceof SpecialPowers.Ci[iface], true,
        tagName(tag) + " does not QI to " + iface);
-  }
-
-  // Now see what classinfo reports
-  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
-  var nodeClassInfo = SpecialPowers.wrap(node).QueryInterface(SpecialPowers.Ci.nsIClassInfo);
-  var count = {};
-  var classInfoInterfaces =
-    nodeClassInfo.getInterfaces(count).
-    map(function(id) { return SpecialPowers.Components.interfacesByID[id].toString(); });
-
-  // Make sure that we know about all the things classinfo claims
-  for (var classInfoInterface of classInfoInterfaces) {
-    isnot(interfaces[tag].indexOf(classInfoInterface), -1,
-          "Should know about " + tagName(tag) + " implementing " +
-          classInfoInterface);
-  }
-
-  // And make sure classinfo claims all the things we know about
-  for (iface of interfaces[tag]) {
-    isnot(classInfoInterfaces.indexOf(iface), -1,
-          "Classinfo for " + tagName(tag) + " should claim to implement " +
-          iface);
   }
 }
 </script>

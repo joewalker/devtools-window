@@ -46,7 +46,7 @@ static WebGLenum InternalFormatForFormatAndType(WebGLenum format, WebGLenum type
 void
 WebGLContext::ActiveTexture(WebGLenum texture)
 {
-    if (!IsContextStable())
+    if (!IsContextStable()) 
         return;
 
     if (texture < LOCAL_GL_TEXTURE0 ||
@@ -171,7 +171,7 @@ WebGLContext::BindFramebuffer(WebGLenum target, WebGLFramebuffer *wfb)
     MakeContextCurrent();
 
     if (!wfb) {
-        gl->fBindFramebuffer(target, gl->GetOffscreenFBO());
+        gl->fBindFramebuffer(target, 0);
     } else {
         WebGLuint framebuffername = wfb->GLName();
         gl->fBindFramebuffer(target, framebuffername);
@@ -575,32 +575,52 @@ WebGLContext::Clear(WebGLbitfield mask)
     if (mask != m)
         return ErrorInvalidValue("clear: invalid mask bits");
 
-    bool needClearCallHere = true;
-
     if (mBoundFramebuffer) {
         if (!mBoundFramebuffer->CheckAndInitializeRenderbuffers())
             return ErrorInvalidFramebufferOperation("clear: incomplete framebuffer");
-    } else {
-        // no FBO is bound, so we are clearing the backbuffer here
-        EnsureBackbufferClearedAsNeeded();
-        bool valuesAreDefault = mColorClearValue[0] == 0.0f &&
-                                  mColorClearValue[1] == 0.0f &&
-                                  mColorClearValue[2] == 0.0f &&
-                                  mColorClearValue[3] == 0.0f &&
-                                  mDepthClearValue    == 1.0f &&
-                                  mStencilClearValue  == 0;
-        if (valuesAreDefault &&
-            mBackbufferClearingStatus == BackbufferClearingStatus::ClearedToDefaultValues)
-        {
-            needClearCallHere = false;
-        }
+
+        gl->fClear(mask);
+        return;
     }
 
-    if (needClearCallHere) {
-        gl->fClear(mask);
-        mBackbufferClearingStatus = BackbufferClearingStatus::HasBeenDrawnTo;
-        Invalidate();
+    // Ok, we're clearing the default framebuffer/screen.
+
+    bool needsClear = true;
+    if (mIsScreenCleared) {
+        bool isClearRedundant = true;
+        if (mask & LOCAL_GL_COLOR_BUFFER_BIT) {
+            if (mColorClearValue[0] != 0.0f ||
+                mColorClearValue[1] != 0.0f ||
+                mColorClearValue[2] != 0.0f ||
+                mColorClearValue[3] != 0.0f)
+            {
+                isClearRedundant = false;
+            }
+        }
+
+        if (mask & LOCAL_GL_DEPTH_BUFFER_BIT) {
+            if (mDepthClearValue != 1.0f) {
+                isClearRedundant = false;
+            }
+        }
+
+        if (mask & LOCAL_GL_DEPTH_BUFFER_BIT) {
+            if (mStencilClearValue != 0) {
+                isClearRedundant = false;
+            }
+        }
+
+        if (isClearRedundant)
+            needsClear = false;
     }
+
+    if (needsClear) {
+        gl->fClear(mask);
+        mIsScreenCleared = false;
+    }
+
+    Invalidate();
+    mShouldPresent = true;
 }
 
 void
@@ -815,7 +835,7 @@ WebGLContext::CopyTexImage2D(WebGLenum target,
                                     internalformat == LOCAL_GL_ALPHA ||
                                     internalformat == LOCAL_GL_LUMINANCE_ALPHA;
     bool fboFormatHasAlpha = mBoundFramebuffer ? mBoundFramebuffer->ColorAttachment().HasAlpha()
-                                                 : bool(gl->ActualFormat().alpha > 0);
+                                                 : bool(gl->GetPixelFormat().alpha > 0);
     if (texFormatRequiresAlpha && !fboFormatHasAlpha)
         return ErrorInvalidOperation("copyTexImage2D: texture format requires an alpha channel "
                                      "but the framebuffer doesn't have one");
@@ -925,7 +945,7 @@ WebGLContext::CopyTexSubImage2D(WebGLenum target,
                                   format == LOCAL_GL_ALPHA ||
                                   format == LOCAL_GL_LUMINANCE_ALPHA;
     bool fboFormatHasAlpha = mBoundFramebuffer ? mBoundFramebuffer->ColorAttachment().HasAlpha()
-                                                 : bool(gl->ActualFormat().alpha > 0);
+                                                 : bool(gl->GetPixelFormat().alpha > 0);
 
     if (texFormatRequiresAlpha && !fboFormatHasAlpha)
         return ErrorInvalidOperation("copyTexSubImage2D: texture format requires an alpha channel "
@@ -1440,8 +1460,6 @@ WebGLContext::DrawArrays(GLenum mode, WebGLint first, WebGLsizei count)
     if (mBoundFramebuffer) {
         if (!mBoundFramebuffer->CheckAndInitializeRenderbuffers())
             return ErrorInvalidFramebufferOperation("drawArrays: incomplete framebuffer");
-    } else {
-        EnsureBackbufferClearedAsNeeded();
     }
 
     BindFakeBlackTextures();
@@ -1454,8 +1472,11 @@ WebGLContext::DrawArrays(GLenum mode, WebGLint first, WebGLsizei count)
     UndoFakeVertexAttrib0();
     UnbindFakeBlackTextures();
 
-    mBackbufferClearingStatus = BackbufferClearingStatus::HasBeenDrawnTo;
-    Invalidate();
+    if (!mBoundFramebuffer) {
+        Invalidate();
+        mShouldPresent = true;
+        mIsScreenCleared = false;
+    }
 }
 
 void
@@ -1533,8 +1554,6 @@ WebGLContext::DrawElements(WebGLenum mode, WebGLsizei count, WebGLenum type,
     if (mBoundFramebuffer) {
         if (!mBoundFramebuffer->CheckAndInitializeRenderbuffers())
             return ErrorInvalidFramebufferOperation("drawElements: incomplete framebuffer");
-    } else {
-        EnsureBackbufferClearedAsNeeded();
     }
 
     BindFakeBlackTextures();
@@ -1547,8 +1566,11 @@ WebGLContext::DrawElements(WebGLenum mode, WebGLsizei count, WebGLenum type,
     UndoFakeVertexAttrib0();
     UnbindFakeBlackTextures();
 
-    mBackbufferClearingStatus = BackbufferClearingStatus::HasBeenDrawnTo;
-    Invalidate();
+    if (!mBoundFramebuffer) {
+        Invalidate();
+        mShouldPresent = true;
+        mIsScreenCleared = false;
+    }
 }
 
 void
@@ -2828,6 +2850,15 @@ WebGLContext::GetVertexAttrib(JSContext* cx, WebGLuint index, WebGLenum pname,
             return JS::Int32Value(mAttribBuffers[index].stride);
 
         case LOCAL_GL_VERTEX_ATTRIB_ARRAY_SIZE:
+        {
+            if (!ValidateAttribIndex(index, "enableVertexAttribArray"))
+                return JS::NullValue();
+
+            if (!mAttribBuffers[index].enabled)
+                return JS::Int32Value(4);
+
+            // Don't break; fall through.
+        }
         case LOCAL_GL_VERTEX_ATTRIB_ARRAY_TYPE:
         {
             GLint i = 0;
@@ -3332,7 +3363,7 @@ WebGLContext::ReadPixels(WebGLint x, WebGLint y, WebGLsizei width,
         if (mBoundFramebuffer) {
             needAlphaFixup = !mBoundFramebuffer->ColorAttachment().HasAlpha();
         } else {
-            needAlphaFixup = gl->ActualFormat().alpha == 0;
+            needAlphaFixup = gl->GetPixelFormat().alpha == 0;
         }
 
         if (needAlphaFixup) {
@@ -3651,12 +3682,17 @@ WebGLContext::SurfaceFromElementResultToImageSurface(nsLayoutUtils::SurfaceFromE
 }
 
 
+
 void
 WebGLContext::Uniform1i(WebGLUniformLocation *location_object, WebGLint a1)
 {
     GLint location;
     if (!ValidateUniformSetter("Uniform1i", location_object, location))
         return;
+
+    if (!ValidateSamplerUniformSetter("Uniform1i", location_object, a1))
+        return;
+
     MakeContextCurrent();
     gl->fUniform1i(location, a1);
 }
@@ -3668,6 +3704,13 @@ WebGLContext::Uniform2i(WebGLUniformLocation *location_object, WebGLint a1,
     GLint location;
     if (!ValidateUniformSetter("Uniform2i", location_object, location))
         return;
+
+    if (!ValidateSamplerUniformSetter("Uniform2i", location_object, a1) ||
+        !ValidateSamplerUniformSetter("Uniform2i", location_object, a2))
+    {
+        return;
+    }
+
     MakeContextCurrent();
     gl->fUniform2i(location, a1, a2);
 }
@@ -3679,6 +3722,14 @@ WebGLContext::Uniform3i(WebGLUniformLocation *location_object, WebGLint a1,
     GLint location;
     if (!ValidateUniformSetter("Uniform3i", location_object, location))
         return;
+
+    if (!ValidateSamplerUniformSetter("Uniform3i", location_object, a1) ||
+        !ValidateSamplerUniformSetter("Uniform3i", location_object, a2) ||
+        !ValidateSamplerUniformSetter("Uniform3i", location_object, a3))
+    {
+        return;
+    }
+
     MakeContextCurrent();
     gl->fUniform3i(location, a1, a2, a3);
 }
@@ -3690,6 +3741,15 @@ WebGLContext::Uniform4i(WebGLUniformLocation *location_object, WebGLint a1,
     GLint location;
     if (!ValidateUniformSetter("Uniform4i", location_object, location))
         return;
+
+    if (!ValidateSamplerUniformSetter("Uniform4i", location_object, a1) ||
+        !ValidateSamplerUniformSetter("Uniform4i", location_object, a2) ||
+        !ValidateSamplerUniformSetter("Uniform4i", location_object, a3) ||
+        !ValidateSamplerUniformSetter("Uniform4i", location_object, a4))
+    {
+        return;
+    }
+
     MakeContextCurrent();
     gl->fUniform4i(location, a1, a2, a3, a4);
 }
@@ -3747,6 +3807,10 @@ WebGLContext::Uniform1iv_base(WebGLUniformLocation *location_object,
                                     numElementsToUpload, arrayLength)) {
         return;
     }
+
+    if (!ValidateSamplerUniformSetter("Uniform1iv", location_object, data[0]))
+        return;
+
     MakeContextCurrent();
     gl->fUniform1iv(location, numElementsToUpload, data);
 }
@@ -3761,6 +3825,13 @@ WebGLContext::Uniform2iv_base(WebGLUniformLocation *location_object,
                                     numElementsToUpload, arrayLength)) {
         return;
     }
+
+    if (!ValidateSamplerUniformSetter("Uniform2iv", location_object, data[0]) ||
+        !ValidateSamplerUniformSetter("Uniform2iv", location_object, data[1]))
+    {
+        return;
+    }
+
     MakeContextCurrent();
     gl->fUniform2iv(location, numElementsToUpload, data);
 }
@@ -3775,6 +3846,14 @@ WebGLContext::Uniform3iv_base(WebGLUniformLocation *location_object,
                                     numElementsToUpload, arrayLength)) {
         return;
     }
+
+    if (!ValidateSamplerUniformSetter("Uniform3iv", location_object, data[0]) ||
+        !ValidateSamplerUniformSetter("Uniform3iv", location_object, data[1]) ||
+        !ValidateSamplerUniformSetter("Uniform3iv", location_object, data[2]))
+    {
+        return;
+    }
+
     MakeContextCurrent();
     gl->fUniform3iv(location, numElementsToUpload, data);
 }
@@ -3789,6 +3868,15 @@ WebGLContext::Uniform4iv_base(WebGLUniformLocation *location_object,
                                     numElementsToUpload, arrayLength)) {
         return;
     }
+
+    if (!ValidateSamplerUniformSetter("Uniform4iv", location_object, data[0]) ||
+        !ValidateSamplerUniformSetter("Uniform4iv", location_object, data[1]) ||
+        !ValidateSamplerUniformSetter("Uniform4iv", location_object, data[2]) ||
+        !ValidateSamplerUniformSetter("Uniform4iv", location_object, data[3]))
+    {
+        return;
+    }
+
     MakeContextCurrent();
     gl->fUniform4iv(location, numElementsToUpload, data);
 }
@@ -4194,6 +4282,15 @@ WebGLContext::CompileShader(WebGLShader *shader)
 
         int compileOptions = SH_ATTRIBUTES_UNIFORMS |
                              SH_ENFORCE_PACKING_RESTRICTIONS;
+
+        // we want to do this everywhere, but:
+#ifndef XP_WIN // to do this on Windows, we need ANGLE r1719, 1733, 1734.
+#ifndef XP_MACOSX // to do this on Mac, we need to do it only on Mac OSX > 10.6 as this
+                  // causes the shader compiler in 10.6 to crash
+        compileOptions |= SH_CLAMP_INDIRECT_ARRAY_BOUNDS;
+#endif
+#endif
+
         if (useShaderSourceTranslation) {
             compileOptions |= SH_OBJECT_CODE
                             | SH_MAP_LONG_VARIABLE_NAMES;

@@ -51,7 +51,7 @@ using mozilla::DebugOnly;
 /*****************************************************************************/
 
 void
-StackFrame::initExecuteFrame(UnrootedScript script, StackFrame *prevLink, AbstractFramePtr prev,
+StackFrame::initExecuteFrame(RawScript script, StackFrame *prevLink, AbstractFramePtr prev,
                              FrameRegs *regs, const Value &thisv, JSObject &scopeChain,
                              ExecuteType type)
 {
@@ -240,6 +240,24 @@ StackFrame::copyRawFrameSlots(AutoValueVector *vec)
     return true;
 }
 
+static void
+CleanupTornValue(StackFrame *fp, Value *vp)
+{
+    if (vp->isObject() && !vp->toGCThing())
+        vp->setObject(fp->global());
+    if (vp->isString() && !vp->toGCThing())
+        vp->setString(fp->compartment()->rt->emptyString);
+}
+
+void
+StackFrame::cleanupTornValues()
+{
+    for (size_t i = 0; i < numFormalArgs(); i++)
+        CleanupTornValue(this, &formals()[i]);
+    for (size_t i = 0; i < script()->nfixed; i++)
+        CleanupTornValue(this, &slots()[i]);
+}
+
 static inline void
 AssertDynamicScopeMatchesStaticScope(JSContext *cx, JSScript *script, JSObject *scope)
 {
@@ -289,7 +307,7 @@ StackFrame::initFunctionScopeObjects(JSContext *cx)
 }
 
 bool
-StackFrame::prologue(JSContext *cx, bool newType)
+StackFrame::prologue(JSContext *cx)
 {
     RootedScript script(cx, this->script());
 
@@ -321,7 +339,7 @@ StackFrame::prologue(JSContext *cx, bool newType)
 
     if (isConstructing()) {
         RootedObject callee(cx, &this->callee());
-        JSObject *obj = js_CreateThisForFunction(cx, callee, newType);
+        JSObject *obj = CreateThisForFunction(cx, callee, useNewType());
         if (!obj)
             return false;
         functionThis() = ObjectValue(*obj);
@@ -348,8 +366,6 @@ StackFrame::epilogue(JSContext *cx)
         } else if (isDirectEvalFrame()) {
             if (isDebuggerFrame())
                 JS_ASSERT(!scopeChain()->isScope());
-            else
-                JS_ASSERT(scopeChain() == prev()->scopeChain());
         } else {
             /*
              * Debugger.Object.prototype.evalInGlobal creates indirect eval
@@ -705,12 +721,6 @@ StackSpace::markActiveCompartments()
 JS_FRIEND_API(bool)
 StackSpace::ensureSpaceSlow(JSContext *cx, MaybeReportError report, Value *from, ptrdiff_t nvals) const
 {
-    mozilla::Maybe<AutoAssertNoGC> maybeNoGC;
-    if (report)
-        AssertCanGC();
-    else
-        maybeNoGC.construct();
-
     assertInvariants();
 
     JSCompartment *dest = cx->compartment;
@@ -859,20 +869,6 @@ ContextStack::~ContextStack()
     JS_ASSERT(!seg_);
 }
 
-ptrdiff_t
-ContextStack::spIndexOf(const Value *vp)
-{
-    if (!hasfp())
-        return JSDVG_SEARCH_STACK;
-
-    Value *base = fp()->base();
-    Value *sp = regs().sp;
-    if (vp < base || vp >= sp)
-        return JSDVG_SEARCH_STACK;
-
-    return vp - sp;
-}
-
 bool
 ContextStack::onTop() const
 {
@@ -892,12 +888,6 @@ Value *
 ContextStack::ensureOnTop(JSContext *cx, MaybeReportError report, unsigned nvars,
                           MaybeExtend extend, bool *pushedSeg)
 {
-    mozilla::Maybe<AutoAssertNoGC> maybeNoGC;
-    if (report)
-        AssertCanGC();
-    else
-        maybeNoGC.construct();
-
     Value *firstUnused = space().firstUnused();
     FrameRegs *regs = cx->maybeRegs();
 
@@ -976,12 +966,6 @@ bool
 ContextStack::pushInvokeArgs(JSContext *cx, unsigned argc, InvokeArgsGuard *iag,
                              MaybeReportError report)
 {
-    mozilla::Maybe<AutoAssertNoGC> maybeNoGC;
-    if (report)
-        AssertCanGC();
-    else
-        maybeNoGC.construct();
-
     JS_ASSERT(argc <= StackSpace::ARGS_LENGTH_MAX);
 
     unsigned nvars = 2 + argc;
@@ -1017,18 +1001,13 @@ ContextStack::popInvokeArgs(const InvokeArgsGuard &iag)
 
 StackFrame *
 ContextStack::pushInvokeFrame(JSContext *cx, MaybeReportError report,
-                              const CallArgs &args, JSFunction *fun,
+                              const CallArgs &args, JSFunction *funArg,
                               InitialFrameFlags initial, FrameGuard *fg)
 {
-    mozilla::Maybe<AutoAssertNoGC> maybeNoGC;
-    if (report)
-        AssertCanGC();
-    else
-        maybeNoGC.construct();
-
     JS_ASSERT(onTop());
     JS_ASSERT(space().firstUnused() == args.end());
 
+    RootedFunction fun(cx, funArg);
     RootedScript script(cx, fun->nonLazyScript());
 
     StackFrame::Flags flags = ToFrameFlags(initial);
@@ -1057,12 +1036,10 @@ ContextStack::pushInvokeFrame(JSContext *cx, const CallArgs &args,
 }
 
 bool
-ContextStack::pushExecuteFrame(JSContext *cx, JSScript *script, const Value &thisv,
-                               JSObject &scopeChain, ExecuteType type,
+ContextStack::pushExecuteFrame(JSContext *cx, HandleScript script, const Value &thisv,
+                               HandleObject scopeChain, ExecuteType type,
                                AbstractFramePtr evalInFrame, ExecuteFrameGuard *efg)
 {
-    AssertCanGC();
-
     /*
      * Even though global code and indirect eval do not execute in the context
      * of the current frame, prev-link these to the current frame so that the
@@ -1112,7 +1089,7 @@ ContextStack::pushExecuteFrame(JSContext *cx, JSScript *script, const Value &thi
 
     AbstractFramePtr prev = evalInFrame ? evalInFrame : maybefp();
     StackFrame *fp = reinterpret_cast<StackFrame *>(firstUnused + 2);
-    fp->initExecuteFrame(script, prevLink, prev, seg_->maybeRegs(), thisv, scopeChain, type);
+    fp->initExecuteFrame(script, prevLink, prev, seg_->maybeRegs(), thisv, *scopeChain, type);
     fp->initVarsToUndefined();
     efg->regs_.prepareToRun(*fp, script);
 
@@ -1131,11 +1108,11 @@ bool
 ContextStack::pushBailoutArgs(JSContext *cx, const ion::IonBailoutIterator &it, InvokeArgsGuard *iag)
 {
     unsigned argc = it.numActualArgs();
-    ion::SnapshotIterator s(it);
 
     if (!pushInvokeArgs(cx, argc, iag, DONT_REPORT_ERROR))
         return false;
 
+    ion::SnapshotIterator s(it);
     JSFunction *fun = it.callee();
     iag->setCallee(ObjectValue(*fun));
 
@@ -1175,7 +1152,6 @@ ContextStack::popFrame(const FrameGuard &fg)
 bool
 ContextStack::pushGeneratorFrame(JSContext *cx, JSGenerator *gen, GeneratorFrameGuard *gfg)
 {
-    AssertCanGC();
     HeapValue *genvp = gen->stackSnapshot;
     JS_ASSERT(genvp == HeapValueify(gen->fp->generatorArgsSnapshotBegin()));
     unsigned vplen = HeapValueify(gen->fp->generatorArgsSnapshotEnd()) - genvp;
@@ -1245,8 +1221,6 @@ ContextStack::popGeneratorFrame(const GeneratorFrameGuard &gfg)
 bool
 ContextStack::saveFrameChain()
 {
-    AssertCanGC();
-
     bool pushedSeg;
     if (!ensureOnTop(cx_, REPORT_ERROR, 0, CANT_EXTEND, &pushedSeg))
         return false;
@@ -1279,7 +1253,6 @@ StackIter::poisonRegs()
 void
 StackIter::popFrame()
 {
-    AutoAssertNoGC nogc;
     StackFrame *oldfp = data_.fp_;
     JS_ASSERT(data_.seg_->contains(oldfp));
     data_.fp_ = data_.fp_->prev();
@@ -1306,7 +1279,6 @@ StackIter::popCall()
 void
 StackIter::settleOnNewSegment()
 {
-    AutoAssertNoGC nogc;
     if (FrameRegs *regs = data_.seg_->maybeRegs())
         data_.pc_ = regs->pc;
     else
@@ -1344,8 +1316,6 @@ StackIter::startOnSegment(StackSegment *seg)
 void
 StackIter::settleOnNewState()
 {
-    AutoAssertNoGC nogc;
-
     /* Reset whether or we popped a call last time we settled. */
     data_.poppedCallDuringSettle_ = false;
 
@@ -1531,7 +1501,8 @@ StackIter::StackIter(JSRuntime *rt, StackSegment &seg)
 StackIter::StackIter(const StackIter &other)
   : data_(other.data_)
 #ifdef JS_ION
-    , ionInlineFrames_(other.data_.seg_->cx(), &other.ionInlineFrames_)
+    , ionInlineFrames_(other.data_.seg_->cx(),
+                       data_.ionFrames_.isScripted() ? &other.ionInlineFrames_ : NULL)
 #endif
 {
 }
@@ -1549,7 +1520,6 @@ StackIter::StackIter(const Data &data)
 void
 StackIter::popIonFrame()
 {
-    AutoAssertNoGC nogc;
     // Keep fp which describes all ion frames.
     poisonRegs();
     if (data_.ionFrames_.isScripted() && ionInlineFrames_.more()) {
@@ -2024,7 +1994,6 @@ StackIter::setReturnValue(const Value &v)
 size_t
 StackIter::numFrameSlots() const
 {
-    AutoAssertNoGC nogc;
     switch (data_.state_) {
       case DONE:
       case NATIVE:
@@ -2047,7 +2016,6 @@ StackIter::numFrameSlots() const
 Value
 StackIter::frameSlotValue(size_t index) const
 {
-    AutoAssertNoGC nogc;
     switch (data_.state_) {
       case DONE:
       case NATIVE:
@@ -2177,4 +2145,20 @@ AllFramesIter::abstractFramePtr() const
     }
     JS_NOT_REACHED("Unexpected state");
     return NullFramePtr();
+}
+
+JSObject *
+AbstractFramePtr::evalPrevScopeChain(JSRuntime *rt) const
+{
+    /* Find the stack segment containing this frame. */
+    AllFramesIter alliter(rt);
+    while (alliter.isIon() || alliter.abstractFramePtr() != *this)
+        ++alliter;
+
+    /* Eval frames are not compiled by Ion, though their caller might be. */
+    StackIter iter(rt, *alliter.seg());
+    while (!iter.isScript() || iter.isIon() || iter.abstractFramePtr() != *this)
+        ++iter;
+    ++iter;
+    return iter.scopeChain();
 }

@@ -20,17 +20,6 @@ LIBXUL_LIBRARY = 1
 
 EXPORTS_NAMESPACES = mozilla
 
-XPIDLSRCS = \
-  nsIHTTPHeaderListener.idl \
-  nsIPluginDocument.idl \
-  nsIPluginHost.idl \
-  nsIPluginInputStream.idl \
-  nsIPluginInstanceOwner.idl \
-  nsIPluginTag.idl \
-  nsIPluginTagInfo.idl \
-  nspluginroot.idl \
-  $(NULL)
-
 EXPORTS = \
   npapi.h \
   npfunctions.h \
@@ -45,6 +34,7 @@ EXPORTS = \
   nsPluginDirServiceProvider.h \
   nsPluginHost.h \
   nsPluginInstanceOwner.h \
+  nsPluginPlayPreviewInfo.h \
   $(NULL)
 
 EXPORTS_mozilla = \
@@ -62,18 +52,16 @@ CPPSRCS		= \
 		nsPluginTags.cpp \
 		PluginPRLibrary.cpp \
 		nsPluginInstanceOwner.cpp \
+		nsPluginPlayPreviewInfo.cpp \
 		$(NULL)
 
 ifeq ($(MOZ_WIDGET_TOOLKIT),android)
-DIRS += android
 LOCAL_INCLUDES += -I$(topsrcdir)/dom/plugins/base/android
 else
 # android_npapi.h extends the NPNVariable and NPPVariable enums
 # using #defines, which results in Wswitch warnings in gcc-4.6.
 # Therefore, enable FAIL_ON_WARNINGS only on non-Android platforms.
-ifndef _MSC_VER
 FAIL_ON_WARNINGS := 1
-endif # !_MSC_VER
 endif
 
 ifeq ($(OS_ARCH),WINNT)

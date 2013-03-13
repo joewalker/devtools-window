@@ -23,7 +23,6 @@
 #include "nsSVGClass.h"
 #include "nsIDOMSVGElement.h"
 
-class nsIDOMSVGSVGElement;
 class nsSVGAngle;
 class nsSVGBoolean;
 class nsSVGEnum;
@@ -39,6 +38,11 @@ namespace mozilla {
 namespace dom {
 class CSSValue;
 class SVGSVGElement;
+
+static const unsigned short SVG_UNIT_TYPE_UNKNOWN           = 0;
+static const unsigned short SVG_UNIT_TYPE_USERSPACEONUSE    = 1;
+static const unsigned short SVG_UNIT_TYPE_OBJECTBOUNDINGBOX = 2;
+
 }
 
 class SVGAnimatedNumberList;
@@ -120,7 +124,7 @@ public:
   // nsIDOMSVGElement
   NS_IMETHOD GetId(nsAString & aId);
   NS_IMETHOD SetId(const nsAString & aId);
-  NS_IMETHOD GetOwnerSVGElement(nsIDOMSVGSVGElement** aOwnerSVGElement);
+  NS_IMETHOD GetOwnerSVGElement(nsIDOMSVGElement** aOwnerSVGElement);
   NS_IMETHOD GetViewportElement(nsIDOMSVGElement** aViewportElement);
   NS_IMETHOD GetClassName(nsIDOMSVGAnimatedString** aClassName);
   NS_IMETHOD GetStyle(nsIDOMCSSStyleDeclaration** aStyle);
@@ -302,9 +306,8 @@ public:
   nsSVGElement* GetViewportElement();
   already_AddRefed<nsIDOMSVGAnimatedString> ClassName();
   already_AddRefed<mozilla::dom::CSSValue> GetPresentationAttribute(const nsAString& aName, mozilla::ErrorResult& rv);
-  static bool PrefEnabled();
 protected:
-  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope, bool *triedToWrap);
+  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
 
 #ifdef DEBUG
   // We define BeforeSetAttr here and mark it MOZ_FINAL to ensure it is NOT used

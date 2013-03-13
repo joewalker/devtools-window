@@ -29,7 +29,7 @@
 #include "PowerManager.h"
 #include "nsIDOMWakeLock.h"
 #include "nsIPowerManagerService.h"
-#include "SmsManager.h"
+#include "mozilla/dom/SmsManager.h"
 #include "nsISmsService.h"
 #include "mozilla/Hal.h"
 #include "nsIWebNavigation.h"
@@ -69,7 +69,6 @@
 #include "nsIDOMGlobalPropertyInitializer.h"
 
 using namespace mozilla::dom::power;
-using namespace mozilla::dom::sms;
 
 // This should not be in the namespace.
 DOMCI_DATA(Navigator, mozilla::dom::Navigator)
@@ -306,7 +305,7 @@ Navigator::GetUserAgent(nsAString& aUserAgent)
     do_GetService("@mozilla.org/dom/site-specific-user-agent;1");
   NS_ENSURE_TRUE(siteSpecificUA, NS_OK);
 
-  return siteSpecificUA->GetUserAgentForURI(codebaseURI, aUserAgent);
+  return siteSpecificUA->GetUserAgentForURIAndWindow(codebaseURI, win, aUserAgent);
 }
 
 NS_IMETHODIMP
@@ -1487,7 +1486,9 @@ Navigator::OnNavigation()
 #ifdef MOZ_MEDIA_NAVIGATOR
   // Inform MediaManager in case there are live streams or pending callbacks.
   MediaManager *manager = MediaManager::Get();
-  manager->OnNavigation(win->WindowID());
+  if (manager) {
+    manager->OnNavigation(win->WindowID());
+  }
 #endif
   if (mCameraManager) {
     mCameraManager->OnNavigation(win->WindowID());
@@ -1514,7 +1515,7 @@ Navigator::CheckPermission(const char* type)
 //*****************************************************************************
 #ifdef MOZ_AUDIO_CHANNEL_MANAGER
 NS_IMETHODIMP
-Navigator::GetMozAudioChannelManager(nsIAudioChannelManager** aAudioChannelManager)
+Navigator::GetMozAudioChannelManager(nsISupports** aAudioChannelManager)
 {
   *aAudioChannelManager = nullptr;
 

@@ -43,6 +43,15 @@ JSObject *
 TransplantObjectWithWrapper(JSContext *cx,
                             JSObject *origobj, JSObject *origwrapper,
                             JSObject *targetobj, JSObject *targetwrapper);
+
+// Return a raw XBL scope object corresponding to contentScope, which must
+// be an object whose global is a DOM window.
+//
+// The return value is not wrapped into cx->compartment, so be sure to enter
+// its compartment before doing anything meaningful.
+JSObject *
+GetXBLScope(JSContext *cx, JSObject *contentScope);
+
 } /* namespace xpc */
 
 #define XPCONNECT_GLOBAL_FLAGS                                                \
@@ -53,9 +62,11 @@ TransplantObjectWithWrapper(JSContext *cx,
 void
 TraceXPCGlobal(JSTracer *trc, JSObject *obj);
 
-// XXX where should this live?
+// XXX These should be moved into XPCJSRuntime!
+NS_EXPORT_(bool)
+xpc_LocalizeRuntime(JSRuntime *rt);
 NS_EXPORT_(void)
-xpc_LocalizeContext(JSContext *cx);
+xpc_DelocalizeRuntime(JSRuntime *rt);
 
 nsresult
 xpc_MorphSlimWrapper(JSContext *cx, nsISupports *tomorph);
@@ -280,6 +291,20 @@ inline bool StringToJsval(JSContext *cx, nsAString &str, JS::Value *rval)
     return NonVoidStringToJsval(cx, str, rval);
 }
 
+inline bool
+NonVoidStringToJsval(JSContext* cx, const nsAString& str, JS::Value *rval)
+{
+    nsString mutableCopy(str);
+    return NonVoidStringToJsval(cx, mutableCopy, rval);
+}
+
+inline bool
+StringToJsval(JSContext* cx, const nsAString& str, JS::Value *rval)
+{
+    nsString mutableCopy(str);
+    return StringToJsval(cx, mutableCopy, rval);
+}
+
 /**
  * As above, but for mozilla::dom::DOMString.
  */
@@ -323,6 +348,8 @@ bool StringToJsval(JSContext* cx, mozilla::dom::DOMString& str,
 }
 
 nsIPrincipal *GetCompartmentPrincipal(JSCompartment *compartment);
+
+bool IsXBLScope(JSCompartment *compartment);
 
 void DumpJSHeap(FILE* file);
 
@@ -401,7 +428,7 @@ inline bool IsDOMProxy(JSObject *obj)
 }
 
 typedef JSObject*
-(*DefineInterface)(JSContext *cx, JSObject *global, bool *enabled);
+(*DefineInterface)(JSContext *cx, JSObject *global, jsid id, bool *enabled);
 
 typedef bool
 (*PrefEnabled)();

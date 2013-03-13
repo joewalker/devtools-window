@@ -7,7 +7,7 @@ package org.mozilla.gecko;
 import org.mozilla.gecko.db.BrowserDB;
 import org.mozilla.gecko.sync.setup.activities.SetupSyncActivity;
 import org.mozilla.gecko.sync.setup.SyncAccounts;
-import org.mozilla.gecko.util.GeckoAsyncTask;
+import org.mozilla.gecko.util.UiAsyncTask;
 
 import android.accounts.Account;
 import android.accounts.AccountManager;
@@ -50,6 +50,14 @@ public class AboutHomePromoBox extends TextView implements View.OnClickListener 
             return true;
         }
         public void onClick(View v) { }
+        public void onDestroy() { }
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        for (Type type : mTypes) {
+            type.onDestroy();
+        }
     }
 
     private class SyncType extends Type {
@@ -58,6 +66,7 @@ public class AboutHomePromoBox extends TextView implements View.OnClickListener 
             super(aText, aBoldText, aImage);
             // The listener will run on the background thread (see 2nd argument)
             mAccountListener = new OnAccountsUpdateListener() {
+                @Override
                 public void onAccountsUpdated(Account[] accounts) {
                     showRandomPromo();
                 }
@@ -75,6 +84,7 @@ public class AboutHomePromoBox extends TextView implements View.OnClickListener 
             context.startActivity(intent);
         }
 
+        @Override
         public void onDestroy() {
             if (mAccountListener != null) {
                 AccountManager.get(mContext).removeOnAccountsUpdatedListener(mAccountListener);
@@ -83,6 +93,7 @@ public class AboutHomePromoBox extends TextView implements View.OnClickListener 
         }
     }
 
+    private static int sTypeIndex = -1;
     private ArrayList<Type> mTypes;
     private Type mType;
 
@@ -115,6 +126,7 @@ public class AboutHomePromoBox extends TextView implements View.OnClickListener 
                 // if the user visits the marketplace through some other means, we'll have to wait
                 // until we are refreshed or restarted to get the correct value
                 v.postDelayed(new Runnable() {
+                    @Override
                     public void run() {
                         showRandomPromo();
                     }
@@ -139,13 +151,19 @@ public class AboutHomePromoBox extends TextView implements View.OnClickListener 
      */
     public void showRandomPromo() {
         getAvailableTypes(new GetTypesCallback() {
+            @Override
             public void onGotTypes(ArrayList<Type> types) {
                 if (types.size() == 0) {
                     hide();
                     return;
                 }
-                int idx = new Random().nextInt(types.size());
-                mType = types.get(idx);
+
+                // Try to maintain a promo type for the lifetime of the application
+                if (AboutHomePromoBox.sTypeIndex == -1 || AboutHomePromoBox.sTypeIndex >= types.size()) {
+                    AboutHomePromoBox.sTypeIndex = new Random().nextInt(types.size());
+                }
+                mType = types.get(AboutHomePromoBox.sTypeIndex);
+
                 updateViewResources();
                 setVisibility(View.VISIBLE);
             }
@@ -176,7 +194,7 @@ public class AboutHomePromoBox extends TextView implements View.OnClickListener 
     }
 
     private void getAvailableTypes(final GetTypesCallback callback) {
-        (new GeckoAsyncTask<Void, Void, ArrayList<Type>>(GeckoApp.mAppContext, GeckoAppShell.getHandler()) {
+        (new UiAsyncTask<Void, Void, ArrayList<Type>>(GeckoAppShell.getHandler()) {
             @Override
             public ArrayList<Type> doInBackground(Void... params) {
                 // Run all of this on a background thread

@@ -148,14 +148,14 @@ js::StringIsArrayIndex(JSLinearString *str, uint32_t *indexp)
     return false;
 }
 
-UnrootedShape
+RawShape
 js::GetDenseArrayShape(JSContext *cx, HandleObject globalObj)
 {
     JS_ASSERT(globalObj);
 
     JSObject *proto = globalObj->global().getOrCreateArrayPrototype(cx);
     if (!proto)
-        return UnrootedShape(NULL);
+        return NULL;
 
     return EmptyShape::getInitialShape(cx, &ArrayClass, proto, proto->getParent(),
                                        gc::FINALIZE_OBJECT0);
@@ -580,11 +580,9 @@ Class js::ArrayClass = {
     NULL,           /* hasInstance */
     NULL,           /* trace       */
     {
-        NULL,       /* equality    */
         NULL,       /* outerObject */
         NULL,       /* innerObject */
         NULL,       /* iteratorObject  */
-        NULL,       /* unused      */
         false,      /* isWrappedNative */
     }
 };
@@ -906,7 +904,10 @@ InitArrayElements(JSContext *cx, HandleObject obj, uint32_t start, uint32_t coun
     if (count == 0)
         return true;
 
-    if (updateTypes && !InitArrayTypes(cx, obj->getType(cx), vector, count))
+    types::TypeObject *type = obj->getType(cx);
+    if (!type)
+        return false;
+    if (updateTypes && !InitArrayTypes(cx, type, vector, count))
         return false;
 
     /*
@@ -919,6 +920,9 @@ InitArrayElements(JSContext *cx, HandleObject obj, uint32_t start, uint32_t coun
         if (ObjectMayHaveExtraIndexedProperties(obj))
             break;
 
+        if (obj->shouldConvertDoubleElements())
+            break;
+
         JSObject::EnsureDenseResult result = obj->ensureDenseElements(cx, start, count);
         if (result != JSObject::ED_OK) {
             if (result == JSObject::ED_FAILED)
@@ -926,6 +930,7 @@ InitArrayElements(JSContext *cx, HandleObject obj, uint32_t start, uint32_t coun
             JS_ASSERT(result == JSObject::ED_SPARSE);
             break;
         }
+
         uint32_t newlen = start + count;
         if (newlen > obj->getArrayLength())
             obj->setArrayLengthInt32(newlen);
@@ -1260,6 +1265,236 @@ SortComparatorFunction::operator()(const Value &a, const Value &b, bool *lessOrE
     return true;
 }
 
+struct NumericElement
+{
+    double dv;
+    size_t elementIndex;
+};
+
+bool
+ComparatorNumericLeftMinusRight(const NumericElement &a, const NumericElement &b,
+                                bool *lessOrEqualp)
+{
+    *lessOrEqualp = (a.dv <= b.dv);
+    return true;
+}
+
+bool
+ComparatorNumericRightMinusLeft(const NumericElement &a, const NumericElement &b,
+                                bool *lessOrEqualp)
+{
+    *lessOrEqualp = (b.dv <= a.dv);
+    return true;
+}
+
+typedef bool (*ComparatorNumeric)(const NumericElement &a, const NumericElement &b,
+                                  bool *lessOrEqualp);
+
+ComparatorNumeric SortComparatorNumerics[] = {
+    NULL,
+    ComparatorNumericLeftMinusRight,
+    ComparatorNumericRightMinusLeft
+};
+
+bool
+ComparatorInt32LeftMinusRight(const Value &a, const Value &b, bool *lessOrEqualp)
+{
+    *lessOrEqualp = (a.toInt32() <= b.toInt32());
+    return true;
+}
+
+bool
+ComparatorInt32RightMinusLeft(const Value &a, const Value &b, bool *lessOrEqualp)
+{
+    *lessOrEqualp = (b.toInt32() <= a.toInt32());
+    return true;
+}
+
+typedef bool (*ComparatorInt32)(const Value &a, const Value &b, bool *lessOrEqualp);
+
+ComparatorInt32 SortComparatorInt32s[] = {
+    NULL,
+    ComparatorInt32LeftMinusRight,
+    ComparatorInt32RightMinusLeft
+};
+
+enum ComparatorMatchResult {
+    Match_None = 0,
+    Match_LeftMinusRight,
+    Match_RightMinusLeft
+};
+
+/*
+ * Specialize behavior for comparator functions with particular common bytecode
+ * patterns: namely, |return x - y| and |return y - x|.
+ */
+ComparatorMatchResult
+MatchNumericComparator(const Value &v)
+{
+    if (!v.isObject())
+        return Match_None;
+
+    JSObject &obj = v.toObject();
+    if (!obj.isFunction())
+        return Match_None;
+
+    JSFunction *fun = obj.toFunction();
+    if (!fun->hasScript())
+        return Match_None;
+
+    RawScript script = fun->nonLazyScript();
+    jsbytecode *pc = script->code;
+
+    uint16_t arg0, arg1;
+    if (JSOp(*pc) != JSOP_GETARG)
+        return Match_None;
+    arg0 = GET_ARGNO(pc);
+    pc += JSOP_GETARG_LENGTH;
+
+    if (JSOp(*pc) != JSOP_GETARG)
+        return Match_None;
+    arg1 = GET_ARGNO(pc);
+    pc += JSOP_GETARG_LENGTH;
+
+    if (JSOp(*pc) != JSOP_SUB)
+        return Match_None;
+    pc += JSOP_SUB_LENGTH;
+
+    if (JSOp(*pc) != JSOP_RETURN)
+        return Match_None;
+
+    if (arg0 == 0 && arg1 == 1)
+        return Match_LeftMinusRight;
+
+    if (arg0 == 1 && arg1 == 0)
+        return Match_RightMinusLeft;
+
+    return Match_None;
+}
+
+template<typename K, typename C>
+inline bool
+MergeSortByKey(K keys, size_t len, K scratch, C comparator, AutoValueVector *vec)
+{
+    MOZ_ASSERT(vec->length() >= len);
+
+    /* Sort keys. */
+    if (!MergeSort(keys, len, scratch, comparator))
+        return false;
+
+    /*
+     * Reorder vec by keys in-place, going element by element.  When an out-of-
+     * place element is encountered, move that element to its proper position,
+     * displacing whatever element was at *that* point to its proper position,
+     * and so on until an element must be moved to the current position.
+     *
+     * At each outer iteration all elements up to |i| are sorted.  If
+     * necessary each inner iteration moves some number of unsorted elements
+     * (including |i|) directly to sorted position.  Thus on completion |*vec|
+     * is sorted, and out-of-position elements have moved once.  Complexity is
+     * Θ(len) + O(len) == O(2*len), with each element visited at most twice.
+     */
+    for (size_t i = 0; i < len; i++) {
+        size_t j = keys[i].elementIndex;
+        if (i == j)
+            continue; // fixed point
+
+        MOZ_ASSERT(j > i, "Everything less than |i| should be in the right place!");
+        Value tv = (*vec)[j];
+        do {
+            size_t k = keys[j].elementIndex;
+            keys[j].elementIndex = j;
+            (*vec)[j] = (*vec)[k];
+            j = k;
+        } while (j != i);
+
+        // We could assert the loop invariant that |i == keys[i].elementIndex|
+        // here if we synced |keys[i].elementIndex|.  But doing so would render
+        // the assertion vacuous, so don't bother, even in debug builds.
+        (*vec)[i] = tv;
+    }
+
+    return true;
+}
+
+/*
+ * Sort Values as strings.
+ *
+ * To minimize #conversions, SortLexicographically() first converts all Values
+ * to strings at once, then sorts the elements by these cached strings.
+ */
+bool
+SortLexicographically(JSContext *cx, AutoValueVector *vec, size_t len)
+{
+    JS_ASSERT(vec->length() >= len);
+
+    StringBuffer sb(cx);
+    Vector<StringifiedElement, 0, TempAllocPolicy> strElements(cx);
+
+    /* MergeSort uses the upper half as scratch space. */
+    if (!strElements.reserve(2 * len))
+        return false;
+
+    /* Convert Values to strings. */
+    size_t cursor = 0;
+    for (size_t i = 0; i < len; i++) {
+        if (!JS_CHECK_OPERATION_LIMIT(cx))
+            return false;
+
+        if (!ValueToStringBuffer(cx, (*vec)[i], sb))
+            return false;
+
+        StringifiedElement el = { cursor, sb.length(), i };
+        strElements.infallibleAppend(el);
+        cursor = sb.length();
+    }
+
+    /* Resize strElements so we can perform MergeSort. */
+    JS_ALWAYS_TRUE(strElements.resize(2 * len));
+
+    /* Sort Values in vec alphabetically. */
+    return MergeSortByKey(strElements.begin(), len, strElements.begin() + len,
+                          SortComparatorStringifiedElements(cx, sb), vec);
+}
+
+/*
+ * Sort Values as numbers.
+ *
+ * To minimize #conversions, SortNumerically first converts all Values to
+ * numerics at once, then sorts the elements by these cached numerics.
+ */
+bool
+SortNumerically(JSContext *cx, AutoValueVector *vec, size_t len, ComparatorMatchResult comp)
+{
+    JS_ASSERT(vec->length() >= len);
+
+    Vector<NumericElement, 0, TempAllocPolicy> numElements(cx);
+
+    /* MergeSort uses the upper half as scratch space. */
+    if (!numElements.reserve(2 * len))
+        return false;
+
+    /* Convert Values to numerics. */
+    for (size_t i = 0; i < len; i++) {
+        if (!JS_CHECK_OPERATION_LIMIT(cx))
+            return false;
+
+        double dv;
+        if (!ToNumber(cx, (*vec)[i], &dv))
+            return false;
+
+        NumericElement el = { dv, i };
+        numElements.infallibleAppend(el);
+    }
+
+    /* Resize strElements so we can perform MergeSort. */
+    JS_ALWAYS_TRUE(numElements.resize(2 * len));
+
+    /* Sort Values in vec numerically. */
+    return MergeSortByKey(numElements.begin(), len, numElements.begin() + len,
+                          SortComparatorNumerics[comp], vec);
+}
+
 } /* namespace anonymous */
 
 JSBool
@@ -1287,7 +1522,8 @@ js::array_sort(JSContext *cx, unsigned argc, Value *vp)
     uint32_t len;
     if (!GetLengthProperty(cx, obj, &len))
         return false;
-    if (len == 0) {
+    if (len < 2) {
+        /* [] and [a] remain unchanged when sorted. */
         args.rval().setObject(*obj);
         return true;
     }
@@ -1351,80 +1587,63 @@ js::array_sort(JSContext *cx, unsigned argc, Value *vp)
             allInts = allInts && v.isInt32();
         }
 
+
+        /*
+         * If the array only contains holes, we're done.  But if it contains
+         * undefs, those must be sorted to the front of the array.
+         */
         n = vec.length();
-        if (n == 0) {
+        if (n == 0 && undefs == 0) {
             args.rval().setObject(*obj);
-            return true; /* The array has only holes and undefs. */
+            return true;
         }
 
-        JS_ALWAYS_TRUE(vec.resize(n * 2));
-
         /* Here len == n + undefs + number_of_holes. */
-        Value *result = vec.begin();
         if (fval.isNull()) {
             /*
              * Sort using the default comparator converting all elements to
              * strings.
              */
             if (allStrings) {
+                JS_ALWAYS_TRUE(vec.resize(n * 2));
                 if (!MergeSort(vec.begin(), n, vec.begin() + n, SortComparatorStrings(cx)))
                     return false;
             } else if (allInts) {
+                JS_ALWAYS_TRUE(vec.resize(n * 2));
                 if (!MergeSort(vec.begin(), n, vec.begin() + n,
                                SortComparatorLexicographicInt32(cx))) {
                     return false;
                 }
             } else {
-                /*
-                 * Convert all elements to a jschar array in StringBuffer.
-                 * Store the index and length of each stringified element with
-                 * the corresponding index of the element in the array. Sort
-                 * the stringified elements and with this result order the
-                 * original array.
-                 */
-                StringBuffer sb(cx);
-                Vector<StringifiedElement, 0, TempAllocPolicy> strElements(cx);
-                if (!strElements.reserve(2 * n))
+                if (!SortLexicographically(cx, &vec, n))
                     return false;
-
-                size_t cursor = 0;
-                for (size_t i = 0; i < n; i++) {
-                    if (!JS_CHECK_OPERATION_LIMIT(cx))
-                        return false;
-
-                    if (!ValueToStringBuffer(cx, vec[i], sb))
-                        return false;
-
-                    StringifiedElement el = { cursor, sb.length(), i };
-                    strElements.infallibleAppend(el);
-                    cursor = sb.length();
-                }
-
-                /* Resize strElements so we can perform the sorting */
-                JS_ALWAYS_TRUE(strElements.resize(2 * n));
-
-                if (!MergeSort(strElements.begin(), n, strElements.begin() + n,
-                               SortComparatorStringifiedElements(cx, sb))) {
-                    return false;
-                }
-
-                /* Order vec[n:2n-1] using strElements.index */
-                for (size_t i = 0; i < n; i ++)
-                    vec[n + i] = vec[strElements[i].elementIndex];
-
-                result = vec.begin() + n;
             }
         } else {
-            /* array.sort() cannot currently be used from parallel code */
-            JS_ASSERT(!ForkJoinSlice::InParallelSection());
-            FastInvokeGuard fig(cx, fval);
-            if (!MergeSort(vec.begin(), n, vec.begin() + n,
-                           SortComparatorFunction(cx, fval, fig))) {
-                return false;
+            ComparatorMatchResult comp = MatchNumericComparator(fval);
+
+            if (comp != Match_None) {
+                if (allInts) {
+                    JS_ALWAYS_TRUE(vec.resize(n * 2));
+                    if (!MergeSort(vec.begin(), n, vec.begin() + n, SortComparatorInt32s[comp]))
+                        return false;
+                } else {
+                    if (!SortNumerically(cx, &vec, n, comp))
+                        return false;
+                }
+            } else {
+                FastInvokeGuard fig(cx, fval);
+                MOZ_ASSERT(!InParallelSection(),
+                           "Array.sort() can't currently be used from parallel code");
+                JS_ALWAYS_TRUE(vec.resize(n * 2));
+                if (!MergeSort(vec.begin(), n, vec.begin() + n,
+                               SortComparatorFunction(cx, fval, fig)))
+                {
+                    return false;
+                }
             }
         }
 
-        if (!InitArrayElements(cx, obj, 0, uint32_t(n), result, DontUpdateTypes))
+        if (!InitArrayElements(cx, obj, 0, uint32_t(n), vec.begin(), DontUpdateTypes))
             return false;
     }
 
@@ -1777,7 +1996,8 @@ CanOptimizeForDenseStorage(HandleObject arr, uint32_t startingIndex, uint32_t co
      * case can't happen, because any dense array used as the prototype of
      * another object is first slowified, for type inference's sake.
      */
-    if (JS_UNLIKELY(arr->getType(cx)->hasAllFlags(OBJECT_FLAG_ITERATED)))
+    types::TypeObject *arrType = arr->getType(cx);
+    if (JS_UNLIKELY(!arrType || arrType->hasAllFlags(OBJECT_FLAG_ITERATED)))
         return false;
 
     /*
@@ -2054,7 +2274,7 @@ js::array_concat(JSContext *cx, unsigned argc, Value *vp)
         HandleValue v = HandleValue::fromMarkedLocation(&p[i]);
         if (v.isObject()) {
             RootedObject obj(cx, &v.toObject());
-            if (ObjectClassIs(*obj, ESClass_Array, cx)) {
+            if (ObjectClassIs(obj, ESClass_Array, cx)) {
                 uint32_t alength;
                 if (!GetLengthProperty(cx, obj, &alength))
                     return false;
@@ -2163,85 +2383,6 @@ array_slice(JSContext *cx, unsigned argc, Value *vp)
     return JS_TRUE;
 }
 
-/* ES5 15.4.4.19. */
-static JSBool
-array_map(JSContext *cx, unsigned argc, Value *vp)
-{
-    CallArgs args = CallArgsFromVp(argc, vp);
-
-    /* Step 1. */
-    RootedObject obj(cx, ToObject(cx, args.thisv()));
-    if (!obj)
-        return false;
-
-    /* Step 2-3. */
-    uint32_t len;
-    if (!GetLengthProperty(cx, obj, &len))
-        return false;
-
-    /* Step 4. */
-    if (args.length() == 0) {
-        js_ReportMissingArg(cx, args.calleev(), 0);
-        return false;
-    }
-    RootedObject callable(cx, ValueToCallable(cx, &args[0]));
-    if (!callable)
-        return false;
-
-    /* Step 5. */
-    RootedValue thisv(cx, args.length() >= 2 ? args[1] : UndefinedValue());
-
-    /* Step 6. */
-    RootedObject arr(cx, NewDenseAllocatedArray(cx, len));
-    if (!arr)
-        return false;
-    TypeObject *newtype = GetTypeCallerInitObject(cx, JSProto_Array);
-    if (!newtype)
-        return false;
-    arr->setType(newtype);
-
-    /* Step 7. */
-    uint32_t k = 0;
-
-    /* Step 8. */
-    RootedValue kValue(cx);
-    JS_ASSERT(!ForkJoinSlice::InParallelSection());
-    FastInvokeGuard fig(cx, ObjectValue(*callable));
-    InvokeArgsGuard &ag = fig.args();
-    while (k < len) {
-        if (!JS_CHECK_OPERATION_LIMIT(cx))
-            return false;
-
-        /* Step a, b, and c.i. */
-        JSBool kNotPresent;
-        if (!GetElement(cx, obj, k, &kNotPresent, &kValue))
-            return false;
-
-        /* Step c.ii-iii. */
-        if (!kNotPresent) {
-            if (!ag.pushed() && !cx->stack.pushInvokeArgs(cx, 3, &ag))
-                return false;
-            ag.setCallee(ObjectValue(*callable));
-            ag.setThis(thisv);
-            ag[0] = kValue;
-            ag[1] = NumberValue(k);
-            ag[2] = ObjectValue(*obj);
-            if (!fig.invoke(cx))
-                return false;
-            kValue = ag.rval();
-            if (!SetArrayElement(cx, arr, k, kValue))
-                return false;
-        }
-
-        /* Step d. */
-        k++;
-    }
-
-    /* Step 9. */
-    args.rval().setObject(*arr);
-    return true;
-}
-
 /* ES5 15.4.4.20. */
 static JSBool
 array_filter(JSContext *cx, unsigned argc, Value *vp)
@@ -2263,7 +2404,7 @@ array_filter(JSContext *cx, unsigned argc, Value *vp)
         js_ReportMissingArg(cx, args.calleev(), 0);
         return false;
     }
-    RootedObject callable(cx, ValueToCallable(cx, &args[0]));
+    RootedObject callable(cx, ValueToCallable(cx, args[0], args.length() - 1));
     if (!callable)
         return false;
 
@@ -2286,7 +2427,7 @@ array_filter(JSContext *cx, unsigned argc, Value *vp)
     uint32_t to = 0;
 
     /* Step 9. */
-    JS_ASSERT(!ForkJoinSlice::InParallelSection());
+    JS_ASSERT(!InParallelSection());
     FastInvokeGuard fig(cx, ObjectValue(*callable));
     InvokeArgsGuard &ag = fig.args();
     RootedValue kValue(cx);
@@ -2362,7 +2503,7 @@ static JSFunctionSpec array_methods[] = {
          {"lastIndexOf",        {NULL, NULL},       1,0, "ArrayLastIndexOf"},
          {"indexOf",            {NULL, NULL},       1,0, "ArrayIndexOf"},
          {"forEach",            {NULL, NULL},       1,0, "ArrayForEach"},
-    JS_FN("map",                array_map,          1,JSFUN_GENERIC_NATIVE),
+         {"map",                {NULL, NULL},       1,0, "ArrayMap"},
          {"reduce",             {NULL, NULL},       1,0, "ArrayReduce"},
          {"reduceRight",        {NULL, NULL},       1,0, "ArrayReduceRight"},
     JS_FN("filter",             array_filter,       1,JSFUN_GENERIC_NATIVE),
@@ -2378,6 +2519,7 @@ static JSFunctionSpec array_static_methods[] = {
          {"lastIndexOf",        {NULL, NULL},       2,0, "ArrayStaticLastIndexOf"},
          {"indexOf",            {NULL, NULL},       2,0, "ArrayStaticIndexOf"},
          {"forEach",            {NULL, NULL},       2,0, "ArrayStaticForEach"},
+         {"map",                {NULL, NULL},       2,0, "ArrayStaticMap"},
          {"every",              {NULL, NULL},       2,0, "ArrayStaticEvery"},
          {"some",               {NULL, NULL},       2,0, "ArrayStaticSome"},
          {"reduce",             {NULL, NULL},       2,0, "ArrayStaticReduce"},
@@ -2456,7 +2598,7 @@ js_InitArrayClass(JSContext *cx, HandleObject obj)
     RootedShape shape(cx, EmptyShape::getInitialShape(cx, &ArrayClass, TaggedProto(proto), proto->getParent(),
                                                       gc::FINALIZE_OBJECT0));
 
-    RootedObject arrayProto(cx, JSObject::createArray(cx, gc::FINALIZE_OBJECT4, shape, type, 0));
+    RootedObject arrayProto(cx, JSObject::createArray(cx, gc::FINALIZE_OBJECT4, gc::TenuredHeap, shape, type, 0));
     if (!arrayProto || !JSObject::setSingletonType(cx, arrayProto) || !AddLengthProperty(cx, arrayProto))
         return NULL;
 
@@ -2512,17 +2654,19 @@ EnsureNewArrayElements(JSContext *cx, JSObject *obj, uint32_t length)
 
 template<bool allocateCapacity>
 static JS_ALWAYS_INLINE JSObject *
-NewArray(JSContext *cx, uint32_t length, RawObject protoArg)
+NewArray(JSContext *cx, uint32_t length, RawObject protoArg, NewObjectKind newKind = GenericObject)
 {
-    gc::AllocKind kind = GuessArrayGCKind(length);
-    JS_ASSERT(CanBeFinalizedInBackground(kind, &ArrayClass));
-    kind = GetBackgroundAllocKind(kind);
+    gc::AllocKind allocKind = GuessArrayGCKind(length);
+    JS_ASSERT(CanBeFinalizedInBackground(allocKind, &ArrayClass));
+    allocKind = GetBackgroundAllocKind(allocKind);
 
     NewObjectCache &cache = cx->runtime->newObjectCache;
 
     NewObjectCache::EntryIndex entry = -1;
-    if (cache.lookupGlobal(&ArrayClass, cx->global(), kind, &entry)) {
-        RootedObject obj(cx, cache.newObjectFromHit(cx, entry));
+    if (newKind != SingletonObject &&
+        cache.lookupGlobal(&ArrayClass, cx->global(), allocKind, &entry))
+    {
+        RootedObject obj(cx, cache.newObjectFromHit(cx, entry, GetInitialHeap(newKind, &ArrayClass)));
         if (obj) {
             /* Fixup the elements pointer and length, which may be incorrect. */
             obj->setFixedElements();
@@ -2553,7 +2697,7 @@ NewArray(JSContext *cx, uint32_t length, RawObject protoArg)
     if (!shape)
         return NULL;
 
-    RootedObject obj(cx, JSObject::createArray(cx, kind, shape, type, length));
+    RootedObject obj(cx, JSObject::createArray(cx, allocKind, gc::DefaultHeap, shape, type, length));
     if (!obj)
         return NULL;
 
@@ -2564,8 +2708,11 @@ NewArray(JSContext *cx, uint32_t length, RawObject protoArg)
         EmptyShape::insertInitialShape(cx, shape, proto);
     }
 
+    if (newKind == SingletonObject && !JSObject::setSingletonType(cx, obj))
+        return NULL;
+
     if (entry != -1)
-        cache.fillGlobal(entry, &ArrayClass, cx->global(), kind, obj);
+        cache.fillGlobal(entry, &ArrayClass, cx->global(), allocKind, obj);
 
     if (allocateCapacity && !EnsureNewArrayElements(cx, obj, length))
         return NULL;
@@ -2575,19 +2722,22 @@ NewArray(JSContext *cx, uint32_t length, RawObject protoArg)
 }
 
 JSObject * JS_FASTCALL
-js::NewDenseEmptyArray(JSContext *cx, RawObject proto /* = NULL */)
+js::NewDenseEmptyArray(JSContext *cx, RawObject proto /* = NULL */,
+                       NewObjectKind newKind /* = GenericObject */)
 {
     return NewArray<false>(cx, 0, proto);
 }
 
 JSObject * JS_FASTCALL
-js::NewDenseAllocatedArray(JSContext *cx, uint32_t length, RawObject proto /* = NULL */)
+js::NewDenseAllocatedArray(JSContext *cx, uint32_t length, RawObject proto /* = NULL */,
+                           NewObjectKind newKind /* = GenericObject */)
 {
-    return NewArray<true>(cx, length, proto);
+    return NewArray<true>(cx, length, proto, newKind);
 }
 
 JSObject * JS_FASTCALL
-js::NewDenseUnallocatedArray(JSContext *cx, uint32_t length, RawObject proto /* = NULL */)
+js::NewDenseUnallocatedArray(JSContext *cx, uint32_t length, RawObject proto /* = NULL */,
+                             NewObjectKind newKind /* = GenericObject */)
 {
     return NewArray<false>(cx, length, proto);
 }
@@ -2628,7 +2778,7 @@ js::NewDenseCopiedArray(JSContext *cx, uint32_t length, HandleObject src, uint32
 // values must point at already-rooted Value objects
 JSObject *
 js::NewDenseCopiedArray(JSContext *cx, uint32_t length, const Value *values,
-                        RawObject proto /* = NULL */)
+                        RawObject proto /* = NULL */, NewObjectKind newKind /* = GenericObject */)
 {
     JSObject* obj = NewArray<true>(cx, length, proto);
     if (!obj)

@@ -69,9 +69,9 @@ public:
 
   bool ShouldBuildLayer() const;
 
-  nsresult BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                            const nsRect&           aDirtyRect,
-                            const nsDisplayListSet& aLists);
+  void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                        const nsRect&           aDirtyRect,
+                        const nsDisplayListSet& aLists);
 
   void AppendScrollPartsTo(nsDisplayListBuilder*   aBuilder,
                            const nsRect&           aDirtyRect,
@@ -299,6 +299,9 @@ public:
   nsCOMPtr<nsITimer> mScrollActivityTimer;
   nsPoint mScrollPosForLayerPixelAlignment;
 
+  // The scroll position where we last updated image visibility.
+  nsPoint mLastUpdateImagesPos;
+
   bool mNeverHasVerticalScrollbar:1;
   bool mNeverHasHorizontalScrollbar:1;
   bool mHasVerticalScrollbar:1;
@@ -371,10 +374,10 @@ public:
   NS_IMETHOD SetInitialChildList(ChildListID     aListID,
                                  nsFrameList&    aChildList) MOZ_OVERRIDE;
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists) {
-    return mInner.BuildDisplayList(aBuilder, aDirtyRect, aLists);
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE {
+    mInner.BuildDisplayList(aBuilder, aDirtyRect, aLists);
   }
 
   bool TryLayout(ScrollReflowState* aState,
@@ -406,6 +409,10 @@ public:
                     nsHTMLReflowMetrics&     aDesiredSize,
                     const nsHTMLReflowState& aReflowState,
                     nsReflowStatus&          aStatus);
+
+  virtual bool UpdateOverflow() MOZ_OVERRIDE {
+    return mInner.UpdateOverflow();
+  }
 
   // Because there can be only one child frame, these two function return
   // NS_ERROR_FAILURE
@@ -527,8 +534,8 @@ public:
   virtual void ResetScrollPositionForLayerPixelAlignment() {
     mInner.ResetScrollPositionForLayerPixelAlignment();
   }
-  virtual bool UpdateOverflow() {
-    return mInner.UpdateOverflow();
+  virtual bool DidHistoryRestore() MOZ_OVERRIDE {
+    return mInner.mDidHistoryRestore;
   }
 
   // nsIStatefulFrame
@@ -553,8 +560,6 @@ public:
 #ifdef DEBUG
   NS_IMETHOD GetFrameName(nsAString& aResult) const;
 #endif
-
-  bool DidHistoryRestore() { return mInner.mDidHistoryRestore; }
 
 #ifdef ACCESSIBILITY
   virtual mozilla::a11y::AccType AccessibleType() MOZ_OVERRIDE;
@@ -612,16 +617,20 @@ public:
   NS_IMETHOD SetInitialChildList(ChildListID     aListID,
                                  nsFrameList&    aChildList);
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists) MOZ_OVERRIDE {
-    return mInner.BuildDisplayList(aBuilder, aDirtyRect, aLists);
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE {
+    mInner.BuildDisplayList(aBuilder, aDirtyRect, aLists);
   }
 
   // XXXldb Is this actually used?
 #if 0
   virtual nscoord GetMinWidth(nsRenderingContext *aRenderingContext) MOZ_OVERRIDE;
 #endif
+
+  virtual bool UpdateOverflow() MOZ_OVERRIDE {
+    return mInner.UpdateOverflow();
+  }
 
   // Because there can be only one child frame, these two function return
   // NS_ERROR_FAILURE
@@ -778,8 +787,8 @@ public:
   virtual void ResetScrollPositionForLayerPixelAlignment() {
     mInner.ResetScrollPositionForLayerPixelAlignment();
   }
-  virtual bool UpdateOverflow() {
-    return mInner.UpdateOverflow();
+  virtual bool DidHistoryRestore() MOZ_OVERRIDE {
+    return mInner.mDidHistoryRestore;
   }
 
   // nsIStatefulFrame

@@ -254,7 +254,7 @@ Object.freeze(DataSubmissionRequest.prototype);
  *        (Preferences) Handle on preferences branch on which state will be
  *        queried and stored.
  * @param healthReportPrefs
- *        (Preferences) Handle on preferences branch hold Health Report state.
+ *        (Preferences) Handle on preferences branch holding Health Report state.
  * @param listener
  *        (object) Object with callbacks that will be invoked at certain key
  *        events.
@@ -279,6 +279,24 @@ this.DataReportingPolicy = function (prefs, healthReportPrefs, listener) {
     this.firstRunDate = this.now();
   }
 
+  // Install an observer so that we can act on changes from external
+  // code (such as Android UI).
+  // Use a function because this is the only place where the Preferences
+  // abstraction is way less usable than nsIPrefBranch.
+  //
+  // Hang on to the observer here so that tests can reach it.
+  this.uploadEnabledObserver = function onUploadEnabledChanged() {
+    if (this.pendingDeleteRemoteData || this.healthReportUploadEnabled) {
+      // Nothing to do: either we're already deleting because the caller
+      // came through the front door (rHRUE), or they set the flag to true.
+      return;
+    }
+    this._log.info("uploadEnabled pref changed. Scheduling deletion.");
+    this.deleteRemoteData();
+  }.bind(this);
+
+  healthReportPrefs.observe("uploadEnabled", this.uploadEnabledObserver);
+
   // Ensure we are scheduled to submit.
   if (!this.nextDataSubmissionDate.getTime()) {
     this.nextDataSubmissionDate = this._futureDate(MILLISECONDS_PER_DAY);
@@ -292,7 +310,7 @@ this.DataReportingPolicy = function (prefs, healthReportPrefs, listener) {
   // Record when we last requested for submitted data to be sent. This is
   // to avoid having multiple outstanding requests.
   this._inProgressSubmissionRequest = null;
-}
+};
 
 DataReportingPolicy.prototype = Object.freeze({
   /**
@@ -306,7 +324,7 @@ DataReportingPolicy.prototype = Object.freeze({
    * THERE ARE POTENTIAL LEGAL IMPLICATIONS OF CHANGING THIS VALUE. Check with
    * Privacy and/or Legal before modifying.
    */
-  IMPLICIT_ACCEPTANCE_INTERVAL_MSEC: 5 * 60 * 1000,
+  IMPLICIT_ACCEPTANCE_INTERVAL_MSEC: 8 * 60 * 60 * 1000,
 
   /**
    *  How often to poll to see if we need to do something.
@@ -621,6 +639,8 @@ DataReportingPolicy.prototype = Object.freeze({
     return !!this._healthReportPrefs.get("uploadEnabled", true);
   },
 
+  // External callers should update this via `recordHealthReportUploadEnabled`
+  // to ensure appropriate side-effects are performed.
   set healthReportUploadEnabled(value) {
     this._healthReportPrefs.set("uploadEnabled", !!value);
   },
@@ -661,6 +681,39 @@ DataReportingPolicy.prototype = Object.freeze({
     this.dataSubmissionPolicyResponseDate = this.now();
     this.dataSubmissionPolicyResponseType = "rejected-" + reason;
     this.dataSubmissionPolicyAccepted = false;
+  },
+
+  /**
+   * Record the user's intent for whether FHR should upload data.
+   *
+   * This is the preferred way for XUL applications to record a user's
+   * preference on whether Firefox Health Report should upload data to
+   * a server.
+   *
+   * If upload is disabled through this API, a request for remote data
+   * deletion is initiated automatically.
+   *
+   * If upload is being disabled and this operation is scheduled to
+   * occur immediately, a promise will be returned. This promise will be
+   * fulfilled when the deletion attempt finishes. If upload is being
+   * disabled and a promise is not returned, callers must poll
+   * `haveRemoteData` on the HealthReporter instance to see if remote
+   * data has been deleted.
+   *
+   * @param flag
+   *        (bool) Whether data submission is enabled or disabled.
+   * @param reason
+   *        (string) Why this value is being adjusted. For logging
+   *        purposes only.
+   */
+  recordHealthReportUploadEnabled: function (flag, reason="no-reason") {
+    let result = null;
+    if (!flag) {
+      result = this.deleteRemoteData(reason);
+    }
+
+    this.healthReportUploadEnabled = flag;
+    return result;
   },
 
   /**

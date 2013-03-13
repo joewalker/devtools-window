@@ -2,6 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "CSFLog.h"
 
 #include "CallControlManager.h"
 #include "CC_Device.h"
@@ -11,13 +12,13 @@
 #include "CC_SIPCCCallInfo.h"
 #include "ccapi_device_info.h"
 #include "CC_SIPCCDeviceInfo.h"
-#include "CSFLog.h"
 #include "vcm.h"
 #include "VcmSIPCCBinding.h"
 #include "PeerConnectionImpl.h"
 #include "PeerConnectionCtx.h"
 #include "runnable_utils.h"
 #include "cpr_socket.h"
+#include "debug-psipcc-types.h"
 
 #include "nsIObserverService.h"
 #include "nsIObserver.h"
@@ -25,6 +26,12 @@
 #include "StaticPtr.h"
 
 static const char* logTag = "PeerConnectionCtx";
+
+extern "C" {
+extern PRCondVar *ccAppReadyToStartCond;
+extern PRLock *ccAppReadyToStartLock;
+extern char ccAppReadyToStart;
+}
 
 namespace mozilla {
 class PeerConnectionCtxShutdown : public nsIObserver
@@ -180,6 +187,16 @@ nsresult PeerConnectionCtx::Initialize() {
   //codecMask |= VCM_CODEC_RESOURCE_I420;
   mCCM->setVideoCodecs(codecMask);
 
+  ccAppReadyToStartLock = PR_NewLock();
+  if (!ccAppReadyToStartLock) {
+    return NS_ERROR_FAILURE;
+  }
+
+  ccAppReadyToStartCond = PR_NewCondVar(ccAppReadyToStartLock);
+  if (!ccAppReadyToStartCond) {
+    return NS_ERROR_FAILURE;
+  }
+
   if (!mCCM->startSDPMode())
     return NS_ERROR_FAILURE;
 
@@ -187,6 +204,14 @@ nsresult PeerConnectionCtx::Initialize() {
   mCCM->addCCObserver(this);
   NS_ENSURE_TRUE(mDevice.get(), NS_ERROR_FAILURE);
   ChangeSipccState(PeerConnectionImpl::kStarting);
+
+  // Now that everything is set up, we let the CCApp thread
+  // know that it's okay to start processing messages.
+  PR_Lock(ccAppReadyToStartLock);
+  ccAppReadyToStart = 1;
+  PR_NotifyAllCondVar(ccAppReadyToStartCond);
+  PR_Unlock(ccAppReadyToStartLock);
+
   return NS_OK;
 }
 
@@ -210,18 +235,25 @@ void PeerConnectionCtx::onDeviceEvent(ccapi_device_event_e aDeviceEvent,
   // with ChangeSipccState in the debug message and compound if below
   PeerConnectionImpl::SipccState currentSipccState = mSipccState;
 
-  CSFLogDebug(logTag, "%s - %d : %d", __FUNCTION__, state, currentSipccState);
+  switch (aDeviceEvent) {
+    case CCAPI_DEVICE_EV_STATE:
+      CSFLogDebug(logTag, "%s - %d : %d", __FUNCTION__, state, currentSipccState);
 
-  if (CC_STATE_INS == state) {
-    // SIPCC is up
-    if (PeerConnectionImpl::kStarting == currentSipccState ||
-        PeerConnectionImpl::kIdle == currentSipccState) {
-      ChangeSipccState(PeerConnectionImpl::kStarted);
-    } else {
-      CSFLogError(logTag, "%s PeerConnection already started", __FUNCTION__);
-    }
-  } else {
-    NS_NOTREACHED("Unsupported Signaling State Transition");
+      if (CC_STATE_INS == state) {
+        // SIPCC is up
+        if (PeerConnectionImpl::kStarting == currentSipccState ||
+            PeerConnectionImpl::kIdle == currentSipccState) {
+          ChangeSipccState(PeerConnectionImpl::kStarted);
+        } else {
+          CSFLogError(logTag, "%s PeerConnection already started", __FUNCTION__);
+        }
+      } else {
+        NS_NOTREACHED("Unsupported Signaling State Transition");
+      }
+      break;
+    default:
+      CSFLogDebug(logTag, "%s: Ignoring event: %s\n",__FUNCTION__,
+                  device_event_getname(aDeviceEvent));
   }
 }
 

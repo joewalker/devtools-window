@@ -20,6 +20,7 @@ include protocol PSms;
 include protocol PStorage;
 include protocol PTestShell;
 include DOMTypes;
+include InputStreamParams;
 include URIParams;
 
 include "mozilla/chrome/RegistryMessageUtils.h";
@@ -129,6 +130,39 @@ union DeviceStorageParams
   DeviceStorageFreeSpaceParams;
   DeviceStorageUsedSpaceParams;
   DeviceStorageAvailableParams;
+};
+
+struct SlicedBlobConstructorParams
+{
+  PBlob source;
+  uint64_t begin;
+  uint64_t end;
+  nsString contentType;
+};
+
+struct MysteryBlobConstructorParams
+{
+  // Nothing is known about this type of blob.
+};
+
+union ChildBlobConstructorParams
+{
+  NormalBlobConstructorParams;
+  FileBlobConstructorParams;
+  SlicedBlobConstructorParams;
+  MysteryBlobConstructorParams;
+};
+
+struct ParentBlobConstructorParams
+{
+  ChildBlobConstructorParams blobParams;
+  OptionalInputStreamParams optionalInputStreamParams;
+};
+
+union BlobConstructorParams
+{
+  ChildBlobConstructorParams;
+  ParentBlobConstructorParams;
 };
 
 // An IPCTabContext which corresponds to a PBrowser opened by a child when it
@@ -351,6 +385,9 @@ parent:
 
     sync PCrashReporter(NativeThreadId tid, uint32_t processType);
 
+    sync GetRandomValues(uint32_t length)
+        returns (uint8_t[] randomValues);
+
     PHal();
 
     PIndexedDB();
@@ -396,7 +433,7 @@ parent:
                        nsCString aContentDisposition, bool aForceSave,
                        int64_t aContentLength, OptionalURIParams aReferrer);
 
-    AddGeolocationListener(Principal principal);
+    AddGeolocationListener(Principal principal, bool highAccuracy);
     RemoveGeolocationListener();
     SetGeolocationHigherAccuracy(bool enable);
 
@@ -450,6 +487,9 @@ parent:
     async BroadcastVolume(nsString volumeName);
 
     async RecordingDeviceEvents(nsString recordingStatus);
+
+    // Notify the parent that the child has finished handling a system message.
+    async SystemMessageHandled();
 
 both:
      AsyncMessage(nsString aMessage, ClonedMessageData aData);

@@ -76,6 +76,7 @@ class nsWindowSizes;
 class nsSmallVoidArray;
 class nsDOMCaretPosition;
 class nsViewportInfo;
+class nsDOMEvent;
 
 namespace mozilla {
 class ErrorResult;
@@ -92,18 +93,25 @@ class DocumentFragment;
 class DocumentType;
 class DOMImplementation;
 class Element;
+struct ElementRegistrationOptions;
 class GlobalObject;
 class HTMLBodyElement;
 class Link;
+class NodeFilter;
+class NodeIterator;
 class ProcessingInstruction;
+class TreeWalker;
 class UndoManager;
 template<typename> class Sequence;
+
+template<typename, typename> class CallbackObjectHolder;
+typedef CallbackObjectHolder<NodeFilter, nsIDOMNodeFilter> NodeFilterHolder;
 } // namespace dom
 } // namespace mozilla
 
 #define NS_IDOCUMENT_IID \
-{ 0x4e6f7d97, 0x091e, 0x4eda, \
-  { 0xb7, 0xd6, 0xfe, 0xb0, 0xb8, 0x01, 0x2a, 0x93 } }
+{ 0x45ce048f, 0x5970, 0x411e, \
+  { 0xaa, 0x99, 0x12, 0xed, 0x3a, 0x55, 0xc9, 0xc3 } }
 
 // Flag for AddStyleSheet().
 #define NS_STYLESHEET_FROM_CATALOG                (1 << 0)
@@ -864,10 +872,15 @@ public:
   virtual Element* GetFullScreenElement() = 0;
 
   /**
-   * Asynchronously requests that the document make aElement the full-screen
-   * element, and move into full-screen mode. The current full-screen element
-   * (if any) is pushed onto the full-screen element stack, and it can be
-   * returned to full-screen status by calling RestorePreviousFullScreenState().
+   * Asynchronously requests that the document make aElement the fullscreen
+   * element, and move into fullscreen mode. The current fullscreen element
+   * (if any) is pushed onto the fullscreen element stack, and it can be
+   * returned to fullscreen status by calling RestorePreviousFullScreenState().
+   *
+   * Note that requesting fullscreen in a document also makes the element which
+   * contains this document in this document's parent document fullscreen. i.e.
+   * the <iframe> or <browser> that contains this document is also mode
+   * fullscreen. This happens recursively in all ancestor documents.
    */
   virtual void AsyncRequestFullScreen(Element* aElement) = 0;
 
@@ -886,7 +899,7 @@ public:
    * so that all its fullscreen element stacks are empty; we must continue the
    * rollback in this parent process' doc tree branch which is fullscreen.
    * Note that only one branch of the document tree can have its documents in
-   * fullscreen state at one time. We're in inconsistent state if the a 
+   * fullscreen state at one time. We're in inconsistent state if a
    * fullscreen document has a parent and that parent isn't fullscreen. We
    * preserve this property across process boundaries.
    */
@@ -905,6 +918,25 @@ public:
   virtual bool IsFullScreenDoc() = 0;
 
   /**
+   * Returns true if this document is a fullscreen leaf document, i.e. it
+   * is in fullscreen mode and has no fullscreen children.
+   */
+  virtual bool IsFullscreenLeaf() = 0;
+
+  /**
+   * Returns the document which is at the root of this document's branch
+   * in the in-process document tree. Returns nullptr if the document isn't
+   * fullscreen.
+   */
+  virtual nsIDocument* GetFullscreenRoot() = 0;
+
+  /**
+   * Sets the fullscreen root to aRoot. This stores a weak reference to aRoot
+   * in this document.
+   */
+  virtual void SetFullscreenRoot(nsIDocument* aRoot) = 0;
+
+  /**
    * Sets whether this document is approved for fullscreen mode.
    * Documents aren't approved for fullscreen until chrome has sent a
    * "fullscreen-approved" notification with a subject which is a pointer
@@ -913,12 +945,27 @@ public:
   virtual void SetApprovedForFullscreen(bool aIsApproved) = 0;
 
   /**
-   * Exits all documents from DOM full-screen mode, and moves the top-level
-   * browser window out of full-screen mode. If aRunAsync is true, this runs
-   * asynchronously.
+   * Exits documents out of DOM fullscreen mode.
+   *
+   * If aDocument is null, all fullscreen documents in all browser windows
+   * exit fullscreen.
+   *
+   * If aDocument is non null, all documents from aDocument's fullscreen root
+   * to the fullscreen leaf exit fullscreen. 
+   *
+   * Note that the fullscreen leaf is the bottom-most document which is
+   * fullscreen, it may have non-fullscreen child documents. The fullscreen
+   * root is usually the chrome document, but if fullscreen is content-only,
+   * (see the comment in nsContentUtils.h on IsFullscreenApiContentOnly())
+   * the fullscreen root will be a direct child of the chrome document, and
+   * there may be other branches of the same doctree that are fullscreen.
+   *
+   * If aRunAsync is true, fullscreen is executed asynchronously.
+   *
+   * Note if aDocument is not fullscreen this function has no effect, even if
+   * aDocument has fullscreen ancestors.
    */
-  static void ExitFullScreen(bool aRunAsync);
-
+  static void ExitFullscreen(nsIDocument* aDocument, bool aRunAsync);
 
   virtual void RequestPointerLock(Element* aElement) = 0;
 
@@ -1865,6 +1912,10 @@ public:
   {
     return GetRootElement();
   }
+  virtual JSObject*
+  Register(JSContext* aCx, const nsAString& aName,
+           const mozilla::dom::ElementRegistrationOptions& aOptions,
+           mozilla::ErrorResult& rv) = 0;
   already_AddRefed<nsContentList>
   GetElementsByTagName(const nsAString& aTagName)
   {
@@ -1893,15 +1944,24 @@ public:
   already_AddRefed<nsINode>
     ImportNode(nsINode& aNode, bool aDeep, mozilla::ErrorResult& rv) const;
   nsINode* AdoptNode(nsINode& aNode, mozilla::ErrorResult& rv);
-  already_AddRefed<nsIDOMEvent> CreateEvent(const nsAString& aEventType,
-                                            mozilla::ErrorResult& rv) const;
+  already_AddRefed<nsDOMEvent> CreateEvent(const nsAString& aEventType,
+                                           mozilla::ErrorResult& rv) const;
   already_AddRefed<nsRange> CreateRange(mozilla::ErrorResult& rv);
-  already_AddRefed<nsIDOMNodeIterator>
+  already_AddRefed<mozilla::dom::NodeIterator>
     CreateNodeIterator(nsINode& aRoot, uint32_t aWhatToShow,
-                       nsIDOMNodeFilter* aFilter, mozilla::ErrorResult& rv) const;
-  already_AddRefed<nsIDOMTreeWalker>
+                       mozilla::dom::NodeFilter* aFilter,
+                       mozilla::ErrorResult& rv) const;
+  already_AddRefed<mozilla::dom::NodeIterator>
+    CreateNodeIterator(nsINode& aRoot, uint32_t aWhatToShow,
+                       const mozilla::dom::NodeFilterHolder& aFilter,
+                       mozilla::ErrorResult& rv) const;
+  already_AddRefed<mozilla::dom::TreeWalker>
     CreateTreeWalker(nsINode& aRoot, uint32_t aWhatToShow,
-                     nsIDOMNodeFilter* aFilter, mozilla::ErrorResult& rv) const;
+                     mozilla::dom::NodeFilter* aFilter, mozilla::ErrorResult& rv) const;
+  already_AddRefed<mozilla::dom::TreeWalker>
+    CreateTreeWalker(nsINode& aRoot, uint32_t aWhatToShow,
+                     const mozilla::dom::NodeFilterHolder& aFilter,
+                     mozilla::ErrorResult& rv) const;
 
   // Deprecated WebIDL bits
   already_AddRefed<mozilla::dom::CDATASection>
@@ -1939,6 +1999,10 @@ public:
   void ReleaseCapture() const;
   virtual void MozSetImageElement(const nsAString& aImageElementId,
                                   Element* aElement) = 0;
+  nsIURI* GetDocumentURIObject()
+  {
+    return GetDocumentURI();
+  }
   // Not const because all the full-screen goop is not const
   virtual bool MozFullScreenEnabled() = 0;
   virtual Element* GetMozFullScreenElement(mozilla::ErrorResult& rv) = 0;
@@ -2407,6 +2471,10 @@ NS_NewImageDocument(nsIDocument** aInstancePtrResult);
 nsresult
 NS_NewVideoDocument(nsIDocument** aInstancePtrResult);
 #endif
+
+already_AddRefed<mozilla::dom::DocumentFragment>
+NS_NewDocumentFragment(nsNodeInfoManager* aNodeInfoManager,
+                       mozilla::ErrorResult& aRv);
 
 nsresult
 NS_NewDocumentFragment(nsIDOMDocumentFragment** aInstancePtrResult,

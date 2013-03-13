@@ -16,6 +16,7 @@
 #include "vm/Shape.h"
 
 #include "jsscriptinlines.h"
+#include "ion/ExecutionModeInlines.h"
 
 using namespace js;
 using namespace js::ion;
@@ -135,43 +136,6 @@ CodeGeneratorX86::visitUnbox(LUnbox *unbox)
         if (!bailoutIf(Assembler::NotEqual, unbox->snapshot()))
             return false;
     }
-    return true;
-}
-
-void
-CodeGeneratorX86::linkAbsoluteLabels()
-{
-    UnrootedScript script = gen->info().script();
-    IonCode *method = script->ion->method();
-
-    for (size_t i = 0; i < deferredDoubles_.length(); i++) {
-        DeferredDouble *d = deferredDoubles_[i];
-        const Value &v = script->ion->getConstant(d->index());
-        MacroAssembler::Bind(method, d->label(), &v);
-    }
-}
-
-bool
-CodeGeneratorX86::visitDouble(LDouble *ins)
-{
-    const LDefinition *out = ins->getDef(0);
-    const LConstantIndex *cindex = ins->getOperand(0)->toConstantIndex();
-    const Value &v = graph.getConstant(cindex->index());
-
-    union DoublePun {
-        uint64_t u;
-        double d;
-    } dpun;
-    dpun.d = v.toDouble();
-
-    if (masm.maybeInlineDouble(dpun.u, ToFloatRegister(out)))
-        return true;
-
-    DeferredDouble *d = new DeferredDouble(cindex->index());
-    if (!deferredDoubles_.append(d))
-        return false;
-
-    masm.movsd(d->label(), ToFloatRegister(out));
     return true;
 }
 
@@ -348,7 +312,7 @@ CodeGeneratorX86::visitCompareB(LCompareB *lir)
             masm.cmp32(lhs.payloadReg(), Imm32(rhs->toConstant()->toBoolean()));
         else
             masm.cmp32(lhs.payloadReg(), ToRegister(rhs));
-        emitSet(JSOpToCondition(mir->jsop()), output);
+        masm.emitSet(JSOpToCondition(mir->jsop()), output);
         masm.jump(&done);
     }
     masm.bind(&notBoolean);
@@ -391,15 +355,14 @@ CodeGeneratorX86::visitCompareV(LCompareV *lir)
     const ValueOperand rhs = ToValue(lir, LCompareV::RhsInput);
     const Register output = ToRegister(lir->output());
 
-    JS_ASSERT(mir->jsop() == JSOP_EQ || mir->jsop() == JSOP_STRICTEQ ||
-              mir->jsop() == JSOP_NE || mir->jsop() == JSOP_STRICTNE);
+    JS_ASSERT(IsEqualityOp(mir->jsop()));
 
     Label notEqual, done;
     masm.cmp32(lhs.typeReg(), rhs.typeReg());
     masm.j(Assembler::NotEqual, &notEqual);
     {
         masm.cmp32(lhs.payloadReg(), rhs.payloadReg());
-        emitSet(cond, output);
+        masm.emitSet(cond, output);
         masm.jump(&done);
     }
     masm.bind(&notEqual);

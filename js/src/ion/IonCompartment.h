@@ -9,8 +9,8 @@
 #define jsion_ion_compartment_h__
 
 #include "IonCode.h"
-#include "jsval.h"
 #include "jsweakcache.h"
+#include "js/Value.h"
 #include "vm/Stack.h"
 #include "IonFrames.h"
 
@@ -225,7 +225,7 @@ class IonActivation
 
 // Called from JSCompartment::discardJitCode().
 void InvalidateAll(FreeOp *fop, JSCompartment *comp);
-void FinishInvalidation(FreeOp *fop, UnrootedScript script);
+void FinishInvalidation(FreeOp *fop, RawScript script);
 
 } // namespace ion
 } // namespace js

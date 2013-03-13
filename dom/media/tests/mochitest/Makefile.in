@@ -15,13 +15,26 @@ MOCHITEST_FILES = \
   test_getUserMedia_basicAudio.html \
   test_getUserMedia_basicVideo.html \
   test_getUserMedia_basicVideoAudio.html \
+  test_getUserMedia_gumWithinGum.html \
+  test_getUserMedia_playAudioTwice.html \
+  test_getUserMedia_playVideoTwice.html \
+  test_getUserMedia_playVideoAudioTwice.html \
+  test_getUserMedia_stopAudioStream.html \
+  test_getUserMedia_stopAudioStreamWithFollowupAudio.html \
+  test_getUserMedia_stopVideoStreamWithFollowupVideo.html \
+  test_getUserMedia_stopVideoAudioStreamWithFollowupVideoAudio.html \
+  test_getUserMedia_stopVideoStream.html \
+  test_getUserMedia_stopVideoAudioStream.html \
   test_peerConnection_basicAudio.html \
   test_peerConnection_basicAudioVideo.html \
   test_peerConnection_basicAudioVideoCombined.html \
   test_peerConnection_basicVideo.html \
+  test_peerConnection_bug822674.html \
   test_peerConnection_bug827843.html \
   test_peerConnection_bug825703.html \
   test_peerConnection_bug834153.html \
+  test_peerConnection_bug835370.html \
+  test_peerConnection_bug840344.html \
   head.js \
   mediaStreamPlayback.js \
   pc.js \

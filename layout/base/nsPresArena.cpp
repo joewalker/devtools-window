@@ -24,23 +24,7 @@
 #endif
 
 #include "mozilla/StandardInteger.h"
-
-#if defined(MOZ_ASAN)
-// XXX These come from sanitizer/asan_interface.h but that header doesn't seem
-// to be installed by default?
-extern "C" {
-  void __asan_poison_memory_region(void const volatile *addr, size_t size)
-    __attribute__((visibility("default")));
-  void __asan_unpoison_memory_region(void const volatile *addr, size_t size)
-    __attribute__((visibility("default")));
-#define ASAN_POISON_MEMORY_REGION(addr, size)   \
-  __asan_poison_memory_region((addr), (size))
-#define ASAN_UNPOISON_MEMORY_REGION(addr, size) \
-  __asan_unpoison_memory_region((addr), (size))
-}
-#elif defined(MOZ_VALGRIND)
-#include "valgrind/memcheck.h"
-#endif
+#include "mozilla/MemoryChecking.h"
 
 // Even on 32-bit systems, we allocate objects from the frame arena
 // that require 8-byte alignment.  The cast to uintptr_t is needed
@@ -302,18 +286,14 @@ struct nsPresArena::State {
     PR_CallOnce(&ARENA_POISON_guard, ARENA_POISON_init);
   }
 
-#if defined(MOZ_ASAN) || defined(MOZ_VALGRIND)
+#if defined(MOZ_HAVE_MEM_CHECKS)
   static PLDHashOperator UnpoisonFreeList(FreeList* aEntry, void*)
   {
     nsTArray<void*>::index_type len;
     while ((len = aEntry->mEntries.Length())) {
       void* result = aEntry->mEntries.ElementAt(len - 1);
       aEntry->mEntries.RemoveElementAt(len - 1);
-#if defined(MOZ_ASAN)
-      ASAN_UNPOISON_MEMORY_REGION(result, aEntry->mEntrySize);
-#elif defined(MOZ_VALGRIND)
-      VALGRIND_MAKE_MEM_UNDEFINED(result, aEntry->mEntrySize);
-#endif
+      MOZ_MAKE_MEM_UNDEFINED(result, aEntry->mEntrySize);
     }
     return PL_DHASH_NEXT;
   }
@@ -321,7 +301,7 @@ struct nsPresArena::State {
 
   ~State()
   {
-#if defined(MOZ_ASAN) || defined(MOZ_VALGRIND)
+#if defined(MOZ_HAVE_MEM_CHECKS)
     mFreeLists.EnumerateEntries(UnpoisonFreeList, nullptr);
 #endif
     PL_FinishArenaPool(&mPool);
@@ -352,11 +332,8 @@ struct nsPresArena::State {
       // LIFO behavior for best cache utilization
       result = list->mEntries.ElementAt(len - 1);
       list->mEntries.RemoveElementAt(len - 1);
-#if defined(MOZ_ASAN)
-      ASAN_UNPOISON_MEMORY_REGION(result, list->mEntrySize);
-#elif defined(MOZ_VALGRIND)
-      VALGRIND_MAKE_MEM_UNDEFINED(result, list->mEntrySize);
-#elif defined(DEBUG)
+      MOZ_MAKE_MEM_UNDEFINED(result, list->mEntrySize);
+#if defined(DEBUG)
       {
         char* p = reinterpret_cast<char*>(result);
         char* limit = p + list->mEntrySize;
@@ -399,11 +376,7 @@ struct nsPresArena::State {
       *reinterpret_cast<uintptr_t*>(p) = ARENA_POISON;
     }
 
-#if defined(MOZ_ASAN)
-    ASAN_POISON_MEMORY_REGION(aPtr, list->mEntrySize);
-#elif defined(MOZ_VALGRIND)
-    VALGRIND_MAKE_MEM_NOACCESS(aPtr, list->mEntrySize);
-#endif
+    MOZ_MAKE_MEM_NOACCESS(aPtr, list->mEntrySize);
     list->mEntries.AppendElement(aPtr);
   }
 
@@ -417,15 +390,7 @@ struct nsPresArena::State {
   size_t SizeOfIncludingThisFromMalloc(nsMallocSizeOfFun aMallocSizeOf) const
   {
     size_t n = aMallocSizeOf(this);
-
-    // The first PLArena is within the PLArenaPool, i.e. within |this|, so we
-    // don't measure it.  Subsequent PLArenas are by themselves and must be
-    // measured.
-    const PLArena *arena = mPool.first.next;
-    while (arena) {
-      n += aMallocSizeOf(arena);
-      arena = arena->next;
-    }
+    n += PL_SizeOfArenaPoolExcludingPool(&mPool, aMallocSizeOf);
     n += mFreeLists.SizeOfExcludingThis(SizeOfFreeListEntryExcludingThis,
                                         aMallocSizeOf);
     return n;

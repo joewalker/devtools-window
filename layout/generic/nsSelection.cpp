@@ -327,123 +327,6 @@ IsValidSelectionPoint(nsFrameSelection *aFrameSel, nsINode *aNode)
 }
 
 
-NS_IMPL_ADDREF(nsSelectionIterator)
-NS_IMPL_RELEASE(nsSelectionIterator)
-
-NS_INTERFACE_MAP_BEGIN(nsSelectionIterator)
-  NS_INTERFACE_MAP_ENTRY(nsIEnumerator)
-  NS_INTERFACE_MAP_ENTRY(nsIBidirectionalEnumerator)
-NS_INTERFACE_MAP_END_AGGREGATED(mDomSelection)
-
-
-///////////BEGIN nsSelectionIterator methods
-
-nsSelectionIterator::nsSelectionIterator(Selection* aList)
-:mIndex(0)
-{
-  if (!aList)
-  {
-    NS_NOTREACHED("nsFrameSelection");
-    return;
-  }
-  mDomSelection = aList;
-}
-
-
-
-nsSelectionIterator::~nsSelectionIterator()
-{
-}
-
-
-
-////////////END nsSelectionIterator methods
-
-////////////BEGIN nsSelectionIterator methods
-
-
-
-NS_IMETHODIMP
-nsSelectionIterator::Next()
-{
-  mIndex++;
-  int32_t cnt = mDomSelection->mRanges.Length();
-  if (mIndex < cnt)
-    return NS_OK;
-  return NS_ERROR_FAILURE;
-}
-
-
-
-NS_IMETHODIMP
-nsSelectionIterator::Prev()
-{
-  mIndex--;
-  if (mIndex >= 0 )
-    return NS_OK;
-  return NS_ERROR_FAILURE;
-}
-
-
-
-NS_IMETHODIMP
-nsSelectionIterator::First()
-{
-  if (!mDomSelection)
-    return NS_ERROR_NULL_POINTER;
-  mIndex = 0;
-  return NS_OK;
-}
-
-
-
-NS_IMETHODIMP
-nsSelectionIterator::Last()
-{
-  if (!mDomSelection)
-    return NS_ERROR_NULL_POINTER;
-  mIndex = mDomSelection->mRanges.Length() - 1;
-  return NS_OK;
-}
-
-
-
-NS_IMETHODIMP 
-nsSelectionIterator::CurrentItem(nsISupports **aItem)
-{
-  *aItem = static_cast<nsIDOMRange*>(CurrentItem());
-  if (!*aItem) {
-    return NS_ERROR_FAILURE;
-  }
-
-  NS_ADDREF(*aItem);
-  return NS_OK;
-}
-
-nsRange*
-nsSelectionIterator::CurrentItem()
-{
-  return mDomSelection->mRanges.SafeElementAt(mIndex, sEmptyData).mRange;
-}
-
-
-
-NS_IMETHODIMP
-nsSelectionIterator::IsDone()
-{
-  int32_t cnt = mDomSelection->mRanges.Length();
-  if (mIndex >= 0 && mIndex < cnt) {
-    // XXX This is completely incompatible with the meaning of nsresult.
-    // NS_ENUMERATOR_FALSE is defined to be 1.  (bug 778111)
-    return (nsresult)NS_ENUMERATOR_FALSE;
-  }
-  return NS_OK;
-}
-
-
-////////////END nsSelectionIterator methods
-
-
 ////////////BEGIN nsFrameSelection methods
 
 nsFrameSelection::nsFrameSelection()
@@ -532,11 +415,8 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsFrameSelection)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAncestorLimiter)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(nsFrameSelection)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(nsFrameSelection)
-NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsFrameSelection)
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
-NS_INTERFACE_MAP_END
+NS_IMPL_CYCLE_COLLECTION_ROOT_NATIVE(nsFrameSelection, AddRef)
+NS_IMPL_CYCLE_COLLECTION_UNROOT_NATIVE(nsFrameSelection, Release)
 
 
 nsresult
@@ -1586,7 +1466,7 @@ nsFrameSelection::TakeFocus(nsIContent *aNewFocus,
       // non-anchor/focus collapsed ranges.
       mDomSelections[index]->RemoveCollapsedRanges();
 
-      nsRefPtr<nsRange> newRange = new nsRange();
+      nsRefPtr<nsRange> newRange = new nsRange(aNewFocus);
 
       newRange->SetStart(aNewFocus, aContentOffset);
       newRange->SetEnd(aNewFocus, aContentOffset);
@@ -2986,7 +2866,7 @@ nsFrameSelection::CreateAndAddRange(nsINode *aParentNode, int32_t aOffset)
 {
   if (!aParentNode) return NS_ERROR_NULL_POINTER;
 
-  nsRefPtr<nsRange> range = new nsRange();
+  nsRefPtr<nsRange> range = new nsRange(aParentNode);
 
   // Set range around child at given offset
   nsresult result = range->SetStart(aParentNode, aOffset);
@@ -3047,18 +2927,12 @@ nsFrameSelection::DeleteFromDocument()
     return NS_OK;
   }
 
-  // Get an iterator
-  nsSelectionIterator iter(mDomSelections[index]);
-  res = iter.First();
-  if (NS_FAILED(res))
-    return res;
-
-  while (iter.IsDone() == static_cast<nsresult>(NS_ENUMERATOR_FALSE)) {
-    nsRefPtr<nsRange> range = iter.CurrentItem();
+  nsRefPtr<mozilla::Selection> selection = mDomSelections[index];
+  for (int32_t rangeIdx = 0; rangeIdx < selection->GetRangeCount(); ++rangeIdx) {
+    nsRefPtr<nsRange> range = selection->GetRangeAt(rangeIdx);
     res = range->DeleteContents();
     if (NS_FAILED(res))
       return res;
-    iter.Next();
   }
 
   // Collapse to the new location.
@@ -3402,7 +3276,7 @@ Selection::SubtractRange(RangeData* aRange, nsRange* aSubtract,
   if (cmp2 > 0) {
     // We need to add a new RangeData to the output, running from
     // the end of aSubtract to the end of range
-    nsRange* postOverlap = new nsRange();
+    nsRefPtr<nsRange> postOverlap = new nsRange(aSubtract->GetEndParent());
 
     rv =
       postOverlap->SetStart(aSubtract->GetEndParent(), aSubtract->EndOffset());
@@ -3420,7 +3294,7 @@ Selection::SubtractRange(RangeData* aRange, nsRange* aSubtract,
   if (cmp < 0) {
     // We need to add a new RangeData to the output, running from
     // the start of the range to the start of aSubtract
-    nsRange* preOverlap = new nsRange();
+    nsRefPtr<nsRange> preOverlap = new nsRange(range->GetStartParent());
 
     nsresult rv =
      preOverlap->SetStart(range->GetStartParent(), range->StartOffset());
@@ -4241,14 +4115,6 @@ Selection::GetCachedFrameOffset(nsIFrame* aFrame, int32_t inOffset,
 }
 
 NS_IMETHODIMP
-Selection::GetFrameSelection(nsFrameSelection** aFrameSelection) {
-  NS_ENSURE_ARG_POINTER(aFrameSelection);
-  *aFrameSelection = mFrameSelection;
-  NS_IF_ADDREF(*aFrameSelection);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 Selection::SetAncestorLimiter(nsIContent* aContent)
 {
   if (mFrameSelection)
@@ -4353,14 +4219,6 @@ Selection::DoAutoScroll(nsIFrame* aFrame, nsPoint& aPoint)
 
   return NS_OK;
 }
-
-NS_IMETHODIMP
-Selection::GetEnumerator(nsIEnumerator** aIterator)
-{
-  NS_ADDREF(*aIterator = new nsSelectionIterator(this));
-  return NS_OK;
-}
-
 
 
 /** RemoveAllRanges zeroes the selection
@@ -4540,7 +4398,7 @@ Selection::Collapse(nsINode* aParentNode, int32_t aOffset)
   // Turn off signal for table selection
   mFrameSelection->ClearTableCellSelection();
 
-  nsRefPtr<nsRange> range = new nsRange();
+  nsRefPtr<nsRange> range = new nsRange(aParentNode);
   result = range->SetEnd(aParentNode, aOffset);
   if (NS_FAILED(result))
     return result;
@@ -4796,7 +4654,7 @@ Selection::Extend(nsINode* aParentNode, int32_t aOffset)
                                                   &disconnected);
 
   nsRefPtr<nsPresContext>  presContext = GetPresContext();
-  nsRefPtr<nsRange> difRange = new nsRange();
+  nsRefPtr<nsRange> difRange = new nsRange(aParentNode);
   if ((result1 == 0 && result3 < 0) || (result1 <= 0 && result2 < 0)){//a1,2  a,1,2
     //select from 1 to 2 unless they are collapsed
     res = range->SetEnd(aParentNode, aOffset);

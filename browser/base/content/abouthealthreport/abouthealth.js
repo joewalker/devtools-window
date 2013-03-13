@@ -60,7 +60,7 @@ function refreshDataView(data) {
   noData.style.display = data ? "none" : "inline";
   dataEl.style.display = data ? "block" : "none";
   if (data) {
-    dataEl.innerHTML = JSON.stringify(data, null, 2);
+    dataEl.textContent = JSON.stringify(data, null, 2);
   }
 }
 
@@ -72,7 +72,8 @@ function refreshJSONPayload() {
 }
 
 function onOptInClick() {
-  policy.healthReportUploadEnabled = true;
+  policy.recordHealthReportUploadEnabled(true,
+                                         "Clicked opt in button on about page.");
   refreshWithDataSubmissionFlag(true);
 }
 
@@ -88,8 +89,8 @@ function onOptOutClick() {
     return;
   }
 
-  policy.healthReportUploadEnabled = false;
-  reporter.requestDeleteRemoteData("Clicked opt out button on about page.");
+  policy.recordHealthReportUploadEnabled(false,
+                                         "Clicked opt out button on about page.");
   refreshWithDataSubmissionFlag(false);
   updateView("disabled");
 }

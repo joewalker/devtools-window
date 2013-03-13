@@ -191,12 +191,17 @@ public:
     float GetX(JNIEnv *env);
     float GetY(JNIEnv *env);
     float GetScale(JNIEnv *env);
+    void GetFixedLayerMargins(JNIEnv *env, gfx::Margin &aFixedLayerMargins);
 
 private:
     static jclass jViewTransformClass;
     static jfieldID jXField;
     static jfieldID jYField;
     static jfieldID jScaleField;
+    static jfieldID jFixedLayerMarginLeft;
+    static jfieldID jFixedLayerMarginTop;
+    static jfieldID jFixedLayerMarginRight;
+    static jfieldID jFixedLayerMarginBottom;
 };
 
 class AndroidProgressiveUpdateData : public WrappedJavaObject {
@@ -257,7 +262,8 @@ public:
     void SetFirstPaintViewport(const nsIntPoint& aOffset, float aZoom, const nsIntRect& aPageRect, const gfx::Rect& aCssPageRect);
     void SetPageRect(const gfx::Rect& aCssPageRect);
     void SyncViewportInfo(const nsIntRect& aDisplayPort, float aDisplayResolution, bool aLayersUpdated,
-                          nsIntPoint& aScrollOffset, float& aScaleX, float& aScaleY);
+                          nsIntPoint& aScrollOffset, float& aScaleX, float& aScaleY,
+                          gfx::Margin& aFixedLayerMargins);
     bool ProgressiveUpdateCallback(bool aHasPendingNewThebesContent, const gfx::Rect& aDisplayPort, float aDisplayResolution, bool aDrawingCritical, gfx::Rect& aViewport, float& aScaleX, float& aScaleY);
     bool CreateFrame(AutoLocalJNIFrame *jniFrame, AndroidLayerRendererFrame& aFrame);
     bool ActivateProgram(AutoLocalJNIFrame *jniFrame);
@@ -281,47 +287,6 @@ public:
     static jmethodID jViewportCtor;
     static jfieldID jDisplayportPosition;
     static jfieldID jDisplayportResolution;
-};
-
-class AndroidGeckoSurfaceView : public WrappedJavaObject
-{
-public:
-    static void InitGeckoSurfaceViewClass(JNIEnv *jEnv);
-
-    AndroidGeckoSurfaceView() { }
-    AndroidGeckoSurfaceView(jobject jobj) {
-        Init(jobj);
-    }
-
-    void Init(jobject jobj);
-
-    enum {
-        DRAW_ERROR = 0,
-        DRAW_GLES_2 = 1,
-        DRAW_2D = 2,
-        DRAW_DISABLED = 3
-    };
-
-    int BeginDrawing();
-    jobject GetSoftwareDrawBitmap(AutoLocalJNIFrame *jniFrame);
-    jobject GetSoftwareDrawBuffer(AutoLocalJNIFrame *jniFrame);
-    void EndDrawing();
-    void Draw2D(jobject bitmap, int width, int height);
-    void Draw2D(jobject buffer, int stride);
-
-    jobject GetSurface(AutoLocalJNIFrame *jniFrame);
-    jobject GetSurfaceHolder(AutoLocalJNIFrame *jniFrame);
-
-protected:
-    static jclass jGeckoSurfaceViewClass;
-    static jmethodID jBeginDrawingMethod;
-    static jmethodID jEndDrawingMethod;
-    static jmethodID jDraw2DBitmapMethod;
-    static jmethodID jDraw2DBufferMethod;
-    static jmethodID jGetSoftwareDrawBitmapMethod;
-    static jmethodID jGetSoftwareDrawBufferMethod;
-    static jmethodID jGetSurfaceMethod;
-    static jmethodID jGetHolderMethod;
 };
 
 class AndroidKeyEvent
@@ -657,6 +622,7 @@ public:
 
     int Action() { return mAction; }
     int Type() { return mType; }
+    bool AckNeeded() { return mAckNeeded; }
     int64_t Time() { return mTime; }
     const nsTArray<nsIntPoint>& Points() { return mPoints; }
     const nsTArray<int>& PointIndicies() { return mPointIndicies; }
@@ -699,6 +665,7 @@ public:
 protected:
     int mAction;
     int mType;
+    bool mAckNeeded;
     int64_t mTime;
     nsTArray<nsIntPoint> mPoints;
     nsTArray<nsIntPoint> mPointRadii;
@@ -743,6 +710,7 @@ protected:
     static jclass jGeckoEventClass;
     static jfieldID jActionField;
     static jfieldID jTypeField;
+    static jfieldID jAckNeededField;
     static jfieldID jTimeField;
     static jfieldID jPoints;
     static jfieldID jPointIndicies;
@@ -799,7 +767,7 @@ public:
         LOAD_URI = 12,
         SURFACE_CREATED = 13,   // used by XUL fennec only
         SURFACE_DESTROYED = 14, // used by XUL fennec only
-        GECKO_EVENT_SYNC = 15,
+        NOOP = 15,
         FORCED_RESIZE = 16, // used internally in nsAppShell/nsWindow
         ACTIVITY_START = 17,
         BROADCAST = 19,
@@ -823,7 +791,8 @@ public:
         IME_UPDATE_COMPOSITION = 4,
         IME_REMOVE_COMPOSITION = 5,
         IME_ACKNOWLEDGE_FOCUS = 6,
-        IME_FLUSH_CHANGES = 7
+        IME_FLUSH_CHANGES = 7,
+        IME_UPDATE_CONTEXT = 8
     };
 };
 

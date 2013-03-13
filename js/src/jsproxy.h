@@ -51,9 +51,11 @@ class JS_FRIEND_API(Wrapper);
 class JS_FRIEND_API(BaseProxyHandler) {
     void *mFamily;
     bool mHasPrototype;
+    bool mHasPolicy;
   protected:
     // Subclasses may set this in their constructor.
-    void setHasPrototype(bool hasPrototype) { mHasPrototype = hasPrototype; }
+    void setHasPrototype(bool aHasPrototype) { mHasPrototype = aHasPrototype; }
+    void setHasPolicy(bool aHasPolicy) { mHasPolicy = aHasPolicy; }
 
   public:
     explicit BaseProxyHandler(void *family);
@@ -63,6 +65,10 @@ class JS_FRIEND_API(BaseProxyHandler) {
         return mHasPrototype;
     }
 
+    bool hasPolicy() {
+        return mHasPolicy;
+    }
+
     inline void *family() {
         return mFamily;
     }
@@ -70,6 +76,32 @@ class JS_FRIEND_API(BaseProxyHandler) {
     virtual bool isOuterWindow() {
         return false;
     }
+
+    virtual bool finalizeInBackground(HandleValue priv) {
+        /*
+         * Called on creation of a proxy to determine whether its finalize
+         * method can be finalized on the background thread.
+         */
+        return true;
+    }
+
+    /* Policy enforcement traps.
+     *
+     * enter() allows the policy to specify whether the caller may perform |act|
+     * on the proxy's |id| property. In the case when |act| is CALL, |id| is
+     * generally JSID_VOID.
+     *
+     * The |act| parameter to enter() specifies the action being performed.
+     * If |bp| is false, the trap suggests that the caller throw (though it
+     * may still decide to squelch the error).
+     */
+    enum Action {
+        GET,
+        SET,
+        CALL
+    };
+    virtual bool enter(JSContext *cx, JSObject *wrapper, jsid id, Action act,
+                       bool *bp);
 
     /* ES5 Harmony fundamental proxy traps. */
     virtual bool getPropertyDescriptor(JSContext *cx, JSObject *proxy, jsid id,
@@ -100,7 +132,6 @@ class JS_FRIEND_API(BaseProxyHandler) {
     virtual bool construct(JSContext *cx, JSObject *proxy, unsigned argc, Value *argv, Value *rval);
     virtual bool nativeCall(JSContext *cx, IsAcceptableThis test, NativeImpl impl, CallArgs args);
     virtual bool hasInstance(JSContext *cx, HandleObject proxy, MutableHandleValue v, bool *bp);
-    virtual JSType typeOf(JSContext *cx, JSObject *proxy);
     virtual bool objectClassIs(JSObject *obj, ESClassValue classValue, JSContext *cx);
     virtual JSString *obj_toString(JSContext *cx, JSObject *proxy);
     virtual JSString *fun_toString(JSContext *cx, JSObject *proxy, unsigned indent);
@@ -159,7 +190,6 @@ public:
                             CallArgs args) MOZ_OVERRIDE;
     virtual bool hasInstance(JSContext *cx, HandleObject proxy, MutableHandleValue v,
                              bool *bp) MOZ_OVERRIDE;
-    virtual JSType typeOf(JSContext *cx, JSObject *proxy) MOZ_OVERRIDE;
     virtual bool objectClassIs(JSObject *obj, ESClassValue classValue,
                                JSContext *cx) MOZ_OVERRIDE;
     virtual JSString *obj_toString(JSContext *cx, JSObject *proxy) MOZ_OVERRIDE;
@@ -206,7 +236,6 @@ class Proxy {
     static bool construct(JSContext *cx, JSObject *proxy, unsigned argc, Value *argv, Value *rval);
     static bool nativeCall(JSContext *cx, IsAcceptableThis test, NativeImpl impl, CallArgs args);
     static bool hasInstance(JSContext *cx, HandleObject proxy, MutableHandleValue v, bool *bp);
-    static JSType typeOf(JSContext *cx, JSObject *proxy);
     static bool objectClassIs(JSObject *obj, ESClassValue classValue, JSContext *cx);
     static JSString *obj_toString(JSContext *cx, JSObject *proxy);
     static JSString *fun_toString(JSContext *cx, JSObject *proxy, unsigned indent);
@@ -300,13 +329,6 @@ SetProxyHandler(RawObject obj, BaseProxyHandler *handler)
 }
 
 inline void
-SetProxyPrivate(RawObject obj, const Value &value)
-{
-    JS_ASSERT(IsProxy(obj));
-    SetReservedSlot(obj, JSSLOT_PROXY_PRIVATE, value);
-}
-
-inline void
 SetProxyExtra(RawObject obj, size_t n, const Value &extra)
 {
     JS_ASSERT(IsProxy(obj));
@@ -321,6 +343,72 @@ NewProxyObject(JSContext *cx, BaseProxyHandler *handler, const Value &priv,
 
 JSObject *
 RenewProxyObject(JSContext *cx, JSObject *obj, BaseProxyHandler *handler, Value priv);
+
+class JS_FRIEND_API(AutoEnterPolicy)
+{
+  public:
+    typedef BaseProxyHandler::Action Action;
+    AutoEnterPolicy(JSContext *cx, BaseProxyHandler *handler,
+                    JSObject *wrapper, jsid id, Action act, bool mayThrow)
+#ifdef DEBUG
+        : context(NULL)
+#endif
+    {
+        allow = handler->hasPolicy() ? handler->enter(cx, wrapper, id, act, &rv)
+                                     : true;
+        recordEnter(cx, wrapper, id);
+        if (!allow && !rv && mayThrow)
+            reportError(cx, id);
+    }
+
+    virtual ~AutoEnterPolicy() { recordLeave(); }
+    inline bool allowed() { return allow; }
+    inline bool returnValue() { JS_ASSERT(!allowed()); return rv; }
+
+  protected:
+    // no-op constructor for subclass
+    AutoEnterPolicy()
+#ifdef DEBUG
+        : context(NULL)
+#endif
+        {};
+    void reportError(JSContext *cx, jsid id);
+    bool allow;
+    bool rv;
+
+#ifdef DEBUG
+    JSContext *context;
+    mozilla::Maybe<RootedObject> enteredProxy;
+    mozilla::Maybe<RootedId> enteredId;
+    // NB: We explicitly don't track the entered action here, because sometimes
+    // SET traps do an implicit GET during their implementation, leading to
+    // spurious assertions.
+    AutoEnterPolicy *prev;
+    void recordEnter(JSContext *cx, JSObject *proxy, jsid id);
+    void recordLeave();
+
+    friend JS_FRIEND_API(void) assertEnteredPolicy(JSContext *cx, JSObject *proxy, jsid id);
+#else
+    inline void recordEnter(JSContext *cx, JSObject *proxy, jsid id) {}
+    inline void recordLeave() {}
+#endif
+
+};
+
+#ifdef DEBUG
+class JS_FRIEND_API(AutoWaivePolicy) : public AutoEnterPolicy {
+public:
+    AutoWaivePolicy(JSContext *cx, JSObject *proxy, jsid id)
+    {
+        allow = true;
+        recordEnter(cx, proxy, id);
+    }
+};
+#else
+class JS_FRIEND_API(AutoWaivePolicy) {
+    public: AutoWaivePolicy(JSContext *cx, JSObject *proxy, jsid id) {};
+};
+#endif
 
 } /* namespace js */
 

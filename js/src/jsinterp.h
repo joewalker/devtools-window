@@ -103,14 +103,18 @@ enum MaybeConstruct {
     CONSTRUCT = INITIAL_CONSTRUCT
 };
 
+/*
+ * numToSkip is the number of stack values the expression decompiler should skip
+ * before it reaches |v|. If it's -1, the decompiler will search the stack.
+ */
 extern bool
-ReportIsNotFunction(JSContext *cx, const Value &v, MaybeConstruct construct = NO_CONSTRUCT);
+ReportIsNotFunction(JSContext *cx, const Value &v, int numToSkip = -1,
+                    MaybeConstruct construct = NO_CONSTRUCT);
 
-extern bool
-ReportIsNotFunction(JSContext *cx, const Value *vp, MaybeConstruct construct = NO_CONSTRUCT);
-
+/* See ReportIsNotFunction comment for the meaning of numToSkip. */
 extern JSObject *
-ValueToCallable(JSContext *cx, const Value *vp, MaybeConstruct construct = NO_CONSTRUCT);
+ValueToCallable(JSContext *cx, const Value &vp, int numToSkip = -1,
+                MaybeConstruct construct = NO_CONSTRUCT);
 
 /*
  * InvokeKernel assumes that the given args have been pushed on the top of the
@@ -273,12 +277,9 @@ class InterpreterFrames {
     const InterruptEnablerBase &enabler;
 };
 
-/*
- * Unwind block and scope chains to match the given depth. The function sets
- * fp->sp on return to stackDepth.
- */
+/* Unwind block and scope chains to match the given depth. */
 extern void
-UnwindScope(JSContext *cx, uint32_t stackDepth);
+UnwindScope(JSContext *cx, AbstractFramePtr frame, uint32_t stackDepth);
 
 /*
  * Unwind for an uncatchable exception. This means not running finalizers, etc;
@@ -367,6 +368,9 @@ CallElement(JSContext *cx, MutableHandleValue lref, HandleValue rref, MutableHan
 bool
 SetObjectElement(JSContext *cx, HandleObject obj, HandleValue index, HandleValue value,
                  JSBool strict);
+bool
+SetObjectElement(JSContext *cx, HandleObject obj, HandleValue index, HandleValue value,
+                 JSBool strict, HandleScript script, jsbytecode *pc);
 
 bool
 AddValues(JSContext *cx, HandleScript script, jsbytecode *pc,

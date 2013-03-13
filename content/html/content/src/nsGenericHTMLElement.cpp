@@ -43,7 +43,6 @@
 #include "nsIPresShell.h"
 #include "nsPresContext.h"
 #include "nsIDocShell.h"
-#include "nsIDocShellTreeItem.h"
 #include "nsINameSpaceManager.h"
 #include "nsError.h"
 #include "nsScriptLoader.h"
@@ -80,8 +79,8 @@
 #include "nsHtml5Module.h"
 #include "nsITextControlElement.h"
 #include "mozilla/dom/Element.h"
-#include "nsHTMLFieldSetElement.h"
-#include "nsHTMLMenuElement.h"
+#include "HTMLFieldSetElement.h"
+#include "HTMLMenuElement.h"
 #include "nsAsyncDOMEvent.h"
 #include "nsDOMMutationObserver.h"
 #include "mozilla/Preferences.h"
@@ -471,8 +470,8 @@ nsGenericHTMLElement::GetOffsetRect(nsRect& aRect)
 
   // Subtract the parent border unless it uses border-box sizing.
   if (parent &&
-      parent->GetStylePosition()->mBoxSizing != NS_STYLE_BOX_SIZING_BORDER) {
-    const nsStyleBorder* border = parent->GetStyleBorder();
+      parent->StylePosition()->mBoxSizing != NS_STYLE_BOX_SIZING_BORDER) {
+    const nsStyleBorder* border = parent->StyleBorder();
     origin.x -= border->GetComputedBorderWidth(NS_SIDE_LEFT);
     origin.y -= border->GetComputedBorderWidth(NS_SIDE_TOP);
   }
@@ -776,23 +775,6 @@ nsGenericHTMLElement::GetHrefURIForAnchors() const
 }
 
 nsresult
-nsGenericHTMLElement::BeforeSetAttr(int32_t aNamespaceID, nsIAtom* aName,
-                                    const nsAttrValueOrString* aValue,
-                                    bool aNotify)
-{
-  if (aNamespaceID == kNameSpaceID_None &&
-      aName == nsGkAtoms::dir &&
-      HasDirAuto()) {
-      // setting dir on an element that currently has dir=auto
-    WalkDescendantsClearAncestorDirAuto(this);
-    SetHasDirAuto();
-  }
-
-  return nsGenericHTMLElementBase::BeforeSetAttr(aNamespaceID, aName,
-                                                 aValue, aNotify);
-}
-
-nsresult
 nsGenericHTMLElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
                                    const nsAttrValue* aValue, bool aNotify)
 {
@@ -824,11 +806,11 @@ nsGenericHTMLElement::AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
       } else {
         ClearHasValidDir();
         ClearHasFixedDir();
-        ClearHasDirAuto();
-        ClearHasDirAutoSet();
         if (NodeInfo()->Equals(nsGkAtoms::bdi)) {
           SetHasDirAuto();
         } else {
+          ClearHasDirAuto();
+          ClearHasDirAutoSet();
           dir = RecomputeDirectionality(this, aNotify);
         }
       }
@@ -1478,8 +1460,8 @@ nsGenericHTMLElement::ParseScrollingValue(const nsAString& aString,
  * Handle attributes common to all html elements
  */
 void
-nsGenericHTMLElement::MapCommonAttributesExceptHiddenInto(const nsMappedAttributes* aAttributes,
-                                                          nsRuleData* aData)
+nsGenericHTMLElement::MapCommonAttributesInto(const nsMappedAttributes* aAttributes,
+                                              nsRuleData* aData)
 {
   if (aData->mSIDs & NS_STYLE_INHERIT_BIT(UserInterface)) {
     nsCSSValue* userModify = aData->ValueForUserModify();
@@ -1507,13 +1489,6 @@ nsGenericHTMLElement::MapCommonAttributesExceptHiddenInto(const nsMappedAttribut
                                             eCSSUnit_Ident);
     }
   }
-}
-
-void
-nsGenericHTMLElement::MapCommonAttributesInto(const nsMappedAttributes* aAttributes,
-                                              nsRuleData* aData)
-{
-  nsGenericHTMLElement::MapCommonAttributesExceptHiddenInto(aAttributes, aData);
 
   if (aData->mSIDs & NS_STYLE_INHERIT_BIT(Display)) {
     nsCSSValue* display = aData->ValueForDisplay();
@@ -2056,7 +2031,7 @@ nsGenericHTMLElement::GetEnumAttr(nsIAtom* aAttr,
   }
 }
 
-nsHTMLMenuElement*
+HTMLMenuElement*
 nsGenericHTMLElement::GetContextMenu() const
 {
   nsAutoString value;
@@ -2064,7 +2039,7 @@ nsGenericHTMLElement::GetContextMenu() const
   if (!value.IsEmpty()) {
     nsIDocument* doc = GetCurrentDoc();
     if (doc) {
-      return nsHTMLMenuElement::FromContentOrNull(doc->GetElementById(value));
+      return HTMLMenuElement::FromContentOrNull(doc->GetElementById(value));
     }
   }
   return nullptr;
@@ -2157,20 +2132,9 @@ nsGenericHTMLElement::SetUndoScopeInternal(bool aUndoScope)
 
 // static
 bool
-nsGenericHTMLElement::PrefEnabled()
+nsGenericHTMLElement::TouchEventsEnabled(JSContext* /* unused */, JSObject* /* unused */)
 {
-  // This is a bit of a hack because we don't support non-bool prefs to enable
-  // properties. This function will be called every time a HTMLElement interface
-  // prototype object is created. The first time this is called we set a boolean
-  // pref (dom.w3c_touch_events.expose) which controls the touch event
-  // properties on HTMLElement.
-  static bool sDidSetPref = false;
-  if (!sDidSetPref) {
-    sDidSetPref = true;
-    Preferences::SetBool("dom.w3c_touch_events.expose",
-                         nsDOMTouchEvent::PrefEnabled());
-  }
-  return true;
+  return nsDOMTouchEvent::PrefEnabled();
 }
 
 //----------------------------------------------------------------------
@@ -2198,6 +2162,14 @@ nsGenericHTMLFormElement::~nsGenericHTMLFormElement()
 NS_IMPL_QUERY_INTERFACE_INHERITED1(nsGenericHTMLFormElement,
                                    nsGenericHTMLElement,
                                    nsIFormControl)
+
+nsINode*
+nsGenericHTMLFormElement::GetParentObject() const
+{
+  // We use the parent chain to implement the scope for event handlers.
+  return mForm ? static_cast<nsINode*>(mForm)
+               : static_cast<nsINode*>(OwnerDoc());
+}
 
 bool
 nsGenericHTMLFormElement::IsNodeOfType(uint32_t aFlags) const
@@ -2692,7 +2664,7 @@ nsGenericHTMLFormElement::IsElementDisabledForEvents(uint32_t aMessage,
 {
   bool disabled = IsDisabled();
   if (!disabled && aFrame) {
-    const nsStyleUserInterface* uiStyle = aFrame->GetStyleUserInterface();
+    const nsStyleUserInterface* uiStyle = aFrame->StyleUserInterface();
     disabled = uiStyle->mUserInput == NS_STYLE_USER_INPUT_NONE ||
       uiStyle->mUserInput == NS_STYLE_USER_INPUT_DISABLED;
 
@@ -2783,8 +2755,8 @@ nsGenericHTMLFormElement::UpdateFieldSet(bool aNotify)
 
   for (parent = GetParent(); parent;
        prev = parent, parent = parent->GetParent()) {
-    nsHTMLFieldSetElement* fieldset =
-      nsHTMLFieldSetElement::FromContent(parent);
+    HTMLFieldSetElement* fieldset =
+      HTMLFieldSetElement::FromContent(parent);
     if (fieldset &&
         (!prev || fieldset->GetFirstLegend() != prev)) {
       if (mFieldSet == fieldset) {

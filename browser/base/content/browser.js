@@ -7,6 +7,7 @@ let Ci = Components.interfaces;
 let Cu = Components.utils;
 
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
+Cu.import("resource:///modules/RecentWindow.jsm");
 
 const nsIWebNavigation = Ci.nsIWebNavigation;
 
@@ -123,7 +124,7 @@ XPCOMUtils.defineLazyModuleGetter(this, "Social",
   "resource:///modules/Social.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "PageThumbs",
-  "resource:///modules/PageThumbs.jsm");
+  "resource://gre/modules/PageThumbs.jsm");
 
 #ifdef MOZ_SAFE_BROWSING
 XPCOMUtils.defineLazyModuleGetter(this, "SafeBrowsing",
@@ -200,14 +201,14 @@ XPCOMUtils.defineLazyGetter(this, "PageMenu", function() {
 * We can avoid adding multiple load event listeners and save some time by adding
 * one listener that calls all real handlers.
 */
-function pageShowEventHandlers(event) {
+function pageShowEventHandlers(persisted) {
   charsetLoadListener();
   XULBrowserWindow.asyncUpdateUI();
 
   // The PluginClickToPlay events are not fired when navigating using the
-  // BF cache. |event.persisted| is true when the page is loaded from the
+  // BF cache. |persisted| is true when the page is loaded from the
   // BF cache, so this code reshows the notification if necessary.
-  if (event.persisted)
+  if (persisted)
     gPluginHandler.reshowClickToPlayNotification();
 }
 
@@ -994,6 +995,9 @@ let gGestureSupport = {
     let contentElement = content.document.body.firstElementChild;
     if (!contentElement)
       return;
+    // If we're currently snapping, cancel that snap
+    if (contentElement.classList.contains("completeRotation"))
+      this._clearCompleteRotation();
 
     this.rotation = Math.round(this.rotation + aEvent.delta);
     contentElement.style.transform = "rotate(" + this.rotation + "deg)";
@@ -1036,8 +1040,11 @@ let gGestureSupport = {
              this.rotation < transitionRotation)
       transitionRotation -= 90;
 
-    contentElement.classList.add("completeRotation");
-    contentElement.addEventListener("transitionend", this._clearCompleteRotation);
+    // Only add the completeRotation class if it is is necessary
+    if (transitionRotation != this.rotation) {
+      contentElement.classList.add("completeRotation");
+      contentElement.addEventListener("transitionend", this._clearCompleteRotation);
+    }
 
     contentElement.style.transform = "rotate(" + transitionRotation + "deg)";
     this.rotation = transitionRotation;
@@ -1094,8 +1101,14 @@ let gGestureSupport = {
    * Removes the transition rule by removing the completeRotation class
    */
   _clearCompleteRotation: function() {
-    this.classList.remove("completeRotation");
-    this.removeEventListener("transitionend", this._clearCompleteRotation);
+    let contentElement = content.document &&
+                         content.document instanceof ImageDocument &&
+                         content.document.body &&
+                         content.document.body.firstElementChild;
+    if (!contentElement)
+      return;
+    contentElement.classList.remove("completeRotation");
+    contentElement.removeEventListener("transitionend", this._clearCompleteRotation);
   },
 };
 
@@ -1297,7 +1310,6 @@ var gBrowserInit = {
 
     // Misc. inits.
     CombinedStopReload.init();
-    allTabs.readPref();
     TabsOnTop.init();
     BookmarksMenuButton.init();
     gPrivateBrowsingUI.init();
@@ -1318,7 +1330,7 @@ var gBrowserInit = {
 
   _delayedStartup: function(uriToLoad, mustLoadSidebar) {
     let tmp = {};
-    Cu.import("resource:///modules/TelemetryTimestamps.jsm", tmp);
+    Cu.import("resource://gre/modules/TelemetryTimestamps.jsm", tmp);
     let TelemetryTimestamps = tmp.TelemetryTimestamps;
     TelemetryTimestamps.add("delayedStartupStarted");
 
@@ -1387,7 +1399,7 @@ var gBrowserInit = {
     gBrowser.addEventListener("pageshow", function(event) {
       // Filter out events that are not about the document load we are interested in
       if (content && event.target == content.document)
-        setTimeout(pageShowEventHandlers, 0, event);
+        setTimeout(pageShowEventHandlers, 0, event.persisted);
     }, true);
 
     // Ensure login manager is up and running.
@@ -1459,7 +1471,6 @@ var gBrowserInit = {
 
     ctrlTab.readPref();
     gPrefService.addObserver(ctrlTab.prefName, ctrlTab, false);
-    gPrefService.addObserver(allTabs.prefName, allTabs, false);
 
     // Initialize the download manager some time after the app starts so that
     // auto-resume downloads begin (such as after crashing or quitting with
@@ -1468,14 +1479,9 @@ var gBrowserInit = {
     // downloads will start right away, and getting the service again won't hurt.
     setTimeout(function() {
       Services.downloads;
-
-#ifdef XP_WIN
-      if (Win7Features) {
-        let DownloadTaskbarProgress =
-          Cu.import("resource://gre/modules/DownloadTaskbarProgress.jsm", {}).DownloadTaskbarProgress;
-        DownloadTaskbarProgress.onBrowserWindowLoad(window);
-      }
-#endif
+      let DownloadTaskbarProgress =
+        Cu.import("resource://gre/modules/DownloadTaskbarProgress.jsm", {}).DownloadTaskbarProgress;
+      DownloadTaskbarProgress.onBrowserWindowLoad(window);
     }, 10000);
 
     // The object handling the downloads indicator is also initialized here in the
@@ -1650,7 +1656,6 @@ var gBrowserInit = {
 
     // First clean up services initialized in gBrowserInit.onLoad (or those whose
     // uninit methods don't depend on the services having been initialized).
-    allTabs.uninit();
 
     CombinedStopReload.uninit();
 
@@ -1690,7 +1695,6 @@ var gBrowserInit = {
         Win7Features.onCloseWindow();
 
       gPrefService.removeObserver(ctrlTab.prefName, ctrlTab);
-      gPrefService.removeObserver(allTabs.prefName, allTabs);
       ctrlTab.uninit();
       TabView.uninit();
       gBrowserThumbnails.uninit();
@@ -2610,26 +2614,33 @@ function PageProxyClickHandler(aEvent)
  *  Handle load of some pages (about:*) so that we can make modifications
  *  to the DOM for unprivileged pages.
  */
-function BrowserOnAboutPageLoad(document) {
-  if (document.documentURI.toLowerCase() == "about:home") {
+function BrowserOnAboutPageLoad(doc) {
+  if (doc.documentURI.toLowerCase() == "about:home") {
     // XXX bug 738646 - when Marketplace is launched, remove this statement and
     // the hidden attribute set on the apps button in aboutHome.xhtml
     if (getBoolPref("browser.aboutHome.apps", false))
-      document.getElementById("apps").removeAttribute("hidden");
+      doc.getElementById("apps").removeAttribute("hidden");
 
     let ss = Components.classes["@mozilla.org/browser/sessionstore;1"].
              getService(Components.interfaces.nsISessionStore);
     if (ss.canRestoreLastSession &&
         !PrivateBrowsingUtils.isWindowPrivate(window))
-      document.getElementById("launcher").setAttribute("session", "true");
+      doc.getElementById("launcher").setAttribute("session", "true");
 
     // Inject search engine and snippets URL.
-    let docElt = document.documentElement;
+    let docElt = doc.documentElement;
     docElt.setAttribute("snippetsURL", AboutHomeUtils.snippetsURL);
+    docElt.setAttribute("snippetsVersion", AboutHomeUtils.snippetsVersion);
     docElt.setAttribute("searchEngineName",
                         AboutHomeUtils.defaultSearchEngine.name);
     docElt.setAttribute("searchEngineURL",
                         AboutHomeUtils.defaultSearchEngine.searchURL);
+
+#ifdef MOZ_SERVICES_HEALTHREPORT
+    doc.addEventListener("AboutHomeSearchEvent", function onSearch(e) {
+      BrowserSearch.recordSearchInHealthReport(e.detail, "abouthome");
+    }, true, true);
+#endif
   }
 }
 
@@ -3465,12 +3476,15 @@ const BrowserSearch = {
    *        Boolean indicating whether or not the search should load in a new
    *        tab.
    *
-   * @param responseType [optional]
-   *        The MIME type that we'd like to receive in response
-   *        to this submission.  If null or the the response type is not supported
-   *        for the search engine, will fallback to "text/html".
+   * @param purpose [optional]
+   *        A string meant to indicate the context of the search request. This
+   *        allows the search service to provide a different nsISearchSubmission
+   *        depending on e.g. where the search is triggered in the UI.
+   *
+   * @return string Name of the search engine used to perform a search or null
+   *         if a search was not performed.
    */
-  loadSearch: function BrowserSearch_search(searchText, useNewTab, responseType) {
+  loadSearch: function BrowserSearch_search(searchText, useNewTab, purpose) {
     var engine;
 
     // If the search bar is visible, use the current engine, otherwise, fall
@@ -3480,19 +3494,15 @@ const BrowserSearch = {
     else
       engine = Services.search.defaultEngine;
 
-    var submission = engine.getSubmission(searchText, responseType);
-
-    // If a response type was specified and getSubmission returned null,
-    // fallback to the default response type.
-    if (!submission && responseType)
-      submission = engine.getSubmission(searchText);
+    var submission = engine.getSubmission(searchText, null, purpose); // HTML response
 
     // getSubmission can return null if the engine doesn't have a URL
     // with a text/html response type.  This is unlikely (since
     // SearchService._addEngineToStore() should fail for such an engine),
     // but let's be on the safe side.
-    if (!submission)
-      return;
+    if (!submission) {
+      return null;
+    }
 
     let inBackground = Services.prefs.getBoolPref("browser.search.context.loadInBackground");
     openLinkIn(submission.uri.spec,
@@ -3500,6 +3510,21 @@ const BrowserSearch = {
                { postData: submission.postData,
                  inBackground: inBackground,
                  relatedToCurrent: true });
+
+    return engine.name;
+  },
+
+  /**
+   * Perform a search initiated from the context menu.
+   *
+   * This should only be called from the context menu. See
+   * BrowserSearch.loadSearch for the preferred API.
+   */
+  loadSearchFromContext: function (terms) {
+    let engine = BrowserSearch.loadSearch(terms, true, "contextmenu");
+    if (engine) {
+      BrowserSearch.recordSearchInHealthReport(engine, "contextmenu");
+    }
   },
 
   /**
@@ -3514,8 +3539,43 @@ const BrowserSearch = {
     var where = newWindowPref == 3 ? "tab" : "window";
     var searchEnginesURL = formatURL("browser.search.searchEnginesURL", true);
     openUILinkIn(searchEnginesURL, where);
-  }
-}
+  },
+
+  /**
+   * Helper to record a search with Firefox Health Report.
+   *
+   * FHR records only search counts and nothing pertaining to the search itself.
+   *
+   * @param engine
+   *        (string) The name of the engine used to perform the search. This
+   *        is typically nsISearchEngine.name.
+   * @param source
+   *        (string) Where the search originated from. See the FHR
+   *        SearchesProvider for allowed values.
+   */
+  recordSearchInHealthReport: function (engine, source) {
+#ifdef MOZ_SERVICES_HEALTHREPORT
+    let reporter = Cc["@mozilla.org/datareporting/service;1"]
+                     .getService()
+                     .wrappedJSObject
+                     .healthReporter;
+
+    // This can happen if the FHR component of the data reporting service is
+    // disabled. This is controlled by a pref that most will never use.
+    if (!reporter) {
+      return;
+    }
+
+    reporter.onInit().then(function record() {
+      try {
+        reporter.getProvider("org.mozilla.searches").recordSearch(engine, source);
+      } catch (ex) {
+        Cu.reportError(ex);
+      }
+    });
+#endif
+  },
+};
 
 function FillHistoryMenu(aParent) {
   // Lazily add the hover listeners on first showing and never remove them
@@ -3799,7 +3859,6 @@ function BrowserToolboxCustomizeChange(aType) {
     default:
       gHomeButton.updatePersonalToolbarStyle();
       BookmarksMenuButton.customizeChange();
-      allTabs.readPref();
   }
 }
 
@@ -3955,8 +4014,6 @@ var XULBrowserWindow = {
   // Stored Status, Link and Loading values
   status: "",
   defaultStatus: "",
-  jsStatus: "",
-  jsDefaultStatus: "",
   overLink: "",
   startTime: 0,
   statusText: "",
@@ -4014,14 +4071,12 @@ var XULBrowserWindow = {
     delete this.statusText;
   },
 
-  setJSStatus: function (status) {
-    this.jsStatus = status;
-    this.updateStatusField();
+  setJSStatus: function () {
+    // unsupported
   },
 
-  setJSDefaultStatus: function (status) {
-    this.jsDefaultStatus = status;
-    this.updateStatusField();
+  setJSDefaultStatus: function () {
+    // unsupported
   },
 
   setDefaultStatus: function (status) {
@@ -4046,7 +4101,7 @@ var XULBrowserWindow = {
     var text, type, types = ["overLink"];
     if (this._busyUI)
       types.push("status");
-    types.push("jsStatus", "jsDefaultStatus", "defaultStatus");
+    types.push("defaultStatus");
     for (type of types) {
       text = this[type];
       if (text)
@@ -4196,7 +4251,6 @@ var XULBrowserWindow = {
   },
 
   onLocationChange: function (aWebProgress, aRequest, aLocationURI, aFlags) {
-    const nsIWebProgressListener = Ci.nsIWebProgressListener;
     var location = aLocationURI ? aLocationURI.spec : "";
     this._hostChanged = true;
 
@@ -4248,12 +4302,6 @@ var XULBrowserWindow = {
         // persist across the first location change.
         let nBox = gBrowser.getNotificationBox(selectedBrowser);
         nBox.removeTransientNotifications();
-
-        // Only need to call locationChange if the PopupNotifications object
-        // for this window has already been initialized (i.e. its getter no
-        // longer exists)
-        if (!__lookupGetter__("PopupNotifications"))
-          PopupNotifications.locationChange();
       }
     }
 
@@ -4323,7 +4371,7 @@ var XULBrowserWindow = {
         if (e.target.readyState != "interactive" && e.target.readyState != "complete")
           return;
 
-        e.target.removeEventListener("readystate", onContentRSChange);
+        e.target.removeEventListener("readystatechange", onContentRSChange);
         disableFindCommands(shouldDisableFind(e.target));
       }
 
@@ -4332,7 +4380,7 @@ var XULBrowserWindow = {
           (aLocationURI.schemeIs("about") || aLocationURI.schemeIs("chrome"))) {
         // Don't need to re-enable/disable find commands for same-document location changes
         // (e.g. the replaceStates in about:addons)
-        if (!(aFlags & nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT)) {
+        if (!(aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT)) {
           if (content.document.readyState == "interactive" || content.document.readyState == "complete")
             disableFindCommands(shouldDisableFind(content.document));
           else {
@@ -4666,12 +4714,16 @@ var TabsProgressListener = {
 #endif
 
     // Collect telemetry data about tab load times.
-    if (aWebProgress.DOMWindow == aWebProgress.DOMWindow.top &&
-        aStateFlags & Ci.nsIWebProgressListener.STATE_IS_WINDOW) {
-      if (aStateFlags & Ci.nsIWebProgressListener.STATE_START)
-        TelemetryStopwatch.start("FX_PAGE_LOAD_MS", aBrowser);
-      else if (aStateFlags & Ci.nsIWebProgressListener.STATE_STOP)
-        TelemetryStopwatch.finish("FX_PAGE_LOAD_MS", aBrowser);
+    if (aWebProgress.DOMWindow == aWebProgress.DOMWindow.top) {
+      if (aStateFlags & Ci.nsIWebProgressListener.STATE_IS_WINDOW) {
+        if (aStateFlags & Ci.nsIWebProgressListener.STATE_START)
+          TelemetryStopwatch.start("FX_PAGE_LOAD_MS", aBrowser);
+        else if (aStateFlags & Ci.nsIWebProgressListener.STATE_STOP)
+          TelemetryStopwatch.finish("FX_PAGE_LOAD_MS", aBrowser);
+      } else if (aStateFlags & Ci.nsIWebProgressListener.STATE_STOP &&
+                 aStatus == Cr.NS_BINDING_ABORTED) {
+        TelemetryStopwatch.cancel("FX_PAGE_LOAD_MS", aBrowser);
+      }
     }
 
     // Attach a listener to watch for "click" events bubbling up from error
@@ -4681,9 +4733,14 @@ var TabsProgressListener = {
     // We can't look for this during onLocationChange since at that point the
     // document URI is not yet the about:-uri of the error page.
 
+    let doc = aWebProgress.DOMWindow.document;
     if (aStateFlags & Ci.nsIWebProgressListener.STATE_STOP &&
         Components.isSuccessCode(aStatus) &&
-        aWebProgress.DOMWindow.document.documentURI.startsWith("about:")) {
+        doc.documentURI.startsWith("about:") &&
+        !doc.documentElement.hasAttribute("hasBrowserHandlers")) {
+      // STATE_STOP may be received twice for documents, thus store an
+      // attribute to ensure handling it just once.
+      doc.documentElement.setAttribute("hasBrowserHandlers", "true");
       aBrowser.addEventListener("click", BrowserOnClick, true);
       aBrowser.addEventListener("pagehide", function onPageHide(event) {
         if (event.target.defaultView.frameElement)
@@ -4693,22 +4750,32 @@ var TabsProgressListener = {
       }, true);
 
       // We also want to make changes to page UI for unprivileged about pages.
-      BrowserOnAboutPageLoad(aWebProgress.DOMWindow.document);
+      BrowserOnAboutPageLoad(doc);
     }
   },
 
   onLocationChange: function (aBrowser, aWebProgress, aRequest, aLocationURI,
                               aFlags) {
-    // Filter out any sub-frame loads
-    if (aBrowser.contentWindow == aWebProgress.DOMWindow) {
-      // Filter out any onLocationChanges triggered by anchor navigation
-      // or history.push/pop/replaceState.
-      if (aRequest) {
-        // Initialize the click-to-play state.
-        aBrowser._clickToPlayPluginsActivated = new Map();
-        aBrowser._clickToPlayAllPluginsActivated = false;
-        aBrowser._pluginScriptedState = gPluginHandler.PLUGIN_SCRIPTED_STATE_NONE;
-      }
+    // Filter out sub-frame loads and location changes caused by anchor
+    // navigation or history.push/pop/replaceState.
+    if (aBrowser.contentWindow == aWebProgress.DOMWindow &&
+        !(aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT)) {
+      // Initialize the click-to-play state.
+      aBrowser._clickToPlayPluginsActivated = new Map();
+      aBrowser._clickToPlayAllPluginsActivated = false;
+      aBrowser._pluginScriptedState = gPluginHandler.PLUGIN_SCRIPTED_STATE_NONE;
+
+      // Only need to call locationChange if the PopupNotifications object
+      // for this window has already been initialized (i.e. its getter no
+      // longer exists)
+      if (!Object.getOwnPropertyDescriptor(window, "PopupNotifications").get)
+        PopupNotifications.locationChange(aBrowser);
+
+      // Only handle background browsers as long as the selected browser is
+      // handled in XULBrowserWindow.onLocationChange (bug 839516).
+      if (aBrowser != gBrowser.selectedBrowser)
+        gBrowser.getNotificationBox(aBrowser).removeTransientNotifications();
+
       FullZoom.onLocationChange(aLocationURI, false, aBrowser);
     }
   },
@@ -4799,9 +4866,8 @@ nsBrowserAccess.prototype = {
         if (window.toolbar.visible)
           win = window;
         else {
-          win = Cc["@mozilla.org/browser/browserglue;1"]
-                  .getService(Ci.nsIBrowserGlue)
-                  .getMostRecentBrowserWindow();
+          let isPrivate = PrivateBrowsingUtils.isWindowPrivate(aOpener || window);
+          win = RecentWindow.getMostRecentBrowserWindow({private: isPrivate});
           needToFocusWin = true;
         }
 
@@ -5034,9 +5100,11 @@ var TabsInTitlebar = {
 
       let tabsToolbar       = $("TabsToolbar");
 
+#ifdef MENUBAR_CAN_AUTOHIDE
       let appmenuButtonBox  = $("appmenu-button-container");
-      let captionButtonsBox = $("titlebar-buttonbox");
       this._sizePlaceholder("appmenu-button", rect(appmenuButtonBox).width);
+#endif
+      let captionButtonsBox = $("titlebar-buttonbox");
       this._sizePlaceholder("caption-buttons", rect(captionButtonsBox).width);
 
       let tabsToolbarRect = rect(tabsToolbar);
@@ -5621,6 +5689,7 @@ function SelectDetector(event, doReload)
 
 function BrowserSetForcedCharacterSet(aCharset)
 {
+  gBrowser.docShell.gatherCharsetMenuTelemetry();
   gBrowser.docShell.charset = aCharset;
   // Save the forced character-set
   if (!PrivateBrowsingUtils.isWindowPrivate(window))
@@ -6334,20 +6403,20 @@ function warnAboutClosingWindow() {
   // Figure out if there's at least one other browser window around.
   let e = Services.wm.getEnumerator("navigator:browser");
   let otherPBWindowExists = false;
-  let warnAboutClosingTabs = false;
+  let nonPopupPresent = false;
   while (e.hasMoreElements()) {
     let win = e.getNext();
     if (win != window) {
       if (isPBWindow && PrivateBrowsingUtils.isWindowPrivate(win))
         otherPBWindowExists = true;
       if (win.toolbar.visible)
-        warnAboutClosingTabs = true;
+        nonPopupPresent = true;
       // If the current window is not in private browsing mode we don't need to 
       // look for other pb windows, we can leave the loop when finding the 
       // first non-popup window. If however the current window is in private 
       // browsing mode then we need at least one other pb and one non-popup 
       // window to break out early.
-      if ((!isPBWindow || otherPBWindowExists) && warnAboutClosingTabs)
+      if ((!isPBWindow || otherPBWindowExists) && nonPopupPresent)
         break;
     }
   }
@@ -6362,7 +6431,8 @@ function warnAboutClosingWindow() {
     if (exitingCanceled.data)
       return false;
   }
-  if (warnAboutClosingTabs)
+
+  if (!isPBWindow && nonPopupPresent)
     return gBrowser.warnAboutClosingTabs(true);
 
   let os = Services.obs;
@@ -6380,7 +6450,7 @@ function warnAboutClosingWindow() {
   // OS X doesn't quit the application when the last window is closed, but keeps
   // the session alive. Hence don't prompt users to save tabs, but warn about
   // closing multiple tabs.
-  return gBrowser.warnAboutClosingTabs(true);
+  return isPBWindow || gBrowser.warnAboutClosingTabs(true);
 #else
   return true;
 #endif
@@ -6815,7 +6885,8 @@ var gIdentityHandler = {
     } else if (state & nsIWebProgressListener.STATE_IS_SECURE) {
       this.setMode(this.IDENTITY_MODE_DOMAIN_VERIFIED);
     } else if (state & nsIWebProgressListener.STATE_IS_BROKEN) {
-      if (state & nsIWebProgressListener.STATE_LOADED_MIXED_ACTIVE_CONTENT) {
+      if ((state & nsIWebProgressListener.STATE_LOADED_MIXED_ACTIVE_CONTENT) &&
+          gPrefService.getBoolPref("security.mixed_content.block_active_content")) {
         this.setMode(this.IDENTITY_MODE_MIXED_ACTIVE_CONTENT);
       } else {
         this.setMode(this.IDENTITY_MODE_MIXED_CONTENT);
@@ -7034,25 +7105,27 @@ var gIdentityHandler = {
     this._identityPopup.hidePopup();
   },
 
-  _popupOpenTime : null,
-
   /**
    * Click handler for the identity-box element in primary chrome.
    */
   handleIdentityButtonEvent : function(event) {
-    this._popupOpenTime = new Date();
+    TelemetryStopwatch.start("FX_IDENTITY_POPUP_OPEN_MS");
     event.stopPropagation();
 
     if ((event.type == "click" && event.button != 0) ||
         (event.type == "keypress" && event.charCode != KeyEvent.DOM_VK_SPACE &&
-         event.keyCode != KeyEvent.DOM_VK_RETURN))
+         event.keyCode != KeyEvent.DOM_VK_RETURN)) {
+      TelemetryStopwatch.cancel("FX_IDENTITY_POPUP_OPEN_MS");
       return; // Left click, space or enter only
+    }
 
     // Don't allow left click, space or enter if the location
     // is chrome UI or the location has been modified.
     if (this._mode == this.IDENTITY_MODE_CHROMEUI ||
-        gURLBar.getAttribute("pageproxystate") != "valid")
+        gURLBar.getAttribute("pageproxystate") != "valid") {
+      TelemetryStopwatch.cancel("FX_IDENTITY_POPUP_OPEN_MS");
       return;
+    }
 
     // Make sure that the display:none style we set in xul is removed now that
     // the popup is actually needed
@@ -7074,13 +7147,7 @@ var gIdentityHandler = {
   },
 
   onPopupShown : function(event) {
-    let openingDuration = new Date() - this._popupOpenTime;
-    this._popupOpenTime = null;
-    try {
-      Services.telemetry.getHistogramById("FX_IDENTITY_POPUP_OPEN_MS").add(openingDuration);
-    } catch (ex) {
-      Components.utils.reportError("Unable to report telemetry for FX_IDENTITY_POPUP_OPEN_MS.");
-    }
+    TelemetryStopwatch.finish("FX_IDENTITY_POPUP_OPEN_MS");
     document.getElementById('identity-popup-more-info-button').focus();
   },
 
@@ -7448,3 +7515,4 @@ function focusNextFrame(event) {
   if (element.ownerDocument == document)
     focusAndSelectUrlBar();
 }
+

@@ -28,6 +28,16 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     bool dynamicAlignment_;
     bool enoughMemory_;
 
+    struct Double {
+        double value;
+        AbsoluteLabel uses;
+        Double(double value) : value(value) {}
+    };
+    Vector<Double, 0, SystemAllocPolicy> doubles_;
+
+    typedef HashMap<double, size_t, DefaultHasher<double>, SystemAllocPolicy> DoubleMap;
+    DoubleMap doubleMap_;
+
   protected:
     MoveResolver moveResolver_;
 
@@ -61,6 +71,10 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         enoughMemory_(true)
     {
     }
+
+    // The buffer is about to be linked, make sure any constant pools or excess
+    // bookkeeping has been flushed to the instruction stream.
+    void finish();
 
     bool oom() const {
         return MacroAssemblerX86Shared::oom() || !enoughMemory_;
@@ -328,6 +342,13 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
     }
 
     void branchTestValue(Condition cond, const ValueOperand &value, const Value &v, Label *label);
+    void branchTestValue(Condition cond, const Address &valaddr, const ValueOperand &value,
+                         Label *label)
+    {
+        JS_ASSERT(cond == Equal || cond == NotEqual);
+        branchPtr(cond, tagOf(valaddr), value.typeReg(), label);
+        branchPtr(cond, payloadOf(valaddr), value.payloadReg(), label);
+    }
 
     void cmpPtr(Register lhs, const ImmWord rhs) {
         cmpl(lhs, Imm32(rhs.value));
@@ -339,6 +360,9 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         cmpl(lhs, rhs);
     }
     void cmpPtr(const Operand &lhs, const ImmGCPtr rhs) {
+        cmpl(lhs, rhs);
+    }
+    void cmpPtr(const Operand &lhs, const Imm32 rhs) {
         cmpl(lhs, rhs);
     }
     void cmpPtr(const Address &lhs, Register rhs) {
@@ -629,6 +653,7 @@ class MacroAssemblerX86 : public MacroAssemblerX86Shared
         cvtsi2sd(operand.payloadReg(), dest);
     }
 
+    void loadConstantDouble(double d, const FloatRegister &dest);
     void loadStaticDouble(const double *dp, const FloatRegister &dest) {
         movsd(dp, dest);
     }

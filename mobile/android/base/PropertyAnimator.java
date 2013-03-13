@@ -26,6 +26,7 @@ public class PropertyAnimator implements Runnable {
         TRANSLATION_Y,
         SCROLL_X,
         SCROLL_Y,
+        WIDTH,
         HEIGHT
     }
 
@@ -121,6 +122,8 @@ public class PropertyAnimator implements Runnable {
                 element.from = element.proxy.getScrollY();
             else if (element.property == Property.SCROLL_X)
                 element.from = element.proxy.getScrollX();
+            else if (element.property == Property.WIDTH)
+                element.from = element.proxy.getWidth();
             else if (element.property == Property.HEIGHT)
                 element.from = element.proxy.getHeight();
 
@@ -138,12 +141,18 @@ public class PropertyAnimator implements Runnable {
         }
     }
 
-    public void stop() {
+
+    /**
+     * Stop the animation, optionally snapping to the end position.
+     * onPropertyAnimationEnd is only called when snapping to the end position.
+     */
+    public void stop(boolean snapToEndPosition) {
         mFramePoster.cancelAnimationFrame();
 
         // Make sure to snap to the end position.
-        for (ElementHolder element : mElementsList) { 
-            invalidate(element, element.to);
+        for (ElementHolder element : mElementsList) {
+            if (snapToEndPosition)
+                invalidate(element, element.to);
 
             if (shouldEnableHardwareLayer(element))
                 element.view.setLayerType(View.LAYER_TYPE_NONE, null);
@@ -154,9 +163,14 @@ public class PropertyAnimator implements Runnable {
         mElementsList.clear();
 
         if (mListener != null) {
-            mListener.onPropertyAnimationEnd();
+            if (snapToEndPosition)
+                mListener.onPropertyAnimationEnd();
             mListener = null;
         }
+    }
+
+    public void stop() {
+        stop(true);
     }
 
     private boolean shouldEnableHardwareLayer(ElementHolder element) {
@@ -195,6 +209,8 @@ public class PropertyAnimator implements Runnable {
             element.proxy.scrollTo(element.proxy.getScrollX(), (int) delta);
         else if (element.property == Property.SCROLL_X)
             element.proxy.scrollTo((int) delta, element.proxy.getScrollY());
+        else if (element.property == Property.WIDTH)
+            element.proxy.setWidth((int) delta);
         else if (element.property == Property.HEIGHT)
             element.proxy.setHeight((int) delta);
     }

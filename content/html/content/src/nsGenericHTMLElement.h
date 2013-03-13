@@ -23,7 +23,6 @@ class nsIFrame;
 class nsIStyleRule;
 class nsChildContentList;
 class nsDOMCSSDeclaration;
-class nsHTMLMenuElement;
 class nsIDOMCSSStyleDeclaration;
 class nsIURI;
 class nsIFormControlFrame;
@@ -41,6 +40,7 @@ class nsDOMSettableTokenList;
 namespace mozilla {
 namespace dom{
 class HTMLPropertiesCollection;
+class HTMLMenuElement;
 }
 }
 
@@ -220,7 +220,7 @@ public:
     }
     return false;
   }
-  nsHTMLMenuElement* GetContextMenu() const;
+  mozilla::dom::HTMLMenuElement* GetContextMenu() const;
   bool Spellcheck();
   void SetSpellcheck(bool aSpellcheck, mozilla::ErrorResult& aError)
   {
@@ -358,8 +358,8 @@ public:
    * in aIsFocusable.
    */
   virtual bool IsHTMLFocusable(bool aWithMouse,
-                                 bool *aIsFocusable,
-                                 int32_t *aTabIndex);
+                               bool *aIsFocusable,
+                               int32_t *aTabIndex);
   virtual void PerformAccesskey(bool aKeyCausesActivation,
                                 bool aIsTrustedEvent);
 
@@ -516,14 +516,6 @@ public:
    */
   static void MapCommonAttributesInto(const nsMappedAttributes* aAttributes, 
                                       nsRuleData* aRuleData);
-
-  /**
-   * This method is used by embed elements because they should ignore the hidden
-   * attribute for the moment.
-   * TODO: This should be removed when bug 614825 will be fixed.
-   */
-  static void MapCommonAttributesExceptHiddenInto(const nsMappedAttributes* aAttributes,
-                                                  nsRuleData* aRuleData);
 
   static const MappedAttributeEntry sCommonAttributeMap[];
   static const MappedAttributeEntry sImageMarginSizeAttributeMap[];
@@ -723,7 +715,7 @@ public:
 
   virtual bool IsLabelable() const;
 
-  static bool PrefEnabled();
+  static bool TouchEventsEnabled(JSContext* /* unused */, JSObject* /* unused */);
 
 protected:
   /**
@@ -768,10 +760,6 @@ private:
   void RegUnRegAccessKey(bool aDoReg);
 
 protected:
-  virtual nsresult BeforeSetAttr(int32_t aNamespaceID, nsIAtom* aName,
-                                 const nsAttrValueOrString* aValue,
-                                 bool aNotify);
-
   virtual nsresult AfterSetAttr(int32_t aNamespaceID, nsIAtom* aName,
                                 const nsAttrValue* aValue, bool aNotify);
 
@@ -784,6 +772,10 @@ protected:
   {
     GetAttr(kNameSpaceID_None, aName, aResult);
   }
+  void GetHTMLAttr(nsIAtom* aName, mozilla::dom::DOMString& aResult) const
+  {
+    GetAttr(kNameSpaceID_None, aName, aResult);
+  }
   void GetHTMLEnumAttr(nsIAtom* aName, nsAString& aResult) const
   {
     GetEnumAttr(aName, nullptr, aResult);
@@ -791,6 +783,12 @@ protected:
   void GetHTMLURIAttr(nsIAtom* aName, nsAString& aResult) const
   {
     GetURIAttr(aName, nullptr, aResult);
+  }
+  uint32_t GetHTMLUnsignedIntAttr(nsIAtom* aName, uint32_t aDefault)
+  {
+    uint32_t result;
+    GetUnsignedIntAttr(aName, aDefault, &result);
+    return result;
   }
 
   void SetHTMLAttr(nsIAtom* aName, const nsAString& aValue)
@@ -1012,7 +1010,11 @@ private:
   void ChangeEditableState(int32_t aChange);
 };
 
-class nsHTMLFieldSetElement;
+namespace mozilla {
+namespace dom {
+class HTMLFieldSetElement;
+}
+}
 
 #define FORM_ELEMENT_FLAG_BIT(n_) NODE_FLAG_BIT(ELEMENT_TYPE_SPECIFIC_BITS_OFFSET + (n_))
 
@@ -1050,6 +1052,8 @@ public:
   virtual ~nsGenericHTMLFormElement();
 
   NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr);
+
+  nsINode* GetParentObject() const;
 
   virtual bool IsNodeOfType(uint32_t aFlags) const;
   virtual void SaveSubtreeState();
@@ -1193,7 +1197,7 @@ protected:
   nsHTMLFormElement* mForm;
 
   /* This is a pointer to our closest fieldset parent if any */
-  nsHTMLFieldSetElement* mFieldSet;
+  mozilla::dom::HTMLFieldSetElement* mFieldSet;
 };
 
 //----------------------------------------------------------------------
@@ -1892,6 +1896,7 @@ NS_NewHTMLElement(already_AddRefed<nsINodeInfo> aNodeInfo,
                   mozilla::dom::FromParser aFromParser = mozilla::dom::NOT_FROM_PARSER);
 
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Shared)
+NS_DECLARE_NS_NEW_HTML_ELEMENT(SharedList)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(SharedObject)
 
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Anchor)
@@ -1904,9 +1909,9 @@ NS_DECLARE_NS_NEW_HTML_ELEMENT(Body)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Button)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Canvas)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Mod)
+NS_DECLARE_NS_NEW_HTML_ELEMENT(Data)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(DataList)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Div)
-NS_DECLARE_NS_NEW_HTML_ELEMENT(DList)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(FieldSet)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Font)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Form)
@@ -1929,7 +1934,6 @@ NS_DECLARE_NS_NEW_HTML_ELEMENT(MenuItem)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Meta)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Meter)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Object)
-NS_DECLARE_NS_NEW_HTML_ELEMENT(OList)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(OptGroup)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Option)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Output)
@@ -1953,8 +1957,8 @@ NS_DECLARE_NS_NEW_HTML_ELEMENT(Tbody)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(TextArea)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Tfoot)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Thead)
+NS_DECLARE_NS_NEW_HTML_ELEMENT(Time)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Title)
-NS_DECLARE_NS_NEW_HTML_ELEMENT(UList)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Unknown)
 #if defined(MOZ_MEDIA)
 NS_DECLARE_NS_NEW_HTML_ELEMENT(Video)

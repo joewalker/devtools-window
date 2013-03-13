@@ -12,12 +12,10 @@
 #include "nsIDOMCSSPrimitiveValue.h"
 #include "nsCSSKeywords.h"
 #include "CSSValue.h"
-#include "nsAutoPtr.h"
+#include "nsCOMPtr.h"
 #include "nsCoord.h"
-#include "nsWrapperCache.h"
 
 class nsIURI;
-class nsComputedDOMStyle;
 class nsDOMCSSRect;
 class nsDOMCSSRGBColor;
 
@@ -84,7 +82,7 @@ public:
     return nullptr;
   }
 
-  virtual JSObject *WrapObject(JSContext *cx, JSObject *scope, bool *triedToWrap);
+  virtual JSObject *WrapObject(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
 
 private:
   uint16_t mType;

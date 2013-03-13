@@ -224,7 +224,7 @@ Class js::RegExpClass = {
 };
 
 RegExpObject *
-RegExpObject::create(JSContext *cx, RegExpStatics *res, StableCharPtr chars, size_t length,
+RegExpObject::create(JSContext *cx, RegExpStatics *res, const jschar *chars, size_t length,
                      RegExpFlag flags, TokenStream *tokenStream)
 {
     RegExpFlag staticsFlags = res->getFlags();
@@ -232,10 +232,10 @@ RegExpObject::create(JSContext *cx, RegExpStatics *res, StableCharPtr chars, siz
 }
 
 RegExpObject *
-RegExpObject::createNoStatics(JSContext *cx, StableCharPtr chars, size_t length, RegExpFlag flags,
+RegExpObject::createNoStatics(JSContext *cx, const jschar *chars, size_t length, RegExpFlag flags,
                               TokenStream *tokenStream)
 {
-    RootedAtom source(cx, AtomizeChars<CanGC>(cx, chars.get(), length));
+    RootedAtom source(cx, AtomizeChars<CanGC>(cx, chars, length));
     if (!source)
         return NULL;
 
@@ -266,7 +266,7 @@ RegExpObject::createShared(JSContext *cx, RegExpGuard *g)
     return true;
 }
 
-UnrootedShape
+RawShape
 RegExpObject::assignInitialShape(JSContext *cx)
 {
     JS_ASSERT(isRegExp());
@@ -283,18 +283,18 @@ RegExpObject::assignInitialShape(JSContext *cx)
 
     /* The lastIndex property alone is writable but non-configurable. */
     if (!addDataProperty(cx, cx->names().lastIndex, LAST_INDEX_SLOT, JSPROP_PERMANENT))
-        return UnrootedShape(NULL);
+        return NULL;
 
     /* Remaining instance properties are non-writable and non-configurable. */
     unsigned attrs = JSPROP_PERMANENT | JSPROP_READONLY;
     if (!self->addDataProperty(cx, cx->names().source, SOURCE_SLOT, attrs))
-        return UnrootedShape(NULL);
+        return NULL;
     if (!self->addDataProperty(cx, cx->names().global, GLOBAL_FLAG_SLOT, attrs))
-        return UnrootedShape(NULL);
+        return NULL;
     if (!self->addDataProperty(cx, cx->names().ignoreCase, IGNORE_CASE_FLAG_SLOT, attrs))
-        return UnrootedShape(NULL);
+        return NULL;
     if (!self->addDataProperty(cx, cx->names().multiline, MULTILINE_FLAG_SLOT, attrs))
-        return UnrootedShape(NULL);
+        return NULL;
     return self->addDataProperty(cx, cx->names().sticky, STICKY_FLAG_SLOT, attrs);
 }
 
@@ -519,7 +519,7 @@ RegExpShared::compileMatchOnlyIfNecessary(JSContext *cx)
 }
 
 RegExpRunStatus
-RegExpShared::execute(JSContext *cx, StableCharPtr chars, size_t length,
+RegExpShared::execute(JSContext *cx, const jschar *chars, size_t length,
                       size_t *lastIndex, MatchPairs &matches)
 {
     /* Compile the code at point-of-use. */
@@ -550,11 +550,11 @@ RegExpShared::execute(JSContext *cx, StableCharPtr chars, size_t length,
 
 #if ENABLE_YARR_JIT
     if (codeBlock.isFallBack())
-        result = JSC::Yarr::interpret(bytecode, chars.get(), length, start, outputBuf);
+        result = JSC::Yarr::interpret(cx, bytecode, chars, length, start, outputBuf);
     else
-        result = codeBlock.execute(chars.get(), start, length, (int *)outputBuf).start;
+        result = codeBlock.execute(chars, start, length, (int *)outputBuf).start;
 #else
-    result = JSC::Yarr::interpret(bytecode, chars.get(), length, start, outputBuf);
+    result = JSC::Yarr::interpret(cx, bytecode, chars, length, start, outputBuf);
 #endif
 
     if (result == JSC::Yarr::offsetNoMatch)
@@ -567,7 +567,7 @@ RegExpShared::execute(JSContext *cx, StableCharPtr chars, size_t length,
 }
 
 RegExpRunStatus
-RegExpShared::executeMatchOnly(JSContext *cx, StableCharPtr chars, size_t length,
+RegExpShared::executeMatchOnly(JSContext *cx, const jschar *chars, size_t length,
                                size_t *lastIndex, MatchPair &match)
 {
     /* Compile the code at point-of-use. */
@@ -587,7 +587,7 @@ RegExpShared::executeMatchOnly(JSContext *cx, StableCharPtr chars, size_t length
 
 #if ENABLE_YARR_JIT
     if (!codeBlock.isFallBack()) {
-        MatchResult result = codeBlock.execute(chars.get(), start, length);
+        MatchResult result = codeBlock.execute(chars, start, length);
         if (!result)
             return RegExpRunStatus_Success_NotFound;
 
@@ -609,7 +609,7 @@ RegExpShared::executeMatchOnly(JSContext *cx, StableCharPtr chars, size_t length
         return RegExpRunStatus_Error;
 
     unsigned result =
-        JSC::Yarr::interpret(bytecode, chars.get(), length, start, matches.rawBuf());
+        JSC::Yarr::interpret(cx, bytecode, chars, length, start, matches.rawBuf());
 
     if (result == JSC::Yarr::offsetNoMatch)
         return RegExpRunStatus_Success_NotFound;
@@ -637,7 +637,7 @@ RegExpCompartment::~RegExpCompartment()
 bool
 RegExpCompartment::init(JSContext *cx)
 {
-    if (!map_.init() || !inUse_.init()) {
+    if (!map_.init(0) || !inUse_.init(0)) {
         if (cx)
             js_ReportOutOfMemory(cx);
         return false;
@@ -699,7 +699,7 @@ RegExpCompartment::get(JSContext *cx, JSAtom *source, RegExpFlag flags, RegExpGu
 }
 
 bool
-RegExpCompartment::get(JSContext *cx, JSAtom *atom, JSString *opt, RegExpGuard *g)
+RegExpCompartment::get(JSContext *cx, HandleAtom atom, JSString *opt, RegExpGuard *g)
 {
     RegExpFlag flags = RegExpFlag(0);
     if (opt && !ParseRegExpFlags(cx, opt, &flags))
@@ -711,7 +711,10 @@ RegExpCompartment::get(JSContext *cx, JSAtom *atom, JSString *opt, RegExpGuard *
 size_t
 RegExpCompartment::sizeOfExcludingThis(JSMallocSizeOfFun mallocSizeOf)
 {
-    return map_.sizeOfExcludingThis(mallocSizeOf);
+    size_t n = 0;
+    n += map_.sizeOfExcludingThis(mallocSizeOf);
+    n += inUse_.sizeOfExcludingThis(mallocSizeOf);
+    return n;
 }
 
 /* Functions */

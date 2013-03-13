@@ -13,6 +13,9 @@ include filters/reftest.list
 # smil / animation tests
 include smil/reftest.list
 
+# text tests
+include text/reftest.list
+
 # load only tests
 include load-only/reftest.list
 
@@ -70,7 +73,7 @@ fuzzy-if(/^Windows\x20NT\x206\.1/.test(http.oscpu),1,2) == clipPath-and-shape-re
 == dynamic-conditions-11.svg pass.svg
 == dynamic-conditions-12.svg pass.svg
 == dynamic-conditions-13.svg about:blank
-skip-if(B2G) == dynamic-clipPath-01.svg pass.svg
+fuzzy-if(Android,4,44) skip-if(B2G) == dynamic-clipPath-01.svg pass.svg
 == dynamic-clipPath-02.svg pass.svg
 == dynamic-feFlood-01.svg pass.svg
 == dynamic-feImage-01.svg pass.svg
@@ -108,12 +111,15 @@ skip-if(B2G) == dynamic-text-06.svg pass.svg
 == dynamic-text-07.svg dynamic-text-07-ref.svg
 == dynamic-text-08.svg dynamic-text-08-ref.svg
 skip-if(B2G) == dynamic-textPath-01.svg dynamic-textPath-01-ref.svg
+== dynamic-textPath-02.svg dynamic-textPath-02-ref.svg
+== dynamic-textPath-03.svg dynamic-textPath-03-ref.svg
 == dynamic-use-01.svg pass.svg
 == dynamic-use-02.svg pass.svg
 skip-if(B2G) == dynamic-use-03.svg pass.svg
 skip-if(B2G) == dynamic-use-04.svg pass.svg
 skip-if(B2G) == dynamic-use-05.svg pass.svg
 == dynamic-use-06.svg pass.svg
+== dynamic-use-07.svg pass.svg
 random == dynamic-use-nested-01a.svg dynamic-use-nested-01-ref.svg
 random == dynamic-use-nested-01b.svg dynamic-use-nested-01-ref.svg
 == dynamic-use-remove-width.svg dynamic-use-remove-width-ref.svg
@@ -238,6 +244,7 @@ pref(svg.paint-order.enabled,true) == paint-order-03.svg paint-order-03-ref.svg
 == radialGradient-basic-01.svg pass.svg
 == radialGradient-basic-02.svg pass.svg
 == radialGradient-basic-03.svg radialGradient-basic-03-ref.svg
+== radialGradient-basic-04.svg pass.svg
 == rect-01.svg pass.svg
 == rect-02.svg pass.svg
 == rect-03.svg pass.svg
@@ -274,14 +281,17 @@ HTTP(..) == text-gradient-04.svg text-gradient-04-ref.svg
 # Tests for bug 546813: sanity-check using HTML text, then test SVG behavior.
 skip-if(B2G) != text-language-00.xhtml text-language-00-ref.xhtml
 skip-if(B2G) random-if(gtk2Widget) != text-language-01.xhtml text-language-01-ref.xhtml # Fails on Linux tryserver due to lack of CJK fonts.
-fuzzy-if(OSX==10.8,46,26) == text-layout-01.svg text-layout-01-ref.svg
+fuzzy-if(OSX==10.7,6,2) fuzzy-if(OSX==10.8,46,26) == text-layout-01.svg text-layout-01-ref.svg
 == text-layout-02.svg text-layout-02-ref.svg
 == text-layout-03.svg text-layout-03-ref.svg
 == text-layout-04.svg text-layout-04-ref.svg
 == text-layout-05.svg text-layout-05-ref.svg
 fuzzy-if(cocoaWidget&&layersGPUAccelerated,1,3) == text-layout-06.svg text-layout-06-ref.svg
 == text-layout-07.svg text-layout-07-ref.svg
+pref(svg.text.css-frames.enabled,true) == text-layout-08.svg text-layout-08-ref.svg
 == text-scale-01.svg text-scale-01-ref.svg
+HTTP(..) == text-scale-02.svg text-scale-02-ref.svg
+HTTP(..) == text-scale-03.svg text-scale-03-ref.svg
 == text-stroke-scaling-01.svg text-stroke-scaling-01-ref.svg
 == stroke-dasharray-and-pathLength-01.svg pass.svg
 == stroke-dasharray-and-text-01.svg stroke-dasharray-and-text-01-ref.svg 

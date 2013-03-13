@@ -14,13 +14,15 @@ this.PhoneNumber = (function (dataBase) {
   // Use strict in our context only - users might not want it
   'use strict';
 
+  const MAX_PHONE_NUMBER_LENGTH = 50;
   const UNICODE_DIGITS = /[\uFF10-\uFF19\u0660-\u0669\u06F0-\u06F9]/g;
-  const ALPHA_CHARS = /[a-zA-Z]/g;
   const NON_ALPHA_CHARS = /[^a-zA-Z]/g;
   const NON_DIALABLE_CHARS = /[^,#+\*\d]/g;
-  const PLUS_CHARS = /^[+\uFF0B]+/g;
+  const NON_DIALABLE_CHARS_ONCE = new RegExp(NON_DIALABLE_CHARS.source);
   const BACKSLASH = /\\/g;
   const SPLIT_FIRST_GROUP = /^(\d+)(.*)$/;
+  const VALID_ALPHA_PATTERN = /[a-zA-Z]/g;
+  const LEADING_PLUS_CHARS_PATTERN = /^[+\uFF0B]+/g;
 
   // Format of the string encoded meta data. If the name contains "^" or "$"
   // we will generate a regular expression from the value, with those special
@@ -110,14 +112,14 @@ this.PhoneNumber = (function (dataBase) {
               // Only the first entry has the formats field set.
               // Parse the main country if we haven't already and use
               // the formats field from the main country.
-              if (typeof entry[0] == "string" && entry[0].substr(2,2) == region)
+              if (typeof entry[0] == "string")
                 entry[0] = ParseMetaData(countryCode, entry[0]);
               let formats = entry[0].formats;
               let current = ParseMetaData(countryCode, entry[n]);
               current.formats = formats;
               return entry[n] = current;
             }
-            
+
             entry[n] = ParseMetaData(countryCode, entry[n]);
             return entry[n];
           }
@@ -215,18 +217,34 @@ this.PhoneNumber = (function (dataBase) {
     }
   };
 
+  // Map letters to numbers according to the ITU E.161 standard
+  var E161 = {
+    'a': 2, 'b': 2, 'c': 2,
+    'd': 3, 'e': 3, 'f': 3,
+    'g': 4, 'h': 4, 'i': 4,
+    'j': 5, 'k': 5, 'l': 5,
+    'm': 6, 'n': 6, 'o': 6,
+    'p': 7, 'q': 7, 'r': 7, 's': 7,
+    't': 8, 'u': 8, 'v': 8,
+    'w': 9, 'x': 9, 'y': 9, 'z': 9
+  };
+
   // Normalize a number by converting unicode numbers and symbols to their
   // ASCII equivalents and removing all non-dialable characters.
   function NormalizeNumber(number) {
+    if (typeof number !== 'string') {
+      return '';
+    }
+
     number = number.replace(UNICODE_DIGITS,
                             function (ch) {
                               return String.fromCharCode(48 + (ch.charCodeAt(0) & 0xf));
                             });
-    number = number.replace(ALPHA_CHARS,
+    number = number.replace(VALID_ALPHA_PATTERN,
                             function (ch) {
-                              return (ch.toLowerCase().charCodeAt(0) - 97)/3+2 | 0;
+                              return String(E161[ch.toLowerCase()] || 0);
                             });
-    number = number.replace(PLUS_CHARS, "+");
+    number = number.replace(LEADING_PLUS_CHARS_PATTERN, "+");
     number = number.replace(NON_DIALABLE_CHARS, "");
     return number;
   }
@@ -307,7 +325,7 @@ this.PhoneNumber = (function (dataBase) {
 
     // Detect and strip leading '+'.
     if (number[0] === '+')
-      return ParseInternationalNumber(number.replace(PLUS_CHARS, ""));
+      return ParseInternationalNumber(number.replace(LEADING_PLUS_CHARS_PATTERN, ""));
 
     // Lookup the meta data for the given region.
     var md = FindMetaDataForRegion(defaultRegion.toUpperCase());
@@ -360,7 +378,19 @@ this.PhoneNumber = (function (dataBase) {
     return null;
   }
 
+  function IsPlainPhoneNumber(number) {
+    if (typeof number !== 'string') {
+      return false;
+    }
+
+    var length = number.length;
+    var isTooLong = (length > MAX_PHONE_NUMBER_LENGTH);
+    var isEmpty = (length === 0);
+    return !(isTooLong || isEmpty || NON_DIALABLE_CHARS_ONCE.test(number));
+  }
+
   return {
+    IsPlain: IsPlainPhoneNumber,
     Parse: ParseNumber,
     Normalize: NormalizeNumber
   };

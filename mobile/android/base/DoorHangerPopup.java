@@ -34,6 +34,7 @@ public class DoorHangerPopup extends PopupWindow
     private boolean mInflated; 
     private ImageView mArrow;
     private int mArrowWidth;
+    private int mYOffset;
 
     // Stores a set of all active DoorHanger notifications. A DoorHanger is
     // uniquely identified by its tabId and value.
@@ -45,7 +46,8 @@ public class DoorHangerPopup extends PopupWindow
         mAnchor = aAnchor;
 
         mInflated = false;
-        mArrowWidth = aActivity.getResources().getDimensionPixelSize(R.dimen.doorhanger_arrow_width);
+        mArrowWidth = aActivity.getResources().getDimensionPixelSize(R.dimen.menu_popup_arrow_width);
+        mYOffset = aActivity.getResources().getDimensionPixelSize(R.dimen.menu_popup_offset);
         mDoorHangers = new HashSet<DoorHanger>();
 
         registerEventListener("Doorhanger:Add");
@@ -63,6 +65,7 @@ public class DoorHangerPopup extends PopupWindow
         mAnchor = aAnchor;
     }
 
+    @Override
     public void handleMessage(String event, JSONObject geckoObject) {
         try {
             if (event.equals("Doorhanger:Add")) {
@@ -73,6 +76,7 @@ public class DoorHangerPopup extends PopupWindow
                 final JSONObject options = geckoObject.getJSONObject("options");
 
                 mActivity.runOnUiThread(new Runnable() {
+                    @Override
                     public void run() {
                         addDoorHanger(tabId, value, message, buttons, options);
                     }
@@ -82,6 +86,7 @@ public class DoorHangerPopup extends PopupWindow
                 final String value = geckoObject.getString("value");
 
                 mActivity.runOnUiThread(new Runnable() {
+                    @Override
                     public void run() {
                         DoorHanger doorHanger = getDoorHanger(tabId, value);
                         if (doorHanger == null)
@@ -98,6 +103,7 @@ public class DoorHangerPopup extends PopupWindow
     }
 
     // This callback is automatically executed on the UI thread.
+    @Override
     public void onTabChanged(final Tab tab, final Tabs.TabEvents msg, final Object data) {
         switch(msg) {
             case CLOSED:
@@ -253,7 +259,7 @@ public class DoorHangerPopup extends PopupWindow
             return;
         }
 
-        fixBackgroundForFirst();
+        showDividers();
         if (isShowing()) {
             update();
             return;
@@ -270,19 +276,20 @@ public class DoorHangerPopup extends PopupWindow
         // arrow position is determined by its left margin.
         int offset = mActivity.isTablet() ? mAnchor.getWidth()/2 - mArrowWidth/2 -
                      ((RelativeLayout.LayoutParams) mArrow.getLayoutParams()).leftMargin : 0;
-        showAsDropDown(mAnchor, offset, 0);
+        showAsDropDown(mAnchor, offset, -mYOffset);
         // Make the popup focusable for keyboard accessibility.
         setFocusable(true);
     }
 
-    private void fixBackgroundForFirst() {
-        for (int i = 0; i < mContent.getChildCount(); i++) {
+    private void showDividers() {
+        int count = mContent.getChildCount();
+
+        for (int i = 0; i < count; i++) {
             DoorHanger dh = (DoorHanger) mContent.getChildAt(i);
-            if (dh.getVisibility() == View.VISIBLE) {
-                dh.setBackgroundResource(R.drawable.doorhanger_bg);
-                break;
-            }
+            dh.showDivider();
         }
+
+        ((DoorHanger) mContent.getChildAt(count-1)).hideDivider();
     }
 
     private void registerEventListener(String event) {

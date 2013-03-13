@@ -45,6 +45,8 @@ WebappsRegistry.prototype = {
     switch (aMessage.name) {
       case "Webapps:Install:Return:OK":
         Services.DOMRequest.fireSuccess(req, createApplicationObject(this._window, app));
+        cpmm.sendAsyncMessage("Webapps:Install:Return:Ack",
+                              { manifestURL : app.manifestURL });
         break;
       case "Webapps:Install:Return:KO":
         Services.DOMRequest.fireError(req, msg.error || "DENIED");
@@ -391,6 +393,7 @@ WebappsApplication.prototype = {
     this.initHelper(aWindow, ["Webapps:OfflineCache",
                               "Webapps:CheckForUpdate:Return:OK",
                               "Webapps:CheckForUpdate:Return:KO",
+                              "Webapps:Launch:Return:KO",
                               "Webapps:PackageEvent"]);
 
     cpmm.sendAsyncMessage("Webapps:RegisterForMessages",
@@ -481,6 +484,7 @@ WebappsApplication.prototype = {
                                               manifestURL: this.manifestURL,
                                               startPoint: aStartPoint || "",
                                               oid: this._id,
+                                              timestamp: Date.now(),
                                               requestID: this.getRequestId(request) });
     return request;
   },
@@ -558,6 +562,7 @@ WebappsApplication.prototype = {
             this._fireEvent("downloadsuccess", this._ondownloadsuccess);
             this._fireEvent("downloadapplied", this._ondownloadapplied);
           } else {
+            this.downloading = true;
             this._fireEvent("downloadprogress", this._onprogress);
           }
         } else if (msg.error) {

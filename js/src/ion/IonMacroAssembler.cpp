@@ -6,107 +6,205 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "jsinfer.h"
-#include "jsinferinlines.h"
-#include "IonMacroAssembler.h"
-#include "gc/Root.h"
-#include "Bailouts.h"
+
+#include "ion/Bailouts.h"
+#include "ion/IonMacroAssembler.h"
+#include "js/RootingAPI.h"
 #include "vm/ForkJoin.h"
+
+#include "jsinferinlines.h"
 
 using namespace js;
 using namespace js::ion;
 
-template <typename T> void
-MacroAssembler::guardTypeSet(const T &address, const types::TypeSet *types,
-                             Register scratch, Label *mismatched)
+// Emulate a TypeSet logic from a Type object to avoid duplicating the guard
+// logic.
+class TypeWrapper {
+    types::Type t_;
+
+  public:
+    TypeWrapper(types::Type t) : t_(t) {}
+
+    inline bool unknown() const {
+        return t_.isUnknown();
+    }
+    inline bool hasType(types::Type t) const {
+        if (t == types::Type::Int32Type())
+            return t == t_ || t_ == types::Type::DoubleType();
+        return t == t_;
+    }
+    inline unsigned getObjectCount() const {
+        if (t_.isAnyObject() || t_.isUnknown() || !t_.isObject())
+            return 0;
+        return 1;
+    }
+    inline JSObject *getSingleObject(unsigned) const {
+        if (t_.isSingleObject())
+            return t_.singleObject();
+        return NULL;
+    }
+    inline types::TypeObject *getTypeObject(unsigned) const {
+        if (t_.isTypeObject())
+            return t_.typeObject();
+        return NULL;
+    }
+};
+
+template <typename Source, typename TypeSet> void
+MacroAssembler::guardTypeSet(const Source &address, const TypeSet *types,
+                             Register scratch, Label *matched, Label *miss)
 {
     JS_ASSERT(!types->unknown());
 
-    Label matched;
     Register tag = extractTag(address, scratch);
 
     if (types->hasType(types::Type::DoubleType())) {
         // The double type also implies Int32.
         JS_ASSERT(types->hasType(types::Type::Int32Type()));
-        branchTestNumber(Equal, tag, &matched);
+        branchTestNumber(Equal, tag, matched);
     } else if (types->hasType(types::Type::Int32Type())) {
-        branchTestInt32(Equal, tag, &matched);
+        branchTestInt32(Equal, tag, matched);
     }
 
     if (types->hasType(types::Type::UndefinedType()))
-        branchTestUndefined(Equal, tag, &matched);
+        branchTestUndefined(Equal, tag, matched);
     if (types->hasType(types::Type::BooleanType()))
-        branchTestBoolean(Equal, tag, &matched);
+        branchTestBoolean(Equal, tag, matched);
     if (types->hasType(types::Type::StringType()))
-        branchTestString(Equal, tag, &matched);
+        branchTestString(Equal, tag, matched);
     if (types->hasType(types::Type::NullType()))
-        branchTestNull(Equal, tag, &matched);
+        branchTestNull(Equal, tag, matched);
 
     if (types->hasType(types::Type::AnyObjectType())) {
-        branchTestObject(Equal, tag, &matched);
+        branchTestObject(Equal, tag, matched);
     } else if (types->getObjectCount()) {
-        branchTestObject(NotEqual, tag, mismatched);
+        branchTestObject(NotEqual, tag, miss);
         Register obj = extractObject(address, scratch);
 
         unsigned count = types->getObjectCount();
         for (unsigned i = 0; i < count; i++) {
             if (JSObject *object = types->getSingleObject(i))
-                branchPtr(Equal, obj, ImmGCPtr(object), &matched);
+                branchPtr(Equal, obj, ImmGCPtr(object), matched);
         }
 
         loadPtr(Address(obj, JSObject::offsetOfType()), scratch);
 
         for (unsigned i = 0; i < count; i++) {
             if (types::TypeObject *object = types->getTypeObject(i))
-                branchPtr(Equal, scratch, ImmGCPtr(object), &matched);
+                branchPtr(Equal, scratch, ImmGCPtr(object), matched);
         }
     }
-
-    jump(mismatched);
-    bind(&matched);
 }
 
+template <typename Source> void
+MacroAssembler::guardType(const Source &address, types::Type type,
+                          Register scratch, Label *matched, Label *miss)
+{
+    TypeWrapper wrapper(type);
+    guardTypeSet(address, &wrapper, scratch, matched, miss);
+}
+
+template void MacroAssembler::guardTypeSet(const Address &address, const types::StackTypeSet *types,
+                                           Register scratch, Label *matched, Label *miss);
+template void MacroAssembler::guardTypeSet(const ValueOperand &value, const types::StackTypeSet *types,
+                                           Register scratch, Label *matched, Label *miss);
+
 template void MacroAssembler::guardTypeSet(const Address &address, const types::TypeSet *types,
-                                           Register scratch, Label *mismatched);
+                                           Register scratch, Label *matched, Label *miss);
 template void MacroAssembler::guardTypeSet(const ValueOperand &value, const types::TypeSet *types,
-                                           Register scratch, Label *mismatched);
+                                           Register scratch, Label *matched, Label *miss);
+
+template void MacroAssembler::guardTypeSet(const Address &address, const TypeWrapper *types,
+                                           Register scratch, Label *matched, Label *miss);
+template void MacroAssembler::guardTypeSet(const ValueOperand &value, const TypeWrapper *types,
+                                           Register scratch, Label *matched, Label *miss);
+
+template void MacroAssembler::guardType(const Address &address, types::Type type,
+                                        Register scratch, Label *matched, Label *miss);
+template void MacroAssembler::guardType(const ValueOperand &value, types::Type type,
+                                        Register scratch, Label *matched, Label *miss);
 
 void
 MacroAssembler::PushRegsInMask(RegisterSet set)
 {
-    size_t diff = set.gprs().size() * STACK_SLOT_SIZE +
-                  set.fpus().size() * sizeof(double);
+    int32_t diffF = set.fpus().size() * sizeof(double);
+    int32_t diffG = set.gprs().size() * STACK_SLOT_SIZE;
 
-    reserveStack(diff);
-
-    for (GeneralRegisterIterator iter(set.gprs()); iter.more(); iter++) {
-        diff -= STACK_SLOT_SIZE;
-        storePtr(*iter, Address(StackPointer, diff));
+    reserveStack(diffG);
+#ifdef JS_CPU_ARM
+    if (set.gprs().size() > 1) {
+        startDataTransferM(IsStore, StackPointer, IA, NoWriteBack);
+        for (GeneralRegisterIterator iter(set.gprs()); iter.more(); iter++) {
+            diffG -= STACK_SLOT_SIZE;
+            transferReg(*iter);
+        }
+        finishDataTransfer();
+    } else
+#endif
+    {
+        for (GeneralRegisterIterator iter(set.gprs()); iter.more(); iter++) {
+            diffG -= STACK_SLOT_SIZE;
+            storePtr(*iter, Address(StackPointer, diffG));
+        }
     }
+    JS_ASSERT(diffG == 0);
+
+    reserveStack(diffF);
+#ifdef JS_CPU_ARM
+    diffF -= transferMultipleByRuns(set.fpus(), IsStore, StackPointer, IA);
+#else
     for (FloatRegisterIterator iter(set.fpus()); iter.more(); iter++) {
-        diff -= sizeof(double);
-        storeDouble(*iter, Address(StackPointer, diff));
+        diffF -= sizeof(double);
+        storeDouble(*iter, Address(StackPointer, diffF));
     }
+#endif
+    JS_ASSERT(diffF == 0);
 }
 
 void
 MacroAssembler::PopRegsInMaskIgnore(RegisterSet set, RegisterSet ignore)
 {
-    size_t diff = set.gprs().size() * STACK_SLOT_SIZE +
-                  set.fpus().size() * sizeof(double);
-    size_t reserved = diff;
+    int32_t diffG = set.gprs().size() * STACK_SLOT_SIZE;
+    int32_t diffF = set.fpus().size() * sizeof(double);
+    const int32_t reservedG = diffG;
+    const int32_t reservedF = diffF;
 
-    for (GeneralRegisterIterator iter(set.gprs()); iter.more(); iter++) {
-        diff -= STACK_SLOT_SIZE;
-        if (!ignore.has(*iter))
-            loadPtr(Address(StackPointer, diff), *iter);
+#ifdef JS_CPU_ARM
+    // ARM can load multiple registers at once, but only if we want back all
+    // the registers we previously saved to the stack.
+    if (ignore.empty(true)) {
+        diffF -= transferMultipleByRuns(set.fpus(), IsLoad, StackPointer, IA);
+    } else
+#endif
+    {
+        for (FloatRegisterIterator iter(set.fpus()); iter.more(); iter++) {
+            diffF -= sizeof(double);
+            if (!ignore.has(*iter))
+                loadDouble(Address(StackPointer, diffF), *iter);
+        }
     }
-    for (FloatRegisterIterator iter(set.fpus()); iter.more(); iter++) {
-        diff -= sizeof(double);
-        if (!ignore.has(*iter))
-            loadDouble(Address(StackPointer, diff), *iter);
-    }
+    freeStack(reservedF);
+    JS_ASSERT(diffF == 0);
 
-    freeStack(reserved);
+#ifdef JS_CPU_ARM
+    if (set.gprs().size() > 1 && ignore.empty(false)) {
+        startDataTransferM(IsLoad, StackPointer, IA, NoWriteBack);
+        for (GeneralRegisterIterator iter(set.gprs()); iter.more(); iter++) {
+            diffG -= STACK_SLOT_SIZE;
+            transferReg(*iter);
+        }
+        finishDataTransfer();
+    } else
+#endif
+    {
+        for (GeneralRegisterIterator iter(set.gprs()); iter.more(); iter++) {
+            diffG -= STACK_SLOT_SIZE;
+            if (!ignore.has(*iter))
+                loadPtr(Address(StackPointer, diffG), *iter);
+        }
+    }
+    freeStack(reservedG);
+    JS_ASSERT(diffG == 0);
 }
 
 template<typename T>
@@ -333,6 +431,60 @@ MacroAssembler::newGCThing(const Register &result,
 }
 
 void
+MacroAssembler::parNewGCThing(const Register &result,
+                              const Register &threadContextReg,
+                              const Register &tempReg1,
+                              const Register &tempReg2,
+                              JSObject *templateObject,
+                              Label *fail)
+{
+    // Similar to ::newGCThing(), except that it allocates from a
+    // custom Allocator in the ForkJoinSlice*, rather than being
+    // hardcoded to the compartment allocator.  This requires two
+    // temporary registers.
+    //
+    // Subtle: I wanted to reuse `result` for one of the temporaries,
+    // but the register allocator was assigning it to the same
+    // register as `threadContextReg`.  Then we overwrite that
+    // register which messed up the OOL code.
+
+    gc::AllocKind allocKind = templateObject->getAllocKind();
+    uint32_t thingSize = (uint32_t)gc::Arena::thingSize(allocKind);
+
+    // Load the allocator:
+    // tempReg1 = (Allocator*) forkJoinSlice->allocator
+    loadPtr(Address(threadContextReg, offsetof(js::ForkJoinSlice, allocator)),
+            tempReg1);
+
+    // Get a pointer to the relevant free list:
+    // tempReg1 = (FreeSpan*) &tempReg1->arenas.freeLists[(allocKind)]
+    uint32_t offset = (offsetof(Allocator, arenas) +
+                       js::gc::ArenaLists::getFreeListOffset(allocKind));
+    addPtr(Imm32(offset), tempReg1);
+
+    // Load first item on the list
+    // tempReg2 = tempReg1->first
+    loadPtr(Address(tempReg1, offsetof(gc::FreeSpan, first)), tempReg2);
+
+    // Check whether list is empty
+    // if tempReg1->last <= tempReg2, fail
+    branchPtr(Assembler::BelowOrEqual,
+              Address(tempReg1, offsetof(gc::FreeSpan, last)),
+              tempReg2,
+              fail);
+
+    // If not, take first and advance pointer by thingSize bytes.
+    // result = tempReg2;
+    // tempReg2 += thingSize;
+    movePtr(tempReg2, result);
+    addPtr(Imm32(thingSize), tempReg2);
+
+    // Update `first`
+    // tempReg1->first = tempReg2;
+    storePtr(tempReg2, Address(tempReg1, offsetof(gc::FreeSpan, first)));
+}
+
+void
 MacroAssembler::initGCThing(const Register &obj, JSObject *templateObject)
 {
     // Fast initialization of an empty object returned by NewGCThing().
@@ -357,8 +509,10 @@ MacroAssembler::initGCThing(const Register &obj, JSObject *templateObject)
                 Address(obj, elementsOffset + ObjectElements::offsetOfInitializedLength()));
         store32(Imm32(templateObject->getArrayLength()),
                 Address(obj, elementsOffset + ObjectElements::offsetOfLength()));
-        store32(Imm32(templateObject->shouldConvertDoubleElements() ? 1 : 0),
-                Address(obj, elementsOffset + ObjectElements::offsetOfConvertDoubleElements()));
+        store32(Imm32(templateObject->shouldConvertDoubleElements()
+                      ? ObjectElements::CONVERT_DOUBLE_ELEMENTS
+                      : 0),
+                Address(obj, elementsOffset + ObjectElements::offsetOfFlags()));
     } else {
         storePtr(ImmWord(emptyObjectElements), Address(obj, JSObject::offsetOfElements()));
 
@@ -376,6 +530,55 @@ MacroAssembler::initGCThing(const Register &obj, JSObject *templateObject)
         storePtr(ImmWord(templateObject->getPrivate()),
                  Address(obj, JSObject::getPrivateDataOffset(nfixed)));
     }
+}
+
+void
+MacroAssembler::compareStrings(JSOp op, Register left, Register right, Register result,
+                               Register temp, Label *fail)
+{
+    JS_ASSERT(IsEqualityOp(op));
+
+    Label done;
+    Label notPointerEqual;
+    // Fast path for identical strings.
+    branchPtr(Assembler::NotEqual, left, right, &notPointerEqual);
+    move32(Imm32(op == JSOP_EQ || op == JSOP_STRICTEQ), result);
+    jump(&done);
+
+    bind(&notPointerEqual);
+    loadPtr(Address(left, JSString::offsetOfLengthAndFlags()), result);
+    loadPtr(Address(right, JSString::offsetOfLengthAndFlags()), temp);
+
+    Label notAtom;
+    // Optimize the equality operation to a pointer compare for two atoms.
+    Imm32 atomBit(JSString::ATOM_BIT);
+    branchTest32(Assembler::Zero, result, atomBit, &notAtom);
+    branchTest32(Assembler::Zero, temp, atomBit, &notAtom);
+
+    cmpPtr(left, right);
+    emitSet(JSOpToCondition(op), result);
+    jump(&done);
+
+    bind(&notAtom);
+    // Strings of different length can never be equal.
+    rshiftPtr(Imm32(JSString::LENGTH_SHIFT), result);
+    rshiftPtr(Imm32(JSString::LENGTH_SHIFT), temp);
+    branchPtr(Assembler::Equal, result, temp, fail);
+    move32(Imm32(op == JSOP_NE || op == JSOP_STRICTNE), result);
+
+    bind(&done);
+}
+
+void
+MacroAssembler::parCheckInterruptFlags(const Register &tempReg,
+                                       Label *fail)
+{
+    JSCompartment *compartment = GetIonContext()->compartment;
+
+    void *interrupt = (void*)&compartment->rt->interrupt;
+    movePtr(ImmWord(interrupt), tempReg);
+    load32(Address(tempReg, 0), tempReg);
+    branchTest32(Assembler::NonZero, tempReg, tempReg, fail);
 }
 
 void

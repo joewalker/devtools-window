@@ -231,6 +231,30 @@ public:
                                             const nsIntRect &rect);
 
   /*
+   * Converts image data from sRGB to luminance
+   */
+  static void ComputesRGBLuminanceMask(uint8_t *aData,
+                                       int32_t aStride,
+                                       const nsIntRect &aRect,
+                                       float aOpacity);
+
+  /*
+   * Converts image data from sRGB to luminance assuming
+   * Linear RGB Interpolation
+   */
+  static void ComputeLinearRGBLuminanceMask(uint8_t *aData,
+                                            int32_t aStride,
+                                            const nsIntRect &aRect,
+                                            float aOpacity);
+  /*
+   * Converts image data to luminance using the value of alpha as luminance
+   */
+  static void ComputeAlphaMask(uint8_t *aData,
+                               int32_t aStride,
+                               const nsIntRect &aRect,
+                               float aOpacity);
+
+  /*
    * Converts a nsStyleCoord into a userspace value.  Handles units
    * Factor (straight userspace), Coord (dimensioned), and Percent (of
    * the current SVG viewport)
@@ -645,6 +669,16 @@ public:
   static bool GetSVGGlyphExtents(Element* aElement,
                                  const gfxMatrix& aSVGToAppSpace,
                                  gfxRect* aResult);
+
+  /**
+   * Returns the app unit canvas bounds of a userspace rect.
+   *
+   * @param aToCanvas Transform from userspace to canvas device space.
+   */
+  static nsRect
+  ToCanvasBounds(const gfxRect &aUserspaceRect,
+                 const gfxMatrix &aToCanvas,
+                 const nsPresContext *presContext);
 };
 
 #endif

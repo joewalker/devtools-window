@@ -12,6 +12,7 @@ Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
+Cu.import("resource:///modules/devtools/CssLogic.jsm");
 
 XPCOMUtils.defineLazyModuleGetter(this, "MarkupView",
   "resource:///modules/devtools/MarkupView.jsm");
@@ -218,6 +219,12 @@ InspectorPanel.prototype = {
                         "chrome://browser/content/devtools/csshtmltree.xul",
                         "computedview" == defaultTab);
 
+    if (Services.prefs.getBoolPref("devtools.fontinspector.enabled")) {
+      this.sidebar.addTab("fontinspector",
+                          "chrome://browser/content/devtools/fontinspector/font-inspector.xhtml",
+                          "fontinspector" == defaultTab);
+    }
+
     this.sidebar.addTab("layoutview",
                         "chrome://browser/content/devtools/layoutview/view.xhtml",
                         "layoutview" == defaultTab);
@@ -241,8 +248,12 @@ InspectorPanel.prototype = {
     function onDOMReady() {
       newWindow.removeEventListener("DOMContentLoaded", onDOMReady, true);
 
+      if (self._destroyed) {
+        return;
+      }
+
       if (!self.selection.node) {
-        self.selection.setNode(newWindow.document.documentElement);
+        self.selection.setNode(newWindow.document.documentElement, "navigateaway");
       }
       self._initMarkup();
     }
@@ -407,6 +418,7 @@ InspectorPanel.prototype = {
     this.nodemenu = null;
     this.searchBox = null;
     this.highlighter = null;
+    this._searchResults = null;
 
     return Promise.resolve(null);
   },
@@ -501,16 +513,37 @@ InspectorPanel.prototype = {
     // Set the pseudo classes
     for (let name of ["hover", "active", "focus"]) {
       let menu = this.panelDoc.getElementById("node-menu-pseudo-" + name);
-      let checked = DOMUtils.hasPseudoClassLock(this.selection.node, ":" + name);
-      menu.setAttribute("checked", checked);
+
+      if (this.selection.isElementNode()) {
+        let checked = DOMUtils.hasPseudoClassLock(this.selection.node, ":" + name);
+        menu.setAttribute("checked", checked);
+        menu.removeAttribute("disabled");
+      } else {
+        menu.setAttribute("disabled", "true");
+      }
     }
 
     // Disable delete item if needed
     let deleteNode = this.panelDoc.getElementById("node-menu-delete");
-    if (this.selection.isRoot()) {
+    if (this.selection.isRoot() || this.selection.isDocumentTypeNode()) {
       deleteNode.setAttribute("disabled", "true");
     } else {
       deleteNode.removeAttribute("disabled");
+    }
+
+    // Disable / enable "Copy Unique Selector", "Copy inner HTML" &
+    // "Copy outer HTML" as appropriate
+    let unique = this.panelDoc.getElementById("node-menu-copyuniqueselector");
+    let copyInnerHTML = this.panelDoc.getElementById("node-menu-copyinner");
+    let copyOuterHTML = this.panelDoc.getElementById("node-menu-copyouter");
+    if (this.selection.isElementNode()) {
+      unique.removeAttribute("disabled");
+      copyInnerHTML.removeAttribute("disabled");
+      copyOuterHTML.removeAttribute("disabled");
+    } else {
+      unique.setAttribute("disabled", "true");
+      copyInnerHTML.setAttribute("disabled", "true");
+      copyOuterHTML.setAttribute("disabled", "true");
     }
   },
 
@@ -593,6 +626,7 @@ InspectorPanel.prototype = {
       }
     }
     this.selection.emit("pseudoclass");
+    this.breadcrumbs.scroll();
   },
 
   /**
@@ -640,6 +674,21 @@ InspectorPanel.prototype = {
       return;
     }
     let toCopy = this.selection.node.outerHTML;
+    if (toCopy) {
+      clipboardHelper.copyString(toCopy);
+    }
+  },
+
+  /**
+   * Copy a unique selector of the selected Node to the clipboard.
+   */
+  copyUniqueSelector: function InspectorPanel_copyUniqueSelector()
+  {
+    if (!this.selection.isNode()) {
+      return;
+    }
+
+    let toCopy = CssLogic.findCssSelector(this.selection.node);
     if (toCopy) {
       clipboardHelper.copyString(toCopy);
     }

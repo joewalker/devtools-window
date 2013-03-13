@@ -23,7 +23,6 @@ class nsIAtom;
 class nsIDocument;
 class nsIScriptContext;
 class nsSupportsHashtable;
-class nsFixedSizeAllocator;
 class nsXBLProtoImplField;
 class nsXBLBinding;
 class nsCSSStyleSheet;
@@ -121,12 +120,13 @@ public:
 
   nsresult InitClass(const nsCString& aClassName, JSContext * aContext,
                      JSObject * aGlobal, JSObject * aScriptObject,
-                     JSObject** aClassObject);
+                     JSObject** aClassObject, bool* aNew);
 
   nsresult ConstructInterfaceTable(const nsAString& aImpls);
   
   void SetImplementation(nsXBLProtoImpl* aImpl) { mImplementation = aImpl; }
-  nsresult InstallImplementation(nsIContent* aBoundElement);
+  nsXBLProtoImpl* GetImplementation() { return mImplementation; }
+  nsresult InstallImplementation(nsXBLBinding* aBinding);
   bool HasImplementation() const { return mImplementation != nullptr; }
 
   void AttributeChanged(nsIAtom* aAttribute, int32_t aNameSpaceID,
@@ -282,11 +282,6 @@ public:
   void Traverse(nsCycleCollectionTraversalCallback &cb) const;
   void UnlinkJSObjects();
   void Trace(TraceCallback aCallback, void *aClosure) const;
-
-// Static members
-  static uint32_t gRefCnt;
- 
-  static nsFixedSizeAllocator* kAttrPool;
 
 // Internal member functions.
 // XXXbz GetImmediateChild needs to be public to be called by SetAttrs,

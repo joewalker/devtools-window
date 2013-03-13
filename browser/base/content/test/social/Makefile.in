@@ -12,6 +12,11 @@ include $(DEPTH)/config/autoconf.mk
 
 _BROWSER_FILES = \
                  head.js \
+		 blocklist.xml \
+		 blocklistEmpty.xml \
+		 browser_blocklist.js \
+		 browser_addons.js \
+                 browser_social_activation.js \
                  browser_social_perwindowPB.js \
                  browser_social_toolbar.js \
                  browser_social_shareButton.js \
@@ -20,8 +25,12 @@ _BROWSER_FILES = \
                  browser_social_mozSocial_API.js \
                  browser_social_isVisible.js \
                  browser_social_chatwindow.js \
+                 browser_social_chatwindowfocus.js \
                  browser_social_multiprovider.js \
                  browser_social_errorPage.js \
+                 browser_social_window.js \
+                 social_activate.html \
+                 social_activate_iframe.html \
                  social_panel.html \
                  social_share_image.png \
                  social_sidebar.html \

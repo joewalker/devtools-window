@@ -17,9 +17,7 @@ interface URI;
 interface MozChannel;
 interface nsIStreamListener;
 
-[NamedConstructor=Image(),
- NamedConstructor=Image(unsigned long width),
- NamedConstructor=Image(unsigned long width, unsigned long height)]
+[NamedConstructor=Image(optional unsigned long width, optional unsigned long height)]
 interface HTMLImageElement : HTMLElement {
            [SetterThrows]
            attribute DOMString alt;
@@ -55,7 +53,10 @@ partial interface HTMLImageElement {
            attribute DOMString longDesc;
 
   [TreatNullAs=EmptyString,SetterThrows] attribute DOMString border;
+};
 
+[NoInterfaceObject]
+interface MozImageLoadingContent {
   // Mirrored chrome-only nsIImageLoadingContent methods.  Please make sure
   // to update this list if nsIImageLoadingContent changes.
   [ChromeOnly]
@@ -86,3 +87,5 @@ partial interface HTMLImageElement {
   [ChromeOnly]
   void forceImageState(boolean aForce, unsigned long long aState);
 };
+
+HTMLImageElement implements MozImageLoadingContent;

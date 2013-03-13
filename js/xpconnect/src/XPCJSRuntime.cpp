@@ -238,6 +238,16 @@ EnsureCompartmentPrivate(JSCompartment *c)
 }
 
 bool
+IsXBLScope(JSCompartment *compartment)
+{
+    // We always eagerly create compartment privates for XBL scopes.
+    CompartmentPrivate *priv = GetCompartmentPrivate(compartment);
+    if (!priv || !priv->scope)
+        return false;
+    return priv->scope->IsXBLScope();
+}
+
+bool
 IsUniversalXPConnectEnabled(JSCompartment *compartment)
 {
     CompartmentPrivate *priv = GetCompartmentPrivate(compartment);
@@ -1197,22 +1207,13 @@ void XPCJSRuntime::SystemIsBeingShutDown()
             Enumerate(DetachedWrappedNativeProtoShutdownMarker, nullptr);
 }
 
-JSContext *
-XPCJSRuntime::GetJSCycleCollectionContext()
-{
-    if (!mJSCycleCollectionContext) {
-        mJSCycleCollectionContext = JS_NewContext(mJSRuntime, 0);
-        if (!mJSCycleCollectionContext)
-            return nullptr;
-    }
-    return mJSCycleCollectionContext;
-}
-
 XPCJSRuntime::~XPCJSRuntime()
 {
     MOZ_ASSERT(!mReleaseRunnable);
 
     js::SetGCSliceCallback(mJSRuntime, mPrevGCSliceCallback);
+
+    xpc_DelocalizeRuntime(mJSRuntime);
 
     if (mWatchdogWakeup) {
         // If the watchdog thread is running, tell it to terminate waking it
@@ -1231,9 +1232,6 @@ XPCJSRuntime::~XPCJSRuntime()
         PR_DestroyLock(mWatchdogLock);
         mWatchdogWakeup = nullptr;
     }
-
-    if (mJSCycleCollectionContext)
-        JS_DestroyContextNoGC(mJSCycleCollectionContext);
 
     if (mCallContext)
         mCallContext->SystemIsBeingShutDown();
@@ -1356,7 +1354,7 @@ XPCJSRuntime::~XPCJSRuntime()
     }
 #ifdef MOZ_ENABLE_PROFILER_SPS
     // Tell the profiler that the runtime is gone
-    if (ProfileStack *stack = mozilla_profile_stack())
+    if (PseudoStack *stack = mozilla_get_pseudo_stack())
         stack->sampleRuntime(nullptr);
 #endif
 
@@ -1706,8 +1704,7 @@ ReportCompartmentStats(const JS::CompartmentStats &cStats,
 
     CREPORT_BYTES(cJSPathPrefix + NS_LITERAL_CSTRING("script-data"),
                   cStats.scriptData,
-                  "Memory allocated for JSScript bytecode and various "
-                  "variable-length tables.");
+                  "Memory allocated for various variable-length tables in JSScript.");
 
     CREPORT_BYTES(cJSPathPrefix + NS_LITERAL_CSTRING("jaeger-data"),
                   cStats.jaegerData,
@@ -1923,13 +1920,14 @@ ReportJSRuntimeExplicitTreeStats(const JS::RuntimeStats &rtStats,
                   nsIMemoryReporter::KIND_HEAP, rtStats.runtime.mathCache,
                   "Memory used for the math cache.");
 
-    RREPORT_BYTES(rtPath + NS_LITERAL_CSTRING("runtime/script-filenames"),
-                  nsIMemoryReporter::KIND_HEAP, rtStats.runtime.scriptFilenames,
-                  "Memory used for the table holding script filenames.");
+    RREPORT_BYTES(rtPath + NS_LITERAL_CSTRING("runtime/script-data"),
+                  nsIMemoryReporter::KIND_HEAP, rtStats.runtime.scriptData,
+                  "Memory used for the table holding script data shared in "
+                  "the runtime.");
 
     RREPORT_BYTES(rtPath + NS_LITERAL_CSTRING("runtime/script-sources"),
                   nsIMemoryReporter::KIND_HEAP, rtStats.runtime.scriptSources,
-                  "Memory use for storing JavaScript source code.");
+                  "Memory use for storing JavaScript source code and filenames.");
 
     if (rtTotalOut) {
         *rtTotalOut = rtTotal;
@@ -2339,7 +2337,7 @@ CompartmentNameCallback(JSRuntime *rt, JSCompartment *comp,
     memcpy(buf, name.get(), name.Length() + 1);
 }
 
-bool XPCJSRuntime::gExperimentalBindingsEnabled;
+bool XPCJSRuntime::gXBLScopesEnabled;
 
 static bool
 PreserveWrapper(JSContext *cx, JSObject *obj)
@@ -2477,7 +2475,6 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
  : mXPConnect(aXPConnect),
    mJSRuntime(nullptr),
    mJSContextStack(new XPCJSContextStack()),
-   mJSCycleCollectionContext(nullptr),
    mCallContext(nullptr),
    mAutoRoots(nullptr),
    mResolveName(JSID_VOID),
@@ -2516,8 +2513,8 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
 #endif
 
     DOM_InitInterfaces();
-    Preferences::AddBoolVarCache(&gExperimentalBindingsEnabled,
-                                 "dom.experimental_bindings",
+    Preferences::AddBoolVarCache(&gXBLScopesEnabled,
+                                 "dom.xbl_scopes",
                                  false);
 
 
@@ -2560,7 +2557,7 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
     JS_EnumerateDiagnosticMemoryRegions(DiagnosticMemoryCallback);
 #endif
 #ifdef MOZ_ENABLE_PROFILER_SPS
-    if (ProfileStack *stack = mozilla_profile_stack())
+    if (PseudoStack *stack = mozilla_get_pseudo_stack())
         stack->sampleRuntime(mJSRuntime);
 #endif
     JS_SetAccumulateTelemetryCallback(mJSRuntime, AccumulateTelemetryCallback);
@@ -2583,6 +2580,12 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* aXPConnect)
     // JS_CompileFunction*). In practice, this means content scripts and event
     // handlers.
     JS_SetSourceHook(mJSRuntime, SourceHook);
+
+    // Set up locale information and callbacks for the newly-created runtime so
+    // that the various toLocaleString() methods, localeCompare(), and other
+    // internationalization APIs work as desired.
+    if (!xpc_LocalizeRuntime(mJSRuntime))
+        NS_RUNTIMEABORT("xpc_LocalizeRuntime failed.");
 
     NS_RegisterMemoryReporter(new NS_MEMORY_REPORTER_NAME(XPConnectJSGCHeap));
     NS_RegisterMemoryReporter(new NS_MEMORY_REPORTER_NAME(XPConnectJSSystemCompartmentCount));

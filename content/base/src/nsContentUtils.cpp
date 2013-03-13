@@ -16,6 +16,8 @@
 
 #include <math.h>
 
+#include "mozilla/dom/TextDecoderBase.h"
+
 #include "Layers.h"
 #include "nsJSUtils.h"
 #include "nsCOMPtr.h"
@@ -41,7 +43,6 @@
 #include "nsPIDOMWindow.h"
 #include "nsIJSContextStack.h"
 #include "nsIDocShell.h"
-#include "nsIDocShellTreeItem.h"
 #include "nsParserCIID.h"
 #include "nsIParser.h"
 #include "nsIFragmentContentSink.h"
@@ -160,7 +161,6 @@
 #include "nsICharsetDetectionObserver.h"
 #include "nsIPlatformCharset.h"
 #include "nsIEditor.h"
-#include "nsIEditorDocShell.h"
 #include "mozilla/Attributes.h"
 #include "nsIParserService.h"
 #include "nsIDOMScriptObjectFactory.h"
@@ -168,6 +168,7 @@
 #include "nsSVGFeatures.h"
 #include "MediaDecoder.h"
 #include "DecoderTraits.h"
+#include "mozilla/dom/DocumentFragment.h"
 
 #include "nsWrapperCacheInlines.h"
 #include "nsViewportInfo.h"
@@ -232,6 +233,7 @@ nsString* nsContentUtils::sModifierSeparator = nullptr;
 bool nsContentUtils::sInitialized = false;
 bool nsContentUtils::sIsFullScreenApiEnabled = false;
 bool nsContentUtils::sTrustedFullScreenOnly = true;
+bool nsContentUtils::sFullscreenApiIsContentOnly = false;
 bool nsContentUtils::sIsIdleObserverAPIEnabled = false;
 
 uint32_t nsContentUtils::sHandlingInputTimeout = 1000;
@@ -418,6 +420,12 @@ nsContentUtils::Init()
 
   Preferences::AddBoolVarCache(&sIsFullScreenApiEnabled,
                                "full-screen-api.enabled");
+
+  // Note: We deliberately read this pref here because this code runs
+  // before the profile loads, so users' changes to this pref in about:config
+  // won't have any effect on behaviour. We don't really want users messing
+  // with this pref, as it affects the security model of the fullscreen API.
+  sFullscreenApiIsContentOnly = Preferences::GetBool("full-screen-api.content-only", false);
 
   Preferences::AddBoolVarCache(&sTrustedFullScreenOnly,
                                "full-screen-api.allow-trusted-requests-only");
@@ -1582,6 +1590,15 @@ nsContentUtils::CanCallerAccess(nsIPrincipal* aSubjectPrincipal,
 bool
 nsContentUtils::CanCallerAccess(nsIDOMNode *aNode)
 {
+  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
+  NS_ENSURE_TRUE(node, false);
+  return CanCallerAccess(node);
+}
+
+// static
+bool
+nsContentUtils::CanCallerAccess(nsINode* aNode)
+{
   // XXXbz why not check the IsCapabilityEnabled thing up front, and not bother
   // with the system principal games?  But really, there should be a simpler
   // API here, dammit.
@@ -1595,10 +1612,7 @@ nsContentUtils::CanCallerAccess(nsIDOMNode *aNode)
     return true;
   }
 
-  nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
-  NS_ENSURE_TRUE(node, false);
-
-  return CanCallerAccess(subjectPrincipal, node->NodePrincipal());
+  return CanCallerAccess(subjectPrincipal, aNode->NodePrincipal());
 }
 
 // static
@@ -1752,7 +1766,15 @@ nsContentUtils::IsCallerXBL()
 {
     JSScript *script;
     JSContext *cx = GetCurrentJSContext();
-    if (!cx || !JS_DescribeScriptedCaller(cx, &script, nullptr) || !script)
+    if (!cx)
+        return false;
+
+    // New Hotness.
+    if (XPCJSRuntime::Get()->XBLScopesEnabled())
+        return xpc::IsXBLScope(js::GetContextCompartment(cx));
+
+    // XBL scopes are behind a pref, so check the XBL bit as well.
+    if (!JS_DescribeScriptedCaller(cx, &script, nullptr) || !script)
         return false;
     return JS_GetScriptUserBit(script);
 }
@@ -1763,6 +1785,35 @@ nsContentUtils::IsImageSrcSetDisabled()
 {
   return Preferences::GetBool("dom.disable_image_src_set") &&
          !IsCallerChrome();
+}
+
+// static
+bool
+nsContentUtils::LookupBindingMember(JSContext* aCx, nsIContent *aContent,
+                                    JS::HandleId aId, JSPropertyDescriptor* aDesc)
+{
+  nsXBLBinding* binding = aContent->OwnerDoc()->BindingManager()
+                                  ->GetBinding(aContent);
+  if (!binding)
+    return true;
+  return binding->LookupMember(aCx, aId, aDesc);
+}
+
+// static
+bool
+nsContentUtils::IsBindingField(JSContext* aCx, nsIContent* aContent,
+                               JS::HandleId aId)
+{
+  nsXBLBinding* binding = aContent->OwnerDoc()->BindingManager()
+                                  ->GetBinding(aContent);
+  if (!binding)
+    return false;
+
+  if (!JSID_IS_STRING(aId))
+    return false;
+  nsDependentJSString name(aId);
+
+  return binding->HasField(name);
 }
 
 // static
@@ -2980,19 +3031,14 @@ nsCxPusher::Push(nsIDOMEventTarget *aCurrentTarget)
     return true;
   }
 
-  JSContext* cx = nullptr;
-
-  if (scx) {
-    cx = scx->GetNativeContext();
-    // Bad, no JSContext from script context!
-    NS_ENSURE_TRUE(cx, false);
-  }
+  JSContext* cx = scx ? scx->GetNativeContext() : nullptr;
 
   // If there's no native context in the script context it must be
   // in the process or being torn down. We don't want to notify the
   // script context about scripts having been evaluated in such a
   // case, calling with a null cx is fine in that case.
-  return Push(cx);
+  Push(cx);
+  return true;
 }
 
 bool
@@ -3023,37 +3069,26 @@ nsCxPusher::RePush(nsIDOMEventTarget *aCurrentTarget)
   return Push(aCurrentTarget);
 }
 
-bool
-nsCxPusher::Push(JSContext *cx, bool aRequiresScriptContext)
+void
+nsCxPusher::Push(JSContext *cx)
 {
-  if (mPushedSomething) {
-    NS_ERROR("Whaaa! No double pushing with nsCxPusher::Push()!");
-
-    return false;
-  }
-
-  if (!cx) {
-    return false;
-  }
+  MOZ_ASSERT(!mPushedSomething, "No double pushing with nsCxPusher::Push()!");
+  MOZ_ASSERT(cx);
 
   // Hold a strong ref to the nsIScriptContext, just in case
   // XXXbz do we really need to?  If we don't get one of these in Pop(), is
   // that really a problem?  Or do we need to do this to effectively root |cx|?
   mScx = GetScriptContextFromJSContext(cx);
-  if (!mScx && aRequiresScriptContext) {
-    // Should probably return false. See bug 416916.
-    return true;
-  }
 
-  return DoPush(cx);
+  DoPush(cx);
 }
 
-bool
+void
 nsCxPusher::DoPush(JSContext* cx)
 {
   nsIThreadJSContextStack* stack = nsContentUtils::ThreadJSContextStack();
   if (!stack) {
-    return true;
+    return;
   }
 
   if (cx && IsContextOnStack(stack, cx)) {
@@ -3063,9 +3098,7 @@ nsCxPusher::DoPush(JSContext* cx)
   }
 
   if (NS_FAILED(stack->Push(cx))) {
-    mScriptIsRunning = false;
-    mScx = nullptr;
-    return false;
+    MOZ_CRASH();
   }
 
   mPushedSomething = true;
@@ -3074,13 +3107,12 @@ nsCxPusher::DoPush(JSContext* cx)
   if (cx)
     mCompartmentDepthOnEntry = js::GetEnterCompartmentDepth(cx);
 #endif
-  return true;
 }
 
-bool
+void
 nsCxPusher::PushNull()
 {
-  return DoPush(nullptr);
+  DoPush(nullptr);
 }
 
 void
@@ -3591,39 +3623,17 @@ nsContentUtils::ConvertStringFromCharset(const nsACString& aCharset,
     return NS_OK;
   }
 
-  nsresult rv;
-  nsCOMPtr<nsICharsetConverterManager> ccm =
-    do_GetService(NS_CHARSETCONVERTERMANAGER_CONTRACTID, &rv);
-  if (NS_FAILED(rv))
-    return rv;
+  ErrorResult rv;
+  TextDecoderBase decoder;
+  decoder.Init(NS_ConvertUTF8toUTF16(aCharset), false, rv);
+  if (rv.Failed()) {
+    rv.ClearMessage();
+    return rv.ErrorCode();
+  }
 
-  nsCOMPtr<nsIUnicodeDecoder> decoder;
-  rv = ccm->GetUnicodeDecoder(PromiseFlatCString(aCharset).get(),
-                              getter_AddRefs(decoder));
-  if (NS_FAILED(rv))
-    return rv;
-
-  nsPromiseFlatCString flatInput(aInput);
-  int32_t length = flatInput.Length();
-  int32_t outLen;
-  rv = decoder->GetMaxLength(flatInput.get(), length, &outLen);
-  if (NS_FAILED(rv))
-    return rv;
-
-  PRUnichar *ustr = (PRUnichar *)nsMemory::Alloc((outLen + 1) *
-                                                 sizeof(PRUnichar));
-  if (!ustr)
-    return NS_ERROR_OUT_OF_MEMORY;
-
-  const char* data = flatInput.get();
-  aOutput.Truncate();
-  rv = decoder->Convert(data, &length, ustr, &outLen);
-  MOZ_ASSERT(rv != NS_ERROR_ILLEGAL_INPUT);
-  ustr[outLen] = 0;
-  aOutput.Append(ustr, outLen);
-
-  nsMemory::Free(ustr);
-  return rv;
+  decoder.Decode(aInput.BeginReading(), aInput.Length(), false,
+                 aOutput, rv);
+  return rv.ErrorCode();
 }
 
 /* static */
@@ -4042,8 +4052,22 @@ nsContentUtils::CreateContextualFragment(nsINode* aContextNode,
                                          bool aPreventScriptExecution,
                                          nsIDOMDocumentFragment** aReturn)
 {
-  *aReturn = nullptr;
-  NS_ENSURE_ARG(aContextNode);
+  ErrorResult rv;
+  *aReturn = CreateContextualFragment(aContextNode, aFragment,
+                                      aPreventScriptExecution, rv).get();
+  return rv.ErrorCode();
+}
+
+already_AddRefed<DocumentFragment>
+nsContentUtils::CreateContextualFragment(nsINode* aContextNode,
+                                         const nsAString& aFragment,
+                                         bool aPreventScriptExecution,
+                                         ErrorResult& aRv)
+{
+  if (!aContextNode) {
+    aRv.Throw(NS_ERROR_INVALID_ARG);
+    return nullptr;
+  }
 
   // If we don't have a document here, we can't get the right security context
   // for compiling event handlers... so just bail out.
@@ -4055,8 +4079,8 @@ nsContentUtils::CreateContextualFragment(nsINode* aContextNode,
 #endif
 
   if (isHTML) {
-    nsCOMPtr<nsIDOMDocumentFragment> frag;
-    NS_NewDocumentFragment(getter_AddRefs(frag), document->NodeInfoManager());
+    nsRefPtr<DocumentFragment> frag =
+      NS_NewDocumentFragment(document->NodeInfoManager(), aRv);
     
     nsCOMPtr<nsIContent> contextAsContent = do_QueryInterface(aContextNode);
     if (contextAsContent && !contextAsContent->IsElement()) {
@@ -4067,28 +4091,23 @@ nsContentUtils::CreateContextualFragment(nsINode* aContextNode,
       }
     }
     
-    nsresult rv;
-    nsCOMPtr<nsIContent> fragment = do_QueryInterface(frag);
     if (contextAsContent && !contextAsContent->IsHTML(nsGkAtoms::html)) {
-      rv = ParseFragmentHTML(aFragment,
-                             fragment,
-                             contextAsContent->Tag(),
-                             contextAsContent->GetNameSpaceID(),
-                             (document->GetCompatibilityMode() ==
+      aRv = ParseFragmentHTML(aFragment, frag,
+                              contextAsContent->Tag(),
+                              contextAsContent->GetNameSpaceID(),
+                              (document->GetCompatibilityMode() ==
                                eCompatibility_NavQuirks),
-                             aPreventScriptExecution);
+                              aPreventScriptExecution);
     } else {
-      rv = ParseFragmentHTML(aFragment,
-                             fragment,
-                             nsGkAtoms::body,
-                             kNameSpaceID_XHTML,
-                             (document->GetCompatibilityMode() ==
+      aRv = ParseFragmentHTML(aFragment, frag,
+                              nsGkAtoms::body,
+                              kNameSpaceID_XHTML,
+                              (document->GetCompatibilityMode() ==
                                eCompatibility_NavQuirks),
-                             aPreventScriptExecution);
+                              aPreventScriptExecution);
     }
 
-    frag.forget(aReturn);
-    return rv;
+    return frag.forget();
   }
 
   nsAutoTArray<nsString, 32> tagStack;
@@ -4100,7 +4119,10 @@ nsContentUtils::CreateContextualFragment(nsINode* aContextNode,
 
   while (content && content->IsElement()) {
     nsString& tagName = *tagStack.AppendElement();
-    NS_ENSURE_TRUE(&tagName, NS_ERROR_OUT_OF_MEMORY);
+    if (!&tagName) {
+      aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
+      return nullptr;
+    }
 
     tagName = content->NodeInfo()->QualifiedName();
 
@@ -4146,11 +4168,10 @@ nsContentUtils::CreateContextualFragment(nsINode* aContextNode,
     content = content->GetParent();
   }
 
-  return ParseFragmentXML(aFragment,
-                          document,
-                          tagStack,
-                          aPreventScriptExecution,
-                          aReturn);
+  nsCOMPtr<nsIDOMDocumentFragment> frag;
+  aRv = ParseFragmentXML(aFragment, document, tagStack,
+                         aPreventScriptExecution, getter_AddRefs(frag));
+  return static_cast<DocumentFragment*>(frag.forget().get());
 }
 
 /* static */
@@ -5189,8 +5210,8 @@ nsContentUtils::SetDataTransferInEvent(nsDragEvent* aDragEvent)
     // means, for instance calling the drag service directly, or a drag
     // from another application. In either case, a new dataTransfer should
     // be created that reflects the data.
-    initialDataTransfer =
-      new nsDOMDataTransfer(aDragEvent->message);
+    initialDataTransfer = new nsDOMDataTransfer(aDragEvent->message, true);
+
     NS_ENSURE_TRUE(initialDataTransfer, NS_ERROR_OUT_OF_MEMORY);
 
     // now set it in the drag session so we don't need to create it again
@@ -5769,9 +5790,9 @@ nsresult
 nsContentTypeParser::GetParameter(const char* aParameterName, nsAString& aResult)
 {
   NS_ENSURE_TRUE(mService, NS_ERROR_FAILURE);
-  return mService->GetParameter(mString, aParameterName,
-                                EmptyCString(), false, nullptr,
-                                aResult);
+  return mService->GetParameterHTTP(mString, aParameterName,
+                                    EmptyCString(), false, nullptr,
+                                    aResult);
 }
 
 /* static */
@@ -6088,15 +6109,15 @@ nsContentUtils::CheckCCWrapperTraversal(void* aScriptObjectHolder,
   DebugWrapperTraversalCallback callback(wrapper);
 
   aTracer->Traverse(aScriptObjectHolder, callback);
-  NS_ASSERTION(callback.mFound,
-               "Cycle collection participant didn't traverse to preserved "
-               "wrapper! This will probably crash.");
+  MOZ_ASSERT(callback.mFound,
+             "Cycle collection participant didn't traverse to preserved "
+             "wrapper! This will probably crash.");
 
   callback.mFound = false;
   aTracer->Trace(aScriptObjectHolder, DebugWrapperTraceCallback, &callback);
-  NS_ASSERTION(callback.mFound,
-               "Cycle collection participant didn't trace preserved wrapper! "
-               "This will probably crash.");
+  MOZ_ASSERT(callback.mFound,
+             "Cycle collection participant didn't trace preserved wrapper! "
+             "This will probably crash.");
 }
 #endif
 
@@ -6334,77 +6355,13 @@ nsContentUtils::FindInternalContentViewer(const char* aType,
   }
 
 #ifdef MOZ_MEDIA
-#ifdef MOZ_OGG
-  if (DecoderTraits::IsOggType(nsDependentCString(aType))) {
+  if (DecoderTraits::IsSupportedInVideoDocument(nsDependentCString(aType))) {
     docFactory = do_GetService("@mozilla.org/content/document-loader-factory;1");
     if (docFactory && aLoaderType) {
       *aLoaderType = TYPE_CONTENT;
     }
     return docFactory.forget();
   }
-#endif
-
-#ifdef MOZ_WIDGET_GONK
-  if (DecoderTraits::IsOmxSupportedType(nsDependentCString(aType))) {
-    docFactory = do_GetService("@mozilla.org/content/document-loader-factory;1");
-    if (docFactory && aLoaderType) {
-      *aLoaderType = TYPE_CONTENT;
-    }
-    return docFactory.forget();
-  }
-#endif
-
-#ifdef MOZ_WEBM
-  if (DecoderTraits::IsWebMType(nsDependentCString(aType))) {
-    docFactory = do_GetService("@mozilla.org/content/document-loader-factory;1");
-    if (docFactory && aLoaderType) {
-      *aLoaderType = TYPE_CONTENT;
-    }
-    return docFactory.forget();
-  }
-#endif
-
-#ifdef MOZ_DASH
-  if (DecoderTraits::IsDASHMPDType(nsDependentCString(aType))) {
-    docFactory = do_GetService("@mozilla.org/content/document-loader-factory;1");
-    if (docFactory && aLoaderType) {
-      *aLoaderType = TYPE_CONTENT;
-    }
-    return docFactory.forget();
-  }
-#endif
-
-#ifdef MOZ_GSTREAMER
-  if (DecoderTraits::IsGStreamerSupportedType(nsDependentCString(aType))) {
-    docFactory = do_GetService("@mozilla.org/content/document-loader-factory;1");
-    if (docFactory && aLoaderType) {
-      *aLoaderType = TYPE_CONTENT;
-    }
-    return docFactory.forget();
-  }
-#endif
-
-#ifdef MOZ_MEDIA_PLUGINS
-  if (mozilla::MediaDecoder::IsMediaPluginsEnabled() &&
-      DecoderTraits::IsMediaPluginsType(nsDependentCString(aType))) {
-    docFactory = do_GetService("@mozilla.org/content/document-loader-factory;1");
-    if (docFactory && aLoaderType) {
-      *aLoaderType = TYPE_CONTENT;
-    }
-    return docFactory.forget();
-  }
-#endif // MOZ_MEDIA_PLUGINS
-
-#ifdef MOZ_WMF
-  if (DecoderTraits::IsWMFSupportedType(nsDependentCString(aType))) {
-    docFactory = do_GetService("@mozilla.org/content/document-loader-factory;1");
-    if (docFactory && aLoaderType) {
-      *aLoaderType = TYPE_CONTENT;
-    }
-    return docFactory.forget();
-  }
-#endif
-
 #endif // MOZ_MEDIA
 
   return NULL;
@@ -6418,8 +6375,8 @@ nsContentUtils::IsPatternMatching(nsAString& aValue, nsAString& aPattern,
   NS_ASSERTION(aDocument, "aDocument should be a valid pointer (not null)");
   NS_ENSURE_TRUE(aDocument->GetScriptGlobalObject(), true);
 
-  JSContext* cx = aDocument->GetScriptGlobalObject()->
-                                  GetContext()->GetNativeContext();
+  AutoPushJSContext cx(aDocument->GetScriptGlobalObject()->
+                       GetContext()->GetNativeContext());
   NS_ENSURE_TRUE(cx, true);
 
   JSAutoRequest ar(cx);
@@ -6526,18 +6483,27 @@ nsContentUtils::SetUpChannelOwner(nsIPrincipal* aLoadingPrincipal,
   return false;
 }
 
+/* static */
 bool
 nsContentUtils::IsFullScreenApiEnabled()
 {
   return sIsFullScreenApiEnabled;
 }
 
+/* static */
 bool
 nsContentUtils::IsRequestFullScreenAllowed()
 {
   return !sTrustedFullScreenOnly ||
          nsEventStateManager::IsHandlingUserInput() ||
          IsCallerChrome();
+}
+
+/* static */
+bool
+nsContentUtils::IsFullscreenApiContentOnly()
+{
+  return sFullscreenApiIsContentOnly;
 }
 
 /* static */
@@ -6626,16 +6592,16 @@ nsContentUtils::HasPluginWithUncontrolledEventDispatch(nsIContent* aContent)
 
 /* static */
 nsIDocument*
-nsContentUtils::GetRootDocument(nsIDocument* aDoc)
+nsContentUtils::GetFullscreenAncestor(nsIDocument* aDoc)
 {
-  if (!aDoc) {
-    return nullptr;
-  }
   nsIDocument* doc = aDoc;
-  while (doc->GetParentDocument()) {
+  while (doc) {
+    if (doc->IsFullScreenDoc()) {
+      return doc;
+    }
     doc = doc->GetParentDocument();
   }
-  return doc;
+  return nullptr;
 }
 
 // static
@@ -6767,14 +6733,14 @@ nsIEditor*
 nsContentUtils::GetHTMLEditor(nsPresContext* aPresContext)
 {
   nsCOMPtr<nsISupports> container = aPresContext->GetContainer();
-  nsCOMPtr<nsIEditorDocShell> editorDocShell(do_QueryInterface(container));
+  nsCOMPtr<nsIDocShell> docShell(do_QueryInterface(container));
   bool isEditable;
-  if (!editorDocShell ||
-      NS_FAILED(editorDocShell->GetEditable(&isEditable)) || !isEditable)
+  if (!docShell ||
+      NS_FAILED(docShell->GetEditable(&isEditable)) || !isEditable)
     return nullptr;
 
   nsCOMPtr<nsIEditor> editor;
-  editorDocShell->GetEditor(getter_AddRefs(editor));
+  docShell->GetEditor(getter_AddRefs(editor));
   return editor;
 }
 
@@ -6825,10 +6791,7 @@ AutoJSContext::Init(bool aSafe MOZ_GUARD_OBJECT_NOTIFIER_PARAM_IN_IMPL)
 
   if (!mCx) {
     mCx = nsContentUtils::GetSafeJSContext();
-    bool result = mPusher.Push(mCx);
-    if (!result || !mCx) {
-      MOZ_CRASH();
-    }
+    mPusher.Push(mCx);
   }
 }
 

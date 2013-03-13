@@ -82,18 +82,9 @@ public:
     * @param aProperty      [IN] an atom containing a HTML tag name
     * @param aAttribute     [IN] a string containing the name of a HTML
     *                            attribute carried by the element above
-    * @param aValue         [IN] an optional string containing the attribute's
-    *                            HTML value -- this matters for <font size>,
-    *                            since size=7 has no CSS equivalent.  Make sure
-    *                            you pass the HTML value (e.g. "4"), not the
-    *                            CSS value (e.g. "large").
     */
-  bool IsCSSEditableProperty(nsIContent* aNode, nsIAtom* aProperty,
-                             const nsAString* aAttribute,
-                             const nsAString* aValue = nullptr);
-  bool IsCSSEditableProperty(nsIDOMNode* aNode, nsIAtom* aProperty,
-                             const nsAString* aAttribute,
-                             const nsAString* aValue = nullptr);
+  bool IsCSSEditableProperty(nsIContent* aNode, nsIAtom* aProperty, const nsAString* aAttribute);
+  bool IsCSSEditableProperty(nsIDOMNode* aNode, nsIAtom* aProperty, const nsAString* aAttribute);
 
   /** adds/remove a CSS declaration to the STYLE atrribute carried by a given element
     *
@@ -247,6 +238,20 @@ public:
                                              nsIAtom *aHTMLProperty,
                                              const nsAString *aAttribute,
                                              const nsAString *aValue,
+                                             bool aSuppressTransaction);
+  /** removes from the node the CSS inline styles equivalent to the HTML style
+    *
+    * @param aElement       [IN] a DOM Element (must not be null)
+    * @param aHTMLProperty  [IN] an atom containing an HTML property
+    * @param aAttribute     [IN] a pointer to an attribute name or nullptr if irrelevant
+    * @param aValue         [IN] the attribute value
+    * @param aSuppressTransaction [IN] a boolean indicating, when true,
+    *                                  that no transaction should be recorded
+    */
+  nsresult    RemoveCSSEquivalentToHTMLStyle(mozilla::dom::Element* aElement,
+                                             nsIAtom* aHTMLProperty,
+                                             const nsAString* aAttribute,
+                                             const nsAString* aValue,
                                              bool aSuppressTransaction);
 
   /** parses a "xxxx.xxxxxuuu" string where x is a digit and u an alpha char

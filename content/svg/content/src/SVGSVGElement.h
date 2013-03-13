@@ -8,10 +8,10 @@
 
 #include "mozilla/dom/FromParser.h"
 #include "nsISVGPoint.h"
-#include "nsIDOMSVGSVGElement.h"
 #include "nsSVGEnum.h"
 #include "nsSVGLength2.h"
 #include "SVGGraphicsElement.h"
+#include "SVGImageContext.h"
 #include "nsSVGViewBox.h"
 #include "SVGPreserveAspectRatio.h"
 #include "SVGAnimatedPreserveAspectRatio.h"
@@ -21,6 +21,7 @@ nsresult NS_NewSVGSVGElement(nsIContent **aResult,
                              already_AddRefed<nsINodeInfo> aNodeInfo,
                              mozilla::dom::FromParser aFromParser);
 
+class nsIDOMSVGNumber;
 class nsSMILTimeContainer;
 class nsSVGOuterSVGFrame;
 class nsSVGInnerSVGFrame;
@@ -30,6 +31,7 @@ namespace mozilla {
 class DOMSVGAnimatedPreserveAspectRatio;
 class DOMSVGTransform;
 class SVGFragmentIdentifier;
+class AutoSVGRenderingState;
 
 namespace dom {
 class SVGAngle;
@@ -46,8 +48,8 @@ public:
   DOMSVGTranslatePoint(DOMSVGTranslatePoint* aPt)
     : nsISVGPoint(&aPt->mPt), mElement(aPt->mElement) {}
 
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(DOMSVGTranslatePoint)
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(DOMSVGTranslatePoint, nsISVGPoint)
 
   virtual nsISVGPoint* Clone();
 
@@ -79,16 +81,16 @@ public:
 typedef SVGGraphicsElement SVGSVGElementBase;
 
 class SVGSVGElement MOZ_FINAL : public SVGSVGElementBase,
-                                public nsIDOMSVGSVGElement
+                                public nsIDOMSVGElement
 {
   friend class ::nsSVGOuterSVGFrame;
   friend class ::nsSVGInnerSVGFrame;
-  friend class ::nsSVGImageFrame;
   friend class mozilla::SVGFragmentIdentifier;
+  friend class mozilla::AutoSVGRenderingState;
 
   SVGSVGElement(already_AddRefed<nsINodeInfo> aNodeInfo,
                 FromParser aFromParser);
-  virtual JSObject* WrapNode(JSContext *aCx, JSObject *aScope, bool *aTriedToWrap) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *aCx, JSObject *aScope) MOZ_OVERRIDE;
 
   friend nsresult (::NS_NewSVGSVGElement(nsIContent **aResult,
                                          already_AddRefed<nsINodeInfo> aNodeInfo,
@@ -98,7 +100,6 @@ public:
   // interfaces:
   NS_DECL_ISUPPORTS_INHERITED
   NS_DECL_CYCLE_COLLECTION_CLASS_INHERITED(SVGSVGElement, SVGSVGElementBase)
-  NS_DECL_NSIDOMSVGSVGELEMENT
 
   // xxx I wish we could use virtual inheritance
   NS_FORWARD_NSIDOMNODE_TO_NSINODE
@@ -110,14 +111,7 @@ public:
    * currentTranslate.y to be set by a single operation that dispatches a
    * single SVGZoom event (instead of one SVGZoom and two SVGScroll events).
    */
-  NS_IMETHOD SetCurrentScaleTranslate(float s, float x, float y);
-
-  /**
-   * For use by pan controls to allow currentTranslate.x and currentTranslate.y
-   * to be set by a single operation that dispatches a single SVGScroll event
-   * (instead of two).
-   */
-  NS_IMETHOD SetCurrentTranslate(float x, float y);
+  void SetCurrentScaleTranslate(float s, float x, float y);
 
   /**
    * Retrieve the value of currentScale and currentTranslate.
@@ -162,19 +156,19 @@ public:
    * Note also that this method does not pay attention to whether the width or
    * height values of the viewBox rect are positive!
    */
-  bool HasViewBox() const;
+  bool HasViewBoxRect() const;
 
   /**
    * Returns true if we should synthesize a viewBox for ourselves (that is, if
    * we're the root element in an image document, and we're not currently being
    * painted for an <svg:image> element).
    *
-   * Only call this method if HasViewBox() returns false.
+   * Only call this method if HasViewBoxRect() returns false.
    */
   bool ShouldSynthesizeViewBox() const;
 
   bool HasViewBoxOrSyntheticViewBox() const {
-    return HasViewBox() || ShouldSynthesizeViewBox();
+    return HasViewBoxRect() || ShouldSynthesizeViewBox();
   }
 
   gfxMatrix GetViewBoxTransform() const;
@@ -223,8 +217,6 @@ public:
     mViewportHeight = aSize.height;
   }
 
-  virtual nsXPCClassInfo* GetClassInfo();
-
   virtual nsIDOMNode* AsDOMNode() { return this; }
 
   // WebIDL
@@ -237,18 +229,19 @@ public:
   float ScreenPixelToMillimeterX();
   float ScreenPixelToMillimeterY();
   bool UseCurrentView();
-  // XPIDL SetCurrentScale and SetCurrentTranslate are alright to use because
-  // they only throw on non-finite floats and we don't allow those.
   float CurrentScale();
+  void SetCurrentScale(float aCurrentScale);
   already_AddRefed<nsISVGPoint> CurrentTranslate();
+  void SetCurrentTranslate(float x, float y);
   uint32_t SuspendRedraw(uint32_t max_wait_milliseconds);
-  // XPIDL UnSuspendRedraw(All) can be used because it's a no-op.
+  void UnsuspendRedraw(uint32_t suspend_handle_id);
+  void UnsuspendRedrawAll();
   void ForceRedraw(ErrorResult& rv);
-  void PauseAnimations(ErrorResult& rv);
-  void UnpauseAnimations(ErrorResult& rv);
-  bool AnimationsPaused(ErrorResult& rv);
-  float GetCurrentTime(ErrorResult& rv);
-  void SetCurrentTime(float seconds, ErrorResult& rv);
+  void PauseAnimations();
+  void UnpauseAnimations();
+  bool AnimationsPaused();
+  float GetCurrentTime();
+  void SetCurrentTime(float seconds);
   already_AddRefed<nsIDOMSVGNumber> CreateSVGNumber();
   already_AddRefed<nsIDOMSVGLength> CreateSVGLength();
   already_AddRefed<SVGAngle> CreateSVGAngle();
@@ -276,7 +269,7 @@ private:
   SVGViewElement* GetCurrentViewElement() const;
 
   // Methods for <image> elements to override my "PreserveAspectRatio" value.
-  // These are private so that only our friends (nsSVGImageFrame in
+  // These are private so that only our friends (AutoSVGRenderingState in
   // particular) have access.
   void SetImageOverridePreserveAspectRatio(const SVGPreserveAspectRatio& aPAR);
   void ClearImageOverridePreserveAspectRatio();
@@ -398,6 +391,48 @@ private:
 };
 
 } // namespace dom
+
+// Helper class to automatically manage temporary changes to an SVG document's
+// state for rendering purposes.
+class NS_STACK_CLASS AutoSVGRenderingState
+{
+public:
+  AutoSVGRenderingState(const SVGImageContext* aSVGContext,
+                        float aFrameTime,
+                        dom::SVGSVGElement* aRootElem
+                        MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
+    : mHaveOverrides(!!aSVGContext)
+    , mRootElem(aRootElem)
+  {
+    MOZ_GUARD_OBJECT_NOTIFIER_INIT;
+    MOZ_ASSERT(mRootElem, "No SVG node to manage?");
+    if (mHaveOverrides) {
+      // Override preserveAspectRatio in our helper document.
+      // XXXdholbert We should technically be overriding the helper doc's clip
+      // and overflow properties here, too. See bug 272288 comment 36.
+      mRootElem->SetImageOverridePreserveAspectRatio(
+          aSVGContext->GetPreserveAspectRatio());
+    }
+
+    mOriginalTime = mRootElem->GetCurrentTime();
+    mRootElem->SetCurrentTime(aFrameTime); // Does nothing if there's no change.
+  }
+
+  ~AutoSVGRenderingState()
+  {
+    mRootElem->SetCurrentTime(mOriginalTime);
+    if (mHaveOverrides) {
+      mRootElem->ClearImageOverridePreserveAspectRatio();
+    }
+  }
+
+private:
+  const bool mHaveOverrides;
+  float mOriginalTime;
+  const nsRefPtr<dom::SVGSVGElement> mRootElem;
+  MOZ_DECL_USE_GUARD_OBJECT_NOTIFIER
+};
+
 } // namespace mozilla
 
 #endif // SVGSVGElement_h

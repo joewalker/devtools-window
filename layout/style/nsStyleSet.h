@@ -23,7 +23,6 @@
 #include "nsAutoPtr.h"
 #include "nsIStyleRule.h"
 #include "nsCSSPseudoElements.h"
-#include "nsCSSAnonBoxes.h"
 #include "mozilla/Attributes.h"
 
 class nsIURI;
@@ -364,7 +363,14 @@ class nsStyleSet
     eNoFlags =          0,
     eIsLink =           1 << 0,
     eIsVisitedLink =    1 << 1,
-    eDoAnimation =      1 << 2
+    eDoAnimation =      1 << 2,
+
+    // Indicates that we should skip the flex-item-specific chunk of
+    // ApplyStyleFixups().  This is useful if our parent has "display: flex"
+    // but we can tell it's not going to actually be a flex container (e.g. if
+    // it's the outer frame of a button widget, and we're the inline frame for
+    // the button's label).
+    eSkipFlexItemStyleFixup = 1 << 3
   };
 
   already_AddRefed<nsStyleContext>
@@ -376,7 +382,7 @@ class nsStyleSet
              mozilla::dom::Element* aElementForAnimation,
              uint32_t aFlags);
 
-  nsPresContext* PresContext() { return mRuleTree->GetPresContext(); }
+  nsPresContext* PresContext() { return mRuleTree->PresContext(); }
 
   // The sheets in each array in mSheets are stored with the most significant
   // sheet last.

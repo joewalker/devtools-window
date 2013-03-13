@@ -35,6 +35,7 @@
 #include "nsThemeConstants.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/LookAndFeel.h"
+#include "mozilla/Selection.h"
 #include <algorithm>
 
 // The bidi indicator hangs off the caret to one side, to show which
@@ -219,7 +220,7 @@ nsCaret::Metrics nsCaret::ComputeMetrics(nsIFrame* aFrame, int32_t aOffset, nsco
 
   // Round them to device pixels. Always round down, except that anything
   // between 0 and 1 goes up to 1 so we don't let the caret disappear.
-  uint32_t tpp = aFrame->PresContext()->AppUnitsPerDevPixel();
+  int32_t tpp = aFrame->PresContext()->AppUnitsPerDevPixel();
   Metrics result;
   result.mCaretWidth = NS_ROUND_BORDER_TO_PIXELS(caretWidth, tpp);
   result.mBidiIndicatorSize = NS_ROUND_BORDER_TO_PIXELS(bidiIndicatorSize, tpp);
@@ -668,7 +669,7 @@ nsCaret::DrawAtPositionWithHint(nsIDOMNode*             aNode,
     return false;
 
   // now we have a frame, check whether it's appropriate to show the caret here
-  const nsStyleUserInterface* userinterface = theFrame->GetStyleUserInterface();
+  const nsStyleUserInterface* userinterface = theFrame->StyleUserInterface();
   if ((!mIgnoreUserModify &&
        userinterface->mUserModify == NS_STYLE_USER_MODIFY_READ_ONLY) ||
       (userinterface->mUserInput == NS_STYLE_USER_INPUT_NONE) ||
@@ -742,8 +743,7 @@ nsCaret::GetCaretFrameForNodeOffset(nsIContent*             aContentNode,
   
   // Mamdouh : modification of the caret to work at rtl and ltr with Bidi
   //
-  // Direction Style from this->GetStyleData()
-  // now in (visibility->mDirection)
+  // Direction Style from visibility->mDirection
   // ------------------
   // NS_STYLE_DIRECTION_LTR : LTR or Default
   // NS_STYLE_DIRECTION_RTL
@@ -1072,7 +1072,7 @@ nsCaret::UpdateCaretRects(nsIFrame* aFrame, int32_t aFrameOffset)
   }
 
   // on RTL frames the right edge of mCaretRect must be equal to framePos
-  const nsStyleVisibility* vis = aFrame->GetStyleVisibility();
+  const nsStyleVisibility* vis = aFrame->StyleVisibility();
   if (NS_STYLE_DIRECTION_RTL == vis->mDirection)
     mCaretRect.x -= mCaretRect.width;
 
@@ -1128,15 +1128,14 @@ void nsCaret::CaretBlinkCallback(nsITimer *aTimer, void *aClosure)
 
 
 //-----------------------------------------------------------------------------
-already_AddRefed<nsFrameSelection>
+nsFrameSelection*
 nsCaret::GetFrameSelection()
 {
-  nsCOMPtr<nsISelectionPrivate> privateSelection(do_QueryReferent(mDomSelectionWeak));
-  if (!privateSelection)
+  nsCOMPtr<nsISelection> sel = do_QueryReferent(mDomSelectionWeak);
+  if (!sel)
     return nullptr;
-  nsFrameSelection* frameSelection = nullptr;
-  privateSelection->GetFrameSelection(&frameSelection);
-  return frameSelection;
+
+  return static_cast<Selection*>(sel.get())->GetFrameSelection();
 }
 
 void
@@ -1149,7 +1148,7 @@ nsCaret::SetIgnoreUserModify(bool aIgnoreUserModify)
     // mIgnoreUserModify value.
     nsIFrame *frame = GetCaretFrame();
     if (frame) {
-      const nsStyleUserInterface* userinterface = frame->GetStyleUserInterface();
+      const nsStyleUserInterface* userinterface = frame->StyleUserInterface();
       if (userinterface->mUserModify == NS_STYLE_USER_MODIFY_READ_ONLY) {
         StopBlinking();
       }

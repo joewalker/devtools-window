@@ -14,7 +14,7 @@
 #include "nsCOMPtr.h"
 #include "nsDOMFile.h"
 #include "nsThreadUtils.h"
-#include "nsDOMMediaStream.h"
+#include "DOMMediaStream.h"
 #include "nsDirectoryServiceDefs.h"
 #include "nsComponentManagerUtils.h"
 
@@ -56,24 +56,18 @@ class MediaEngineWebRTCVideoSource : public MediaEngineVideoSource,
                                      public nsRunnable
 {
 public:
-  static const int DEFAULT_VIDEO_FPS = 60;
-  static const int DEFAULT_MIN_VIDEO_FPS = 10;
-
   // ViEExternalRenderer.
   virtual int FrameSizeChange(unsigned int, unsigned int, unsigned int);
   virtual int DeliverFrame(unsigned char*, int, uint32_t, int64_t);
 
-  MediaEngineWebRTCVideoSource(webrtc::VideoEngine* aVideoEnginePtr,
-    int aIndex, int aMinFps = DEFAULT_MIN_VIDEO_FPS)
+  MediaEngineWebRTCVideoSource(webrtc::VideoEngine* aVideoEnginePtr, int aIndex)
     : mVideoEngine(aVideoEnginePtr)
     , mCaptureIndex(aIndex)
-    , mCapabilityChosen(false)
-    , mWidth(640)
-    , mHeight(480)
-    , mLastEndTime(0)
+    , mWidth(0)
+    , mHeight(0)
+    , mFps(-1)
+    , mMinFps(-1)
     , mMonitor("WebRTCCamera.Monitor")
-    , mFps(DEFAULT_VIDEO_FPS)
-    , mMinFps(aMinFps)
     , mInitDone(false)
     , mInSnapshotMode(false)
     , mSnapshotPath(NULL) {
@@ -85,8 +79,7 @@ public:
 
   virtual void GetName(nsAString&);
   virtual void GetUUID(nsAString&);
-  virtual const MediaEngineVideoOptions *GetOptions();
-  virtual nsresult Allocate();
+  virtual nsresult Allocate(const MediaEnginePrefs &aPrefs);
   virtual nsresult Deallocate();
   virtual nsresult Start(SourceMediaStream*, TrackID);
   virtual nsresult Stop(SourceMediaStream*, TrackID);
@@ -138,10 +131,9 @@ private:
   webrtc::CaptureCapability mCapability; // Doesn't work on OS X.
 
   int mCaptureIndex;
-  bool mCapabilityChosen;
   int mWidth, mHeight;
-  TrackID mTrackID;
-  TrackTicks mLastEndTime;
+  int mFps; // Track rate (30 fps by default)
+  int mMinFps; // Min rate we want to accept
 
   // mMonitor protects mImage access/changes, and transitions of mState
   // from kStarted to kStopped (which are combined with EndTrack() and
@@ -150,8 +142,6 @@ private:
   mozilla::ReentrantMonitor mMonitor; // Monitor for processing WebRTC frames.
   nsTArray<SourceMediaStream *> mSources; // When this goes empty, we shut down HW
 
-  int mFps; // Track rate (30 fps by default)
-  int mMinFps; // Min rate we want to accept
   bool mInitDone;
   bool mInSnapshotMode;
   nsString* mSnapshotPath;
@@ -166,8 +156,7 @@ private:
   char mDeviceName[KMaxDeviceNameLength];
   char mUniqueId[KMaxUniqueIdLength];
 
-  void ChooseCapability(uint32_t aWidth, uint32_t aHeight, uint32_t aMinFPS);
-  MediaEngineVideoOptions mOpts;
+  void ChooseCapability(const MediaEnginePrefs &aPrefs);
 };
 
 class MediaEngineWebRTCAudioSource : public MediaEngineAudioSource,
@@ -197,7 +186,7 @@ public:
   virtual void GetName(nsAString&);
   virtual void GetUUID(nsAString&);
 
-  virtual nsresult Allocate();
+  virtual nsresult Allocate(const MediaEnginePrefs &aPrefs);
   virtual nsresult Deallocate();
   virtual nsresult Start(SourceMediaStream*, TrackID);
   virtual nsresult Stop(SourceMediaStream*, TrackID);

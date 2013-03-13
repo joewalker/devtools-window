@@ -75,10 +75,9 @@ SystemMessageManager.prototype = {
     aHandler.handleMessage(wrapped ? aMessage
                                    : ObjectWrapper.wrap(aMessage, this._window));
 
-    // Notify the parent process the message is handled.
-    cpmm.sendAsyncMessage("SystemMessageManager:HandleMessageDone",
-                          { type: aType,
-                            message: aMessage });
+    Services.obs.notifyObservers(/* aSubject */ null,
+                                 "SystemMessageManager:HandleMessageDone",
+                                 /* aData */ null);
   },
 
   mozSetMessageHandler: function sysMessMgr_setMessageHandler(aType, aHandler) {
@@ -86,7 +85,8 @@ SystemMessageManager.prototype = {
 
     if (this._isInBrowserElement) {
       debug("the app loaded in the browser cannot set message handler");
-      throw Cr.NS_ERROR_FAILURE;
+      // Don't throw there, but ignore the registration.
+      return;
     }
 
     if (!aType) {
@@ -117,7 +117,8 @@ SystemMessageManager.prototype = {
 
     if (this._isInBrowserElement) {
       debug("the app loaded in the browser cannot ask pending message");
-      throw Cr.NS_ERROR_FAILURE;
+      // Don't throw there, but pretend to have no messages available.
+      return false;
     }
 
     // If we have a handler for this type, we can't have any pending message.

@@ -155,6 +155,11 @@ SettingsListener.observe('language.current', 'en-US', function(value) {
     });
   });
 
+  SettingsListener.observe('ril.mms.retrieval_mode', 'manual',
+    function(value) {
+      Services.prefs.setCharPref('dom.mms.retrieval_mode', value);
+  });
+
   SettingsListener.observe('ril.sms.strict7BitEncoding.enabled', false,
     function(value) {
       Services.prefs.setBoolPref('dom.sms.strict7BitEncoding', value);
@@ -207,12 +212,17 @@ SettingsListener.observe('devtools.debugger.remote-enabled', false, function(val
 #ifdef MOZ_WIDGET_GONK
   let enableAdb = value;
 
-  if (Services.prefs.getBoolPref('marionette.defaultPrefs.enabled')) {
-    // Marionette is enabled. Force adb on, since marionette requires remote
-    // debugging to be disabled (we don't want adb to track the remote debugger
-    // setting).
+  try {
+    if (Services.prefs.getBoolPref('marionette.defaultPrefs.enabled')) {
+      // Marionette is enabled. Force adb on, since marionette requires remote
+      // debugging to be disabled (we don't want adb to track the remote debugger
+      // setting).
 
-    enableAdb = true;
+      enableAdb = true;
+    }
+  } catch (e) {
+    // This means that the pref doesn't exist. Which is fine. We just leave
+    // enableAdb alone.
   }
 
   // Configure adb.

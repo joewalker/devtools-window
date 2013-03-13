@@ -83,7 +83,7 @@ add_task(function test_current_session() {
   yield sleep(25);
   recorder.onActivity(true);
 
-  let current = provider.getMeasurement("current", 2);
+  let current = provider.getMeasurement("current", 3);
   let values = yield current.getValues();
   let fields = values.singular;
 
@@ -124,7 +124,7 @@ add_task(function test_collect() {
   let sessions = recorder.getPreviousSessions();
   do_check_eq(Object.keys(sessions).length, 0);
 
-  let daily = provider.getMeasurement("previous", 2);
+  let daily = provider.getMeasurement("previous", 3);
   let values = yield daily.getValues();
   do_check_true(values.days.hasDay(now));
   do_check_eq(values.days.size, 1);
@@ -138,6 +138,9 @@ add_task(function test_collect() {
     do_check_eq(day.get(field).length, 6);
   }
 
+  let lastIndex = yield provider.getState("lastSession");
+  do_check_eq(lastIndex, "5"); // 0-indexed so this is really 6.
+
   // Fake an aborted sessions.
   let recorder2 = new SessionRecorder("testing.collect.sessions.");
   recorder2.onStartup();
@@ -147,14 +150,34 @@ add_task(function test_collect() {
 
   values = yield daily.getValues();
   day = values.days.getDay(now);
+  do_check_eq(day.size, 7);
   for (let field of ["abortedActiveTicks", "abortedTotalTime"]) {
     do_check_true(day.has(field));
     do_check_true(Array.isArray(day.get(field)));
     do_check_eq(day.get(field).length, 1);
   }
 
-  recorder.onShutdown();
+  lastIndex = yield provider.getState("lastSession");
+  do_check_eq(lastIndex, "6");
+
   recorder2.onShutdown();
+
+  // If we try to insert a lower-numbered session, it will be ignored.
+  let recorder3 = new SessionRecorder("testing.collect.sessions.");
+  recorder3._currentIndex = recorder2._currentIndex - 4;
+  recorder3._prunedIndex = recorder3._currentIndex;
+  recorder3.onStartup();
+  // Session is left over from recorder2.
+  do_check_eq(Object.keys(recorder.getPreviousSessions()).length, 1);
+  yield provider.collectConstantData();
+  lastIndex = yield provider.getState("lastSession");
+  do_check_eq(lastIndex, "6");
+  values = yield daily.getValues();
+  day = values.days.getDay(now);
+  do_check_eq(day.size, 7); // We should not get additional entry.
+  recorder3.onShutdown();
+
+  recorder.onShutdown();
 
   yield provider.shutdown();
   yield storage.close();
@@ -163,15 +186,18 @@ add_task(function test_collect() {
 add_task(function test_serialization() {
   let [provider, storage, recorder] = yield getProvider("serialization");
 
-  let current = provider.getMeasurement("current", 2);
+  yield sleep(1025);
+  recorder.onActivity(true);
+
+  let current = provider.getMeasurement("current", 3);
   let data = yield current.getValues();
   do_check_true("singular" in data);
 
   let serializer = current.serializer(current.SERIALIZE_JSON);
   let fields = serializer.singular(data.singular);
 
-  do_check_eq(fields._v, 2);
-  do_check_eq(fields.activeTicks, 0);
+  do_check_eq(fields._v, 3);
+  do_check_eq(fields.activeTicks, 1);
   do_check_eq(fields.startDay, Metrics.dateToDays(recorder.startDate));
   do_check_eq(fields.main, 500);
   do_check_eq(fields.firstPaint, 1000);
@@ -181,3 +207,4 @@ add_task(function test_serialization() {
   yield provider.shutdown();
   yield storage.close();
 });
+

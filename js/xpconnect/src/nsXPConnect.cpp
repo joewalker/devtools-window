@@ -79,8 +79,7 @@ nsXPConnect::nsXPConnect()
         mDefaultSecurityManager(nullptr),
         mDefaultSecurityManagerFlags(0),
         mShuttingDown(false),
-        mEventDepth(0),
-        mCycleCollectionContext(nullptr)
+        mEventDepth(0)
 {
     mRuntime = XPCJSRuntime::newXPCJSRuntime(this);
 
@@ -542,24 +541,9 @@ nsXPConnect::FixWeakMappingGrayBits()
 nsresult
 nsXPConnect::BeginCycleCollection(nsCycleCollectionTraversalCallback &cb)
 {
-    // It is important not to call GetSafeJSContext while on the
-    // cycle-collector thread since this context will be destroyed
-    // asynchronously and race with the main thread. In particular, we must
-    // ensure that a context is passed to the XPCCallContext constructor.
-    JSContext *cx = mRuntime->GetJSCycleCollectionContext();
-    if (!cx)
-        return NS_ERROR_OUT_OF_MEMORY;
-
-    NS_ASSERTION(!mCycleCollectionContext, "Didn't call FinishTraverse?");
-    mCycleCollectionContext = new XPCCallContext(NATIVE_CALLER, cx);
-    if (!mCycleCollectionContext->IsValid()) {
-        mCycleCollectionContext = nullptr;
-        return NS_ERROR_FAILURE;
-    }
-
+    JSRuntime* rt = GetRuntime()->GetJSRuntime();
     static bool gcHasRun = false;
     if (!gcHasRun) {
-        JSRuntime* rt = GetRuntime()->GetJSRuntime();
         uint32_t gcNumber = JS_GetGCParameter(rt, JSGC_NUMBER);
         if (!gcNumber)
             NS_RUNTIMEABORT("Cannot cycle collect if GC has not run first!");
@@ -568,7 +552,7 @@ nsXPConnect::BeginCycleCollection(nsCycleCollectionTraversalCallback &cb)
 
     GetRuntime()->AddXPConnectRoots(cb);
 
-    NoteWeakMapsTracer trc(GetRuntime()->GetJSRuntime(), TraceWeakMapping, cb);
+    NoteWeakMapsTracer trc(rt, TraceWeakMapping, cb);
     js::TraceWeakMaps(&trc);
 
     return NS_OK;
@@ -604,14 +588,6 @@ nsXPConnect::NotifyEnterMainThread()
 {
     NS_ABORT_IF_FALSE(NS_IsMainThread(), "Off main thread");
     JS_SetRuntimeThread(mRuntime->GetJSRuntime());
-}
-
-nsresult
-nsXPConnect::FinishTraverse()
-{
-    if (mCycleCollectionContext)
-        mCycleCollectionContext = nullptr;
-    return NS_OK;
 }
 
 class nsXPConnectParticipant: public nsCycleCollectionParticipant
@@ -797,7 +773,7 @@ NoteGCThingJSChildren(JSRuntime *rt, void *p, JSGCTraceKind traceKind,
     MOZ_ASSERT(rt);
     TraversalTracer trc(cb);
     JS_TracerInit(&trc, rt, NoteJSChildTracerShim);
-    trc.eagerlyTraceWeakMaps = false;
+    trc.eagerlyTraceWeakMaps = DoNotTraceWeakMaps;
     JS_TraceChildren(&trc, p, traceKind);
 }
 
@@ -1370,41 +1346,6 @@ nsXPConnect::GetNativeOfWrapper(JSContext * aJSContext,
     mozilla::dom::UnwrapDOMObjectToISupports(cur, supports);
     nsCOMPtr<nsISupports> canonical = do_QueryInterface(supports);
     return canonical;
-}
-
-/* JSObjectPtr getJSObjectOfWrapper (in JSContextPtr aJSContext, in JSObjectPtr aJSObj); */
-NS_IMETHODIMP
-nsXPConnect::GetJSObjectOfWrapper(JSContext * aJSContext,
-                                  JSObject * aJSObj,
-                                  JSObject **_retval)
-{
-    NS_ASSERTION(aJSContext, "bad param");
-    NS_ASSERTION(aJSObj, "bad param");
-    NS_ASSERTION(_retval, "bad param");
-
-    XPCCallContext ccx(NATIVE_CALLER, aJSContext);
-    if (!ccx.IsValid())
-        return UnexpectedFailure(NS_ERROR_FAILURE);
-
-    JSObject* obj2 = nullptr;
-    nsIXPConnectWrappedNative* wrapper =
-        XPCWrappedNative::GetWrappedNativeOfJSObject(aJSContext, aJSObj, nullptr,
-                                                     &obj2);
-    if (wrapper) {
-        wrapper->GetJSObject(_retval);
-        return NS_OK;
-    }
-    if (obj2) {
-        *_retval = obj2;
-        return NS_OK;
-    }
-    if (mozilla::dom::IsDOMObject(aJSObj)) {
-        *_retval = aJSObj;
-        return NS_OK;
-    }
-    // else...
-    *_retval = nullptr;
-    return NS_ERROR_FAILURE;
 }
 
 /* nsIXPConnectWrappedNative getWrappedNativeOfNativeObject (in JSContextPtr aJSContext, in JSObjectPtr aScope, in nsISupports aCOMObj, in nsIIDRef aIID); */
@@ -2454,7 +2395,7 @@ public:
         TraversalTracer trc(cb);
         JSRuntime *rt = nsXPConnect::GetRuntimeInstance()->GetJSRuntime();
         JS_TracerInit(&trc, rt, NoteJSChildTracerShim);
-        trc.eagerlyTraceWeakMaps = false;
+        trc.eagerlyTraceWeakMaps = DoNotTraceWeakMaps;
         js::VisitGrayWrapperTargets(c, NoteJSChildGrayWrapperShim, &trc);
 
         /*

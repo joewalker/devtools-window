@@ -64,9 +64,15 @@ public:
     return nsContainerFrame::StealFrame(aPresContext, aChild, true);
   }
 
-  NS_IMETHOD BuildDisplayList(nsDisplayListBuilder*   aBuilder,
-                              const nsRect&           aDirtyRect,
-                              const nsDisplayListSet& aLists);
+  virtual bool IsFrameOfType(uint32_t aFlags) const
+   {
+     return nsContainerFrame::IsFrameOfType(aFlags &
+              ~(nsIFrame::eCanContainOverflowContainers));
+   }
+
+  virtual void BuildDisplayList(nsDisplayListBuilder*   aBuilder,
+                                const nsRect&           aDirtyRect,
+                                const nsDisplayListSet& aLists) MOZ_OVERRIDE;
 
   virtual nsIAtom* GetType() const;
 
@@ -93,6 +99,7 @@ protected:
     nscoord mExpectedWidthLeftOver;
     nscoord mColGap;
     nscoord mColMaxHeight;
+    bool mIsBalancing;
   };
 
   /**
@@ -132,7 +139,8 @@ protected:
    * style. This function will also be responsible for implementing
    * the state machine that controls column balancing.
    */
-  ReflowConfig ChooseColumnStrategy(const nsHTMLReflowState& aReflowState);
+  ReflowConfig ChooseColumnStrategy(const nsHTMLReflowState& aReflowState,
+                                    bool aForceAuto);
 
   /**
    * Reflow column children. Returns true iff the content that was reflowed 
@@ -197,8 +205,8 @@ nsColumnSetFrame::PaintColumnRule(nsRenderingContext* aCtx,
   if (!nextSibling)
     return;  // 1 column only - this means no gap to draw on
 
-  bool isRTL = GetStyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
-  const nsStyleColumn* colStyle = GetStyleColumn();
+  bool isRTL = StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
+  const nsStyleColumn* colStyle = StyleColumn();
 
   uint8_t ruleStyle;
   // Per spec, inset => ridge and outset => groove
@@ -246,7 +254,7 @@ nsColumnSetFrame::PaintColumnRule(nsRenderingContext* aCtx,
 
     nsRect lineRect(linePt, ruleSize);
     nsCSSRendering::PaintBorderWithStyleBorder(presContext, *aCtx, this,
-        aDirtyRect, lineRect, border, GetStyleContext(),
+        aDirtyRect, lineRect, border, StyleContext(),
         // Remember, we only have the "left" "border". Skip everything else
         (1 << NS_SIDE_TOP | 1 << NS_SIDE_RIGHT | 1 << NS_SIDE_BOTTOM));
 
@@ -259,10 +267,14 @@ NS_IMETHODIMP
 nsColumnSetFrame::SetInitialChildList(ChildListID     aListID,
                                       nsFrameList&    aChildList)
 {
+  if (aListID == kAbsoluteList) {
+    return nsContainerFrame::SetInitialChildList(aListID, aChildList);
+  }
+
   NS_ASSERTION(aListID == kPrincipalList,
                "Only default child list supported");
   NS_ASSERTION(aChildList.OnlyChild(),
-               "initial child list must have exactly one child");
+               "initial child list must have exaisRevertingctly one child");
   // Queue up the frames for the content frame
   return nsContainerFrame::SetInitialChildList(kPrincipalList, aChildList);
 }
@@ -296,7 +308,7 @@ GetColumnGap(nsColumnSetFrame*    aFrame,
              const nsStyleColumn* aColStyle)
 {
   if (eStyleUnit_Normal == aColStyle->mColumnGap.GetUnit())
-    return aFrame->GetStyleFont()->mFont.size;
+    return aFrame->StyleFont()->mFont.size;
   if (eStyleUnit_Coord == aColStyle->mColumnGap.GetUnit()) {
     nscoord colGap = aColStyle->mColumnGap.GetCoordValue();
     NS_ASSERTION(colGap >= 0, "negative column gap");
@@ -308,9 +320,10 @@ GetColumnGap(nsColumnSetFrame*    aFrame,
 }
 
 nsColumnSetFrame::ReflowConfig
-nsColumnSetFrame::ChooseColumnStrategy(const nsHTMLReflowState& aReflowState)
+nsColumnSetFrame::ChooseColumnStrategy(const nsHTMLReflowState& aReflowState,
+                                       bool aForceAuto = false)
 {
-  const nsStyleColumn* colStyle = GetStyleColumn();
+  const nsStyleColumn* colStyle = StyleColumn();
   nscoord availContentWidth = GetAvailableContentWidth(aReflowState);
   if (aReflowState.ComputedWidth() != NS_INTRINSICSIZE) {
     availContentWidth = aReflowState.ComputedWidth();
@@ -326,7 +339,8 @@ nsColumnSetFrame::ChooseColumnStrategy(const nsHTMLReflowState& aReflowState)
   int32_t numColumns = colStyle->mColumnCount;
 
   // If column-fill is set to 'balance', then we want to balance the columns.
-  const bool isBalancing = colStyle->mColumnFill == NS_STYLE_COLUMN_FILL_BALANCE;
+  const bool isBalancing = colStyle->mColumnFill == NS_STYLE_COLUMN_FILL_BALANCE
+                           && !aForceAuto;
   if (isBalancing) {
     const uint32_t MAX_NESTED_COLUMN_BALANCING = 2;
     uint32_t cnt = 0;
@@ -404,13 +418,24 @@ nsColumnSetFrame::ChooseColumnStrategy(const nsHTMLReflowState& aReflowState)
     // This is the case when the column-fill property is set to 'auto'.
     // No balancing, so don't limit the column count
     numColumns = INT32_MAX;
+
+    // XXX_jwir3: If a page's height is set to 0, we could continually
+    //            create continuations, resulting in an infinite loop, since
+    //            no progress is ever made. This is an issue with the spec
+    //            (css3-multicol, css3-page, and css3-break) that is
+    //            unresolved as of 27 Feb 2013. For the time being, we set this
+    //            to have a minimum of 1 css px. Once a resolution is made
+    //            on what minimum to have for a page height, we may need to
+    //            change this value to match the appropriate spec(s).
+    colHeight = std::max(colHeight, nsPresContext::CSSPixelsToAppUnits(1));
   }
 
 #ifdef DEBUG_roc
   printf("*** nsColumnSetFrame::ChooseColumnStrategy: numColumns=%d, colWidth=%d, expectedWidthLeftOver=%d, colHeight=%d, colGap=%d\n",
          numColumns, colWidth, expectedWidthLeftOver, colHeight, colGap);
 #endif
-  ReflowConfig config = { numColumns, colWidth, expectedWidthLeftOver, colGap, colHeight };
+  ReflowConfig config = { numColumns, colWidth, expectedWidthLeftOver, colGap,
+                          colHeight, isBalancing };
   return config;
 }
 
@@ -440,7 +465,7 @@ nsColumnSetFrame::GetMinWidth(nsRenderingContext *aRenderingContext) {
   if (mFrames.FirstChild()) {
     width = mFrames.FirstChild()->GetMinWidth(aRenderingContext);
   }
-  const nsStyleColumn* colStyle = GetStyleColumn();
+  const nsStyleColumn* colStyle = StyleColumn();
   nscoord colWidth;
   if (colStyle->mColumnWidth.GetUnit() == eStyleUnit_Coord) {
     colWidth = colStyle->mColumnWidth.GetCoordValue();
@@ -472,7 +497,7 @@ nsColumnSetFrame::GetPrefWidth(nsRenderingContext *aRenderingContext) {
   // XXX what about forced column breaks here?
   nscoord result = 0;
   DISPLAY_PREF_WIDTH(this, result);
-  const nsStyleColumn* colStyle = GetStyleColumn();
+  const nsStyleColumn* colStyle = StyleColumn();
   nscoord colGap = GetColumnGap(this, colStyle);
 
   nscoord colWidth;
@@ -508,7 +533,7 @@ nsColumnSetFrame::ReflowChildren(nsHTMLReflowMetrics&     aDesiredSize,
 {
   aColData.Reset();
   bool allFit = true;
-  bool RTL = GetStyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
+  bool RTL = StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL;
   bool shrinkingHeightOnly = !NS_SUBTREE_DIRTY(this) &&
     mLastBalanceHeight > aConfig.mColMaxHeight;
   
@@ -611,7 +636,7 @@ nsColumnSetFrame::ReflowChildren(nsHTMLReflowMetrics&     aDesiredSize,
       if (aUnboundedLastColumn && columnCount == aConfig.mBalanceColCount - 1) {
         availSize.height = GetAvailableContentHeight(aReflowState);
       }
-  
+
       if (reflowNext)
         child->AddStateBits(NS_FRAME_IS_DIRTY);
 
@@ -726,8 +751,8 @@ nsColumnSetFrame::ReflowChildren(nsHTMLReflowMetrics&     aDesiredSize,
 
 
       if ((contentBottom > aReflowState.mComputedMaxHeight ||
-          contentBottom > aReflowState.ComputedHeight()) &&
-          aConfig.mBalanceColCount < INT32_MAX) {
+           contentBottom > aReflowState.ComputedHeight()) &&
+           aConfig.mBalanceColCount < INT32_MAX) {
         // We overflowed vertically, but have not exceeded the number
         // of columns. If we're balancing, then we should try reverting
         // to auto instead.
@@ -735,25 +760,17 @@ nsColumnSetFrame::ReflowChildren(nsHTMLReflowMetrics&     aDesiredSize,
       }
 
       if (columnCount >= aConfig.mBalanceColCount) {
-        if (contentBottom >= aReflowState.availableHeight) {
-          // No more columns allowed here. Stop.
-          aStatus |= NS_FRAME_REFLOW_NEXTINFLOW;
-          kidNextInFlow->AddStateBits(NS_FRAME_IS_DIRTY);
-          // Move any of our leftover columns to our overflow list. Our
-          // next-in-flow will eventually pick them up.
-          const nsFrameList& continuationColumns = mFrames.RemoveFramesAfter(child);
-          if (continuationColumns.NotEmpty()) {
-            SetOverflowFrames(PresContext(), continuationColumns);
-          }
-          child = nullptr;
-          break;
-        } else if (contentBottom > aReflowState.mComputedMaxHeight ||
-                   contentBottom > aReflowState.ComputedHeight()) {
-          aColData.mShouldRevertToAuto = true;
-        } else {
-          // The number of columns required is too high.
-          allFit = false;
+        // No more columns allowed here. Stop.
+        aStatus |= NS_FRAME_REFLOW_NEXTINFLOW;
+        kidNextInFlow->AddStateBits(NS_FRAME_IS_DIRTY);
+        // Move any of our leftover columns to our overflow list. Our
+        // next-in-flow will eventually pick them up.
+        const nsFrameList& continuationColumns = mFrames.RemoveFramesAfter(child);
+        if (continuationColumns.NotEmpty()) {
+          SetOverflowFrames(PresContext(), continuationColumns);
         }
+        child = nullptr;
+        break;
       }
     }
 
@@ -897,7 +914,6 @@ nsColumnSetFrame::Reflow(nsPresContext*           aPresContext,
   //------------ Handle Incremental Reflow -----------------
 
   ReflowConfig config = ChooseColumnStrategy(aReflowState);
-  bool isBalancing = config.mBalanceColCount < INT32_MAX;
   
   // If balancing, then we allow the last column to grow to unbounded
   // height during the first reflow. This gives us a way to estimate
@@ -906,7 +922,7 @@ nsColumnSetFrame::Reflow(nsPresContext*           aPresContext,
   // if we have a next in flow because we don't want to suck all its
   // content back here and then have to push it out again!
   nsIFrame* nextInFlow = GetNextInFlow();
-  bool unboundedLastColumn = isBalancing && !nextInFlow;
+  bool unboundedLastColumn = config.mIsBalancing && !nextInFlow;
   nsCollapsingMargin carriedOutBottomMargin;
   ColumnBalanceData colData;
   colData.mShouldRevertToAuto = false;
@@ -919,15 +935,14 @@ nsColumnSetFrame::Reflow(nsPresContext*           aPresContext,
   // children, we were balancing and we overflowed in the block direction.
   do {
     if (colData.mShouldRevertToAuto) {
-      config = ChooseColumnStrategy(aReflowState);
-      isBalancing = false;
-      config.mBalanceColCount = INT32_MAX;
+      config = ChooseColumnStrategy(aReflowState, true);
+      config.mIsBalancing = false;
     }
 
     bool feasible = ReflowChildren(aDesiredSize, aReflowState,
       aStatus, config, unboundedLastColumn, &carriedOutBottomMargin, colData);
 
-    if (isBalancing && !aPresContext->HasPendingInterrupt()) {
+    if (config.mIsBalancing && !aPresContext->HasPendingInterrupt()) {
       nscoord availableContentHeight = GetAvailableContentHeight(aReflowState);
 
       // Termination of the algorithm below is guaranteed because
@@ -1067,10 +1082,7 @@ nsColumnSetFrame::Reflow(nsPresContext*           aPresContext,
       aStatus = NS_FRAME_COMPLETE;
     }
 
-    // XXXjwir3: This call should be replaced with FinishWithAbsoluteFrames
-    //           when bug 724978 is fixed and nsColumnSetFrame is a full absolute
-    //           container.
-    FinishAndStoreOverflow(&aDesiredSize);
+    FinishReflowWithAbsoluteFrames(aPresContext, aDesiredSize, aReflowState, aStatus, false);
 
     aDesiredSize.mCarriedOutBottomMargin = carriedOutBottomMargin;
 
@@ -1083,12 +1095,11 @@ nsColumnSetFrame::Reflow(nsPresContext*           aPresContext,
   return NS_OK;
 }
 
-NS_IMETHODIMP
+void
 nsColumnSetFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                    const nsRect&           aDirtyRect,
                                    const nsDisplayListSet& aLists) {
-  nsresult rv = DisplayBorderBackgroundOutline(aBuilder, aLists);
-  NS_ENSURE_SUCCESS(rv, rv);
+  DisplayBorderBackgroundOutline(aBuilder, aLists);
 
   aLists.BorderBackground()->AppendNewToTop(new (aBuilder)
       nsDisplayGeneric(aBuilder, this, ::PaintColumnRule, "ColumnRule",
@@ -1096,19 +1107,20 @@ nsColumnSetFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
   
   // Our children won't have backgrounds so it doesn't matter where we put them.
   for (nsFrameList::Enumerator e(mFrames); !e.AtEnd(); e.Next()) {
-    nsresult rv = BuildDisplayListForChild(aBuilder, e.get(),
-                                           aDirtyRect, aLists);
-    NS_ENSURE_SUCCESS(rv, rv);
+    BuildDisplayListForChild(aBuilder, e.get(), aDirtyRect, aLists);
   }
-  return NS_OK;
 }
 
 NS_IMETHODIMP
 nsColumnSetFrame::AppendFrames(ChildListID     aListID,
                                nsFrameList&    aFrameList)
 {
-  NS_NOTREACHED("AppendFrames not supported");
-  return NS_ERROR_NOT_IMPLEMENTED;
+  if (aListID == kAbsoluteList) {
+    return nsContainerFrame::AppendFrames(aListID, aFrameList);
+  }
+
+  NS_ERROR("unexpected child list");
+  return NS_ERROR_INVALID_ARG;
 }
 
 NS_IMETHODIMP
@@ -1116,14 +1128,22 @@ nsColumnSetFrame::InsertFrames(ChildListID     aListID,
                                nsIFrame*       aPrevFrame,
                                nsFrameList&    aFrameList)
 {
-  NS_NOTREACHED("InsertFrames not supported");
-  return NS_ERROR_NOT_IMPLEMENTED;
+  if (aListID == kAbsoluteList) {
+    return nsContainerFrame::InsertFrames(aListID, aPrevFrame, aFrameList);
+  }
+
+  NS_ERROR("unexpected child list");
+  return NS_ERROR_INVALID_ARG;
 }
 
 NS_IMETHODIMP
 nsColumnSetFrame::RemoveFrame(ChildListID     aListID,
                               nsIFrame*       aOldFrame)
 {
-  NS_NOTREACHED("RemoveFrame not supported");
-  return NS_ERROR_NOT_IMPLEMENTED;
+  if (aListID == kAbsoluteList) {
+    return nsContainerFrame::RemoveFrame(aListID, aOldFrame);
+  }
+
+  NS_ERROR("unexpected child list");
+  return NS_ERROR_INVALID_ARG;
 }

@@ -449,8 +449,23 @@ GonkGPSGeolocationProvider::SetReferenceLocation()
     nsCOMPtr<nsIDOMMozMobileICCInfo> iccInfo;
     rilCtx->GetIccInfo(getter_AddRefs(iccInfo));
     if (iccInfo) {
-      iccInfo->GetMcc(&location.u.cellID.mcc);
-      iccInfo->GetMnc(&location.u.cellID.mnc);
+      nsresult result;
+      nsAutoString mcc, mnc;
+
+      iccInfo->GetMcc(mcc);
+      iccInfo->GetMnc(mnc);
+
+      location.u.cellID.mcc = mcc.ToInteger(&result, 10);
+      if (result != NS_OK) {
+        NS_WARNING("Cannot parse mcc to integer");
+        location.u.cellID.mcc = 0;
+      }
+
+      location.u.cellID.mnc = mnc.ToInteger(&result, 10);
+      if (result != NS_OK) {
+        NS_WARNING("Cannot parse mnc to integer");
+        location.u.cellID.mnc = 0;
+      }
     }
     nsCOMPtr<nsIDOMMozMobileConnectionInfo> voice;
     rilCtx->GetVoice(getter_AddRefs(voice));
@@ -550,12 +565,9 @@ GonkGPSGeolocationProvider::SetupAGPS()
   }
 
   // Setup network state listener
-  nsIInterfaceRequestor* ireq = dom::gonk::SystemWorkerManager::GetInterfaceRequestor();
-  if (ireq) {
-    mRIL = do_GetInterface(ireq);
-    if (mRIL) {
-      mRIL->RegisterDataCallCallback(this);
-    }
+  mRIL = do_GetService("@mozilla.org/ril;1");
+  if (mRIL) {
+    mRIL->RegisterDataCallCallback(this);
   }
 
   return;

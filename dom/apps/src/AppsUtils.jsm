@@ -32,6 +32,33 @@ function isAbsoluteURI(aURI) {
          Services.io.newURI(aURI, null, bar).prePath != bar.prePath;
 }
 
+function mozIApplication() {
+}
+
+mozIApplication.prototype = {
+  hasPermission: function(aPermission) {
+    let uri = Services.io.newURI(this.origin, null, null);
+    let secMan = Cc["@mozilla.org/scriptsecuritymanager;1"]
+                   .getService(Ci.nsIScriptSecurityManager);
+    // This helper checks an URI inside |aApp|'s origin and part of |aApp| has a
+    // specific permission. It is not checking if browsers inside |aApp| have such
+    // permission.
+    let principal = secMan.getAppCodebasePrincipal(uri, this.localId,
+                                                   /*mozbrowser*/false);
+    let perm = Services.perms.testExactPermissionFromPrincipal(principal,
+                                                               aPermission);
+    return (perm === Ci.nsIPermissionManager.ALLOW_ACTION);
+  },
+
+  QueryInterface: function(aIID) {
+    if (aIID.equals(Ci.mozIDOMApplication) ||
+        aIID.equals(Ci.mozIApplication) ||
+        aIID.equals(Ci.nsISupports))
+      return this;
+    throw Cr.NS_ERROR_NO_INTERFACE;
+  }
+}
+
 this.AppsUtils = {
   // Clones a app, without the manifest.
   cloneAppObject: function cloneAppObject(aApp) {
@@ -68,27 +95,7 @@ this.AppsUtils = {
 
   cloneAsMozIApplication: function cloneAsMozIApplication(aApp) {
     let res = this.cloneAppObject(aApp);
-    res.hasPermission = function(aPermission) {
-      let uri = Services.io.newURI(this.origin, null, null);
-      let secMan = Cc["@mozilla.org/scriptsecuritymanager;1"]
-                     .getService(Ci.nsIScriptSecurityManager);
-      // This helper checks an URI inside |aApp|'s origin and part of |aApp| has a
-      // specific permission. It is not checking if browsers inside |aApp| have such
-      // permission.
-      let principal = secMan.getAppCodebasePrincipal(uri, aApp.localId,
-                                                     /*mozbrowser*/false);
-      let perm = Services.perms.testExactPermissionFromPrincipal(principal,
-                                                                 aPermission);
-      return (perm === Ci.nsIPermissionManager.ALLOW_ACTION);
-    };
-    res.QueryInterface = function(aIID) {
-      if (aIID.equals(Ci.mozIDOMApplication) ||
-          aIID.equals(Ci.mozIApplication) ||
-          aIID.equals(Ci.nsISupports))
-        return this;
-      throw Cr.NS_ERROR_NO_INTERFACE;
-    }
-
+    res.__proto__ = mozIApplication.prototype;
     return res;
   },
 
@@ -170,8 +177,8 @@ this.AppsUtils = {
   },
 
   /**
-   * from https://developer.mozilla.org/en/OpenWebApps/The_Manifest
-   * only the name property is mandatory
+   * From https://developer.mozilla.org/en/OpenWebApps/The_Manifest
+   * Only the name property is mandatory.
    */
   checkManifest: function(aManifest, app) {
     if (aManifest.name == undefined)
@@ -228,8 +235,13 @@ this.AppsUtils = {
       }
     }
 
-    // Ensure that non-updatable fields contains the current app value
-    AppsUtils.normalizeManifest(aManifest, app);
+    // The 'size' field must be a positive integer.
+    if (aManifest.size) {
+      aManifest.size = parseInt(aManifest.size);
+      if (Number.isNaN(aManifest.size) || aManifest.size < 0) {
+        return false;
+      }
+    }
 
     return true;
   },
@@ -250,33 +262,24 @@ this.AppsUtils = {
    * Method to apply modifications to webapp manifests file saved internally.
    * For now, only ensure app can't rename itself.
    */
-  normalizeManifest: function normalizeManifest(aManifest, aApp) {
-    // As normalizeManifest isn't only called on update but also
-    // during app install, we need to bail out on install.
-    if (aApp.installState != "installed" &&
-        aApp.installState != "updating") {
-      return;
-    }
-
-    let previousManifest = aApp.manifest;
-
+  ensureSameAppName: function ensureSameAppName(aOldManifest, aNewManifest, aApp) {
     // Ensure that app name can't be updated
-    aManifest.name = aApp.name;
+    aNewManifest.name = aApp.name;
 
     // Nor through localized names
-    if ('locales' in aManifest) {
-      let defaultName = new ManifestHelper(aManifest, aApp.origin).name;
-      for (let locale in aManifest.locales) {
-        let entry = aManifest.locales[locale];
+    if ('locales' in aNewManifest) {
+      let defaultName = new ManifestHelper(aOldManifest, aApp.origin).name;
+      for (let locale in aNewManifest.locales) {
+        let entry = aNewManifest.locales[locale];
         if (!entry.name) {
           continue;
         }
         // In case previous manifest didn't had a name,
         // we use the default app name
         let localizedName = defaultName;
-        if (previousManifest && 'locales' in previousManifest &&
-            locale in previousManifest.locales) {
-          localizedName = previousManifest.locales[locale].name;
+        if (aOldManifest && 'locales' in aOldManifest &&
+            locale in aOldManifest.locales) {
+          localizedName = aOldManifest.locales[locale].name;
         }
         entry.name = localizedName;
       }

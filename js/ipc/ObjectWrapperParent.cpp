@@ -145,14 +145,7 @@ const js::Class ObjectWrapperParent::sCPOW_JSClass = {
       ObjectWrapperParent::CPOW_Call,
       ObjectWrapperParent::CPOW_HasInstance,
       ObjectWrapperParent::CPOW_Construct,
-      nullptr, // trace
-      {
-          ObjectWrapperParent::CPOW_Equality,
-          nullptr, // outerObject
-          nullptr, // innerObject
-          nullptr, // iteratorObject
-          nullptr, // wrappedObject
-    }
+      nullptr // trace
 };
 
 void
@@ -316,7 +309,7 @@ jsval_from_PObjectWrapperParent(JSContext* cx,
                                 const PObjectWrapperParent* from,
                                 jsval* to)
 {
-    js::RootedObject obj(cx);
+    JS::RootedObject obj(cx);
     if (!JSObject_from_PObjectWrapperParent(cx, from, &obj))
         return false;
     *to = OBJECT_TO_JSVAL(obj);
@@ -573,7 +566,7 @@ ObjectWrapperParent::CPOW_NewResolve(JSContext *cx, JSHandleObject obj, JSHandle
 
     if (objp) {
         AutoResolveFlag arf(objp);
-        js::RootedObject obj2(cx, objp);
+        JS::RootedObject obj2(cx, objp);
         JS_DefinePropertyById(cx, obj2, id, JSVAL_VOID, NULL, NULL,
                               JSPROP_ENUMERATE);
     }
@@ -698,28 +691,4 @@ ObjectWrapperParent::CPOW_HasInstance(JSContext *cx, JSHandleObject obj, JSMutab
             self->CallHasInstance(in_v,
                                   aco.StatusPtr(), bp) &&
             aco.Ok());
-}
-
-/*static*/ JSBool
-ObjectWrapperParent::CPOW_Equality(JSContext *cx, JSHandleObject obj, JSHandleValue v,
-                                   JSBool *bp)
-{
-    CPOW_LOG(("Calling CPOW_Equality..."));
-
-    *bp = JS_FALSE;
-    
-    ObjectWrapperParent* self = Unwrap(cx, obj);
-    if (!self)
-        return with_error(cx, JS_FALSE, "Unwrapping failed in CPOW_Equality");
-
-    if (JSVAL_IS_PRIMITIVE(v))
-        return JS_TRUE;
-
-    ObjectWrapperParent* other = Unwrap(cx, JSVAL_TO_OBJECT(v));
-    if (!other)
-        return JS_TRUE;
-
-    *bp = (self == other);
-    
-    return JS_TRUE;
 }

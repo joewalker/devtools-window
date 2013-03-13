@@ -38,6 +38,12 @@ class LIRGenerator : public LIRGeneratorSpecific
     // The maximum depth, for framesizeclass determination.
     uint32_t maxargslots_;
 
+#ifdef DEBUG
+    // In debug builds, check MPrepareCall and MCall are properly
+    // nested. The argslots_ mechanism relies on this.
+    Vector<MPrepareCall *, 4, SystemAllocPolicy> prepareCallStack_;
+#endif
+
   public:
     LIRGenerator(MIRGenerator *gen, MIRGraph &graph, LIRGraph &lirGraph)
       : LIRGeneratorSpecific(gen, graph, lirGraph),
@@ -79,13 +85,19 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitGoto(MGoto *ins);
     bool visitTableSwitch(MTableSwitch *tableswitch);
     bool visitNewSlots(MNewSlots *ins);
+    bool visitNewParallelArray(MNewParallelArray *ins);
     bool visitNewArray(MNewArray *ins);
     bool visitNewObject(MNewObject *ins);
     bool visitNewDeclEnvObject(MNewDeclEnvObject *ins);
     bool visitNewCallObject(MNewCallObject *ins);
     bool visitNewStringObject(MNewStringObject *ins);
+    bool visitParNew(MParNew *ins);
+    bool visitParNewCallObject(MParNewCallObject *ins);
+    bool visitParNewDenseArray(MParNewDenseArray *ins);
+    bool visitParBailout(MParBailout *ins);
     bool visitInitProp(MInitProp *ins);
     bool visitCheckOverRecursed(MCheckOverRecursed *ins);
+    bool visitParCheckOverRecursed(MParCheckOverRecursed *ins);
     bool visitDefVar(MDefVar *ins);
     bool visitDefFun(MDefFun *ins);
     bool visitPrepareCall(MPrepareCall *ins);
@@ -96,6 +108,9 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitReturnFromCtor(MReturnFromCtor *ins);
     bool visitCall(MCall *call);
     bool visitApplyArgs(MApplyArgs *apply);
+    bool visitGetDynamicName(MGetDynamicName *ins);
+    bool visitFilterArguments(MFilterArguments *ins);
+    bool visitCallDirectEval(MCallDirectEval *ins);
     bool visitTest(MTest *test);
     bool visitPolyInlineDispatch(MPolyInlineDispatch *ins);
     bool visitCompare(MCompare *comp);
@@ -136,6 +151,7 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitRegExp(MRegExp *ins);
     bool visitRegExpTest(MRegExpTest *ins);
     bool visitLambda(MLambda *ins);
+    bool visitParLambda(MParLambda *ins);
     bool visitImplicitThis(MImplicitThis *ins);
     bool visitSlots(MSlots *ins);
     bool visitElements(MElements *ins);
@@ -143,6 +159,10 @@ class LIRGenerator : public LIRGeneratorSpecific
     bool visitConvertElementsToDoubles(MConvertElementsToDoubles *ins);
     bool visitLoadSlot(MLoadSlot *ins);
     bool visitFunctionEnvironment(MFunctionEnvironment *ins);
+    bool visitParSlice(MParSlice *ins);
+    bool visitParWriteGuard(MParWriteGuard *ins);
+    bool visitParCheckInterrupt(MParCheckInterrupt *ins);
+    bool visitParDump(MParDump *ins);
     bool visitStoreSlot(MStoreSlot *ins);
     bool visitTypeBarrier(MTypeBarrier *ins);
     bool visitMonitorTypes(MMonitorTypes *ins);

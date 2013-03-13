@@ -124,7 +124,7 @@ mjit::Compiler::Compiler(JSContext *cx, JSScript *outerScript,
         /* Once a script starts getting really hot we will inline calls in it. */
         if (!debugMode() && cx->typeInferenceEnabled() && globalObj &&
             (outerScript->getUseCount() >= USES_BEFORE_INLINING ||
-             cx->hasRunOption(JSOPTION_METHODJIT_ALWAYS))) {
+             cx->hasOption(JSOPTION_METHODJIT_ALWAYS))) {
             inlining_ = true;
         }
     }
@@ -358,8 +358,10 @@ mjit::Compiler::scanInlineCalls(uint32_t index, uint32_t depth)
                 break;
             }
 
-            if (types::HeapTypeSet::HasObjectFlags(cx, fun->getType(cx),
-                                                   types::OBJECT_FLAG_UNINLINEABLE)) {
+            types::TypeObject *funType = fun->getType(cx);
+            if (!funType ||
+                types::HeapTypeSet::HasObjectFlags(cx, funType, types::OBJECT_FLAG_UNINLINEABLE))
+            {
                 okay = false;
                 break;
             }
@@ -369,7 +371,7 @@ mjit::Compiler::scanInlineCalls(uint32_t index, uint32_t depth)
              * the outer script will be recompiled if any type information
              * changes in stack values within the callee.
              */
-            types::HeapTypeSet::WatchObjectStateChange(cx, fun->getType(cx));
+            types::HeapTypeSet::WatchObjectStateChange(cx, funType);
 
             /*
              * Don't inline scripts which use 'this' if it is possible they
@@ -522,12 +524,12 @@ mjit::Compiler::performCompilation()
 {
     JaegerSpew(JSpew_Scripts,
                "compiling script (file \"%s\") (line \"%d\") (length \"%d\") (chunk \"%d\") (usecount \"%d\")\n",
-               outerScript->filename, outerScript->lineno, outerScript->length, chunkIndex, (int) outerScript->getUseCount());
+               outerScript->filename(), outerScript->lineno, outerScript->length, chunkIndex, (int) outerScript->getUseCount());
 
     if (inlining()) {
         JaegerSpew(JSpew_Inlining,
                    "inlining calls in script (file \"%s\") (line \"%d\")\n",
-                   outerScript->filename, outerScript->lineno);
+                   outerScript->filename(), outerScript->lineno);
     }
 
 #ifdef JS_METHODJIT_SPEW
@@ -1020,7 +1022,7 @@ mjit::CanMethodJIT(JSContext *cx, JSScript *script, jsbytecode *pc,
             return Compile_Abort;
     }
 
-    if (!cx->hasRunOption(JSOPTION_METHODJIT_ALWAYS) &&
+    if (!cx->hasOption(JSOPTION_METHODJIT_ALWAYS) &&
         (cx->typeInferenceEnabled()
          ? script->incUseCount() <= INFER_USES_BEFORE_COMPILE
          : script->incUseCount() <= USES_BEFORE_COMPILE))
@@ -1082,7 +1084,7 @@ mjit::CanMethodJIT(JSContext *cx, JSScript *script, jsbytecode *pc,
     if (compiledOnce)
         return Compile_Skipped;
 
-    if (!cx->hasRunOption(JSOPTION_METHODJIT_ALWAYS) &&
+    if (!cx->hasOption(JSOPTION_METHODJIT_ALWAYS) &&
         ++desc.counter <= INFER_USES_BEFORE_COMPILE)
     {
         return Compile_Skipped;
@@ -1140,6 +1142,10 @@ mjit::Compiler::generatePrologue()
         /* Store this early on so slow paths can access it. */
         masm.storePtr(ImmPtr(script_->function()),
                       Address(JSFrameReg, StackFrame::offsetOfExec()));
+        if (script_->isCallsiteClone) {
+            masm.storeValue(ObjectValue(*script_->function()),
+                            Address(JSFrameReg, StackFrame::offsetOfCallee(script_->function())));
+        }
 
         {
             /*
@@ -2815,6 +2821,10 @@ mjit::Compiler::generateMethod()
           BEGIN_CASE(JSOP_NULL)
             frame.push(NullValue());
           END_CASE(JSOP_NULL)
+
+          BEGIN_CASE(JSOP_CALLEE)
+            frame.pushCallee();
+          END_CASE(JSOP_CALLEE)
 
           BEGIN_CASE(JSOP_THIS)
             jsop_this();
@@ -4647,7 +4657,7 @@ mjit::Compiler::inlineScriptedFunction(uint32_t argc, bool callingNew)
             JSScript *script_ = ssa.iterFrame(i).script;
 
             /* Don't inline if any of the callees should be cloned at callsite. */
-            if (script_->function()->isCloneAtCallsite())
+            if (script_->shouldCloneAtCallsite)
                 return Compile_InlineAbort;
 
             inlineCallees.append(script_);
@@ -4726,7 +4736,7 @@ mjit::Compiler::inlineScriptedFunction(uint32_t argc, bool callingNew)
         a->exitState = exitState;
 
         JaegerSpew(JSpew_Inlining, "inlining call to script (file \"%s\") (line \"%d\")\n",
-                   script->filename, script->lineno);
+                   script->filename(), script->lineno);
 
         if (calleePrevious.isSet()) {
             calleePrevious.get().linkTo(masm.label(), &masm);
@@ -4811,7 +4821,7 @@ mjit::Compiler::inlineScriptedFunction(uint32_t argc, bool callingNew)
     }
 
     JaegerSpew(JSpew_Inlining, "finished inlining call to script (file \"%s\") (line \"%d\")\n",
-               script_->filename, script_->lineno);
+               script_->filename(), script_->lineno);
 
     if (sps.enabled()) {
         RegisterID reg = frame.allocReg();
@@ -5509,6 +5519,7 @@ mjit::Compiler::jsop_getprop_dispatch(HandlePropertyName name)
      * accessed id and that its prototype does have such a property.
      */
     uint32_t last = 0;
+    Rooted<JSObject*> proto(cx);
     for (unsigned i = 0; i < objTypes->getObjectCount(); i++) {
         if (objTypes->getSingleObject(i) != NULL)
             return false;
@@ -5523,11 +5534,14 @@ mjit::Compiler::jsop_getprop_dispatch(HandlePropertyName name)
         if (ownTypes->isOwnProperty(cx, object, false))
             return false;
 
-        Rooted<JSObject*> proto(cx, object->proto);
+        proto = object->proto;
         if (!testSingletonProperty(proto, id))
             return false;
 
-        if (proto->getType(cx)->unknownProperties())
+        types::TypeObject *protoType = proto->getType(cx);
+        if (!protoType)
+            return false;
+        if (protoType->unknownProperties())
             return false;
         types::HeapTypeSet *protoTypes = proto->type()->getProperty(cx, id, false);
         if (!protoTypes)
@@ -6085,7 +6099,7 @@ mjit::Compiler::jsop_aliasedVar(ScopeCoordinate sc, bool get, bool poppedAfter)
     for (unsigned i = 0; i < sc.hops; i++)
         masm.loadPayload(Address(reg, ScopeObject::offsetOfEnclosingScope()), reg);
 
-    UnrootedShape shape = ScopeCoordinateToStaticScopeShape(cx, script_, PC);
+    RawShape shape = ScopeCoordinateToStaticScopeShape(cx, script_, PC);
     Address addr;
     if (shape->numFixedSlots() <= sc.slot) {
         masm.loadPtr(Address(reg, JSObject::offsetOfSlots()), reg);
@@ -6494,8 +6508,6 @@ mjit::Compiler::jsop_bindgname()
 bool
 mjit::Compiler::jsop_getgname(uint32_t index)
 {
-    AssertCanGC();
-
     /* Optimize undefined, NaN and Infinity. */
     PropertyName *name = script_->getName(index);
     if (name == cx->names().undefined) {
@@ -6523,9 +6535,16 @@ mjit::Compiler::jsop_getgname(uint32_t index)
 
     RootedId id(cx, NameToId(name));
     JSValueType type = knownPushedType(0);
-    if (cx->typeInferenceEnabled() && globalObj->isGlobal() && id == types::IdToTypeId(id) &&
-        !globalObj->getType(cx)->unknownProperties()) {
-        types::HeapTypeSet *propertyTypes = globalObj->getType(cx)->getProperty(cx, id, false);
+
+    types::TypeObject *globalType = NULL;
+    if (cx->typeInferenceEnabled() && globalObj->isGlobal() && id == types::IdToTypeId(id)) {
+        globalType = globalObj->getType(cx);
+        if (globalType && globalType->unknownProperties())
+            globalType = NULL;
+    }
+
+    if (globalType) {
+        types::HeapTypeSet *propertyTypes = globalType->getProperty(cx, id, false);
         if (!propertyTypes)
             return false;
 
@@ -6535,12 +6554,12 @@ mjit::Compiler::jsop_getgname(uint32_t index)
          * reallocation of the global object's slots.
          */
         RootedId id(cx, NameToId(name));
-        UnrootedShape shape = globalObj->nativeLookup(cx, id);
+        RawShape shape = globalObj->nativeLookup(cx, id);
         if (shape && shape->hasDefaultGetter() && shape->hasSlot()) {
-            HeapSlot *value = &globalObj->getSlotRef(DropUnrooted(shape)->slot());
-            if (!value->isUndefined() &&
-                !propertyTypes->isOwnProperty(cx, globalObj->getType(cx), true)) {
-                watchGlobalReallocation();
+            HeapSlot *value = &globalObj->getSlotRef(shape->slot());
+            if (!value->isUndefined() && !propertyTypes->isOwnProperty(cx, globalType, true)) {
+                if (!watchGlobalReallocation())
+                    return false;
                 RegisterID reg = frame.allocReg();
                 masm.move(ImmPtr(value), reg);
 
@@ -6650,24 +6669,31 @@ mjit::Compiler::jsop_setgname(HandlePropertyName name, bool popGuaranteed)
     }
 
     RootedId id(cx, NameToId(name));
-    if (cx->typeInferenceEnabled() && globalObj->isGlobal() && id == types::IdToTypeId(id) &&
-        !globalObj->getType(cx)->unknownProperties()) {
+    types::TypeObject *globalType = NULL;
+    if (cx->typeInferenceEnabled() && globalObj->isGlobal() && id == types::IdToTypeId(id)) {
+        globalType = globalObj->getType(cx);
+        if (globalType && globalType->unknownProperties())
+            globalType = NULL;
+    }
+
+    if (globalType) {
         /*
          * Note: object branding is disabled when inference is enabled. With
          * branding there is no way to ensure that a non-function property
          * can't get a function later and cause the global object to become
          * branded, requiring a shape change if it changes again.
          */
-        types::HeapTypeSet *types = globalObj->getType(cx)->getProperty(cx, id, false);
+        types::HeapTypeSet *types = globalType->getProperty(cx, id, false);
         if (!types)
             return false;
         RootedId id(cx, NameToId(name));
         RootedShape shape(cx, globalObj->nativeLookup(cx, id));
         if (shape && shape->hasDefaultSetter() &&
             shape->writable() && shape->hasSlot() &&
-            !types->isOwnProperty(cx, globalObj->getType(cx), true))
+            !types->isOwnProperty(cx, globalType, true))
         {
-            watchGlobalReallocation();
+            if (!watchGlobalReallocation())
+                return false;
             HeapSlot *value = &globalObj->getSlotRef(shape->slot());
             RegisterID reg = frame.allocReg();
 #ifdef JSGC_INCREMENTAL_MJ
@@ -6968,7 +6994,8 @@ mjit::Compiler::jsop_newinit()
         !type ||
         (isArray && count > maxArraySlots) ||
         (!isArray && !baseobj) ||
-        (!isArray && baseobj->hasDynamicSlots())) {
+        (!isArray && baseobj->hasDynamicSlots()))
+    {
         prepareStubCall(Uses(0));
         masm.storePtr(ImmPtr(type), FrameAddress(offsetof(VMFrame, scratch)));
         masm.move(ImmPtr(stubArg), Registers::ArgReg1);
@@ -6984,7 +7011,7 @@ mjit::Compiler::jsop_newinit()
         templateObject = NewDenseUnallocatedArray(cx, count);
         types::StackTypeSet::DoubleConversion conversion =
             script->analysis()->pushedTypes(PC, 0)->convertDoubleElements(cx);
-        if (conversion == types::StackTypeSet::AlwaysConvertToDoubles)
+        if (templateObject && conversion == types::StackTypeSet::AlwaysConvertToDoubles)
             templateObject->setShouldConvertDoubleElements();
     } else {
         templateObject = CopyInitializerObject(cx, baseobj);
@@ -7017,12 +7044,17 @@ mjit::Compiler::jsop_regexp()
     JSObject *obj = script_->getRegExp(GET_UINT32_INDEX(PC));
     RegExpStatics *res = globalObj ? globalObj->getRegExpStatics() : NULL;
 
+    types::TypeObject *globalType;
+    if (globalObj) {
+        globalType = globalObj->getType(cx);
+        if (!globalType)
+            return false;
+    }
     if (!globalObj ||
         &obj->global() != globalObj ||
         !cx->typeInferenceEnabled() ||
         analysis->localsAliasStack() ||
-        types::HeapTypeSet::HasObjectFlags(cx, globalObj->getType(cx),
-                                           types::OBJECT_FLAG_REGEXP_FLAGS_SET))
+        types::HeapTypeSet::HasObjectFlags(cx, globalType, types::OBJECT_FLAG_REGEXP_FLAGS_SET))
     {
         prepareStubCall(Uses(0));
         masm.move(ImmPtr(obj), Registers::ArgReg1);
@@ -7407,7 +7439,7 @@ mjit::Compiler::leaveBlock()
 //   GETPROP "prototype"
 //   IFPRIMTOP:
 //       NULL
-//   call js_CreateThisFromFunctionWithProto(...)
+//   call CreateThisFromFunctionWithProto(...)
 //
 bool
 mjit::Compiler::constructThis()
@@ -7418,14 +7450,19 @@ mjit::Compiler::constructThis()
 
     do {
         if (!cx->typeInferenceEnabled() ||
-            !fun->hasSingletonType() ||
-            fun->getType(cx)->unknownProperties())
+            !fun->hasSingletonType())
         {
             break;
         }
 
+        types::TypeObject *funType = fun->getType(cx);
+        if (!funType)
+            return false;
+        if (funType->unknownProperties())
+            break;
+
         Rooted<jsid> id(cx, NameToId(cx->names().classPrototype));
-        types::HeapTypeSet *protoTypes = fun->getType(cx)->getProperty(cx, HandleId(id), false);
+        types::HeapTypeSet *protoTypes = funType->getProperty(cx, HandleId(id), false);
 
         JSObject *proto = protoTypes->getSingleton(cx);
         if (!proto)
@@ -7442,7 +7479,7 @@ mjit::Compiler::constructThis()
         if (!types::TypeScript::ThisTypes(script_)->hasType(types::Type::ObjectType(type)))
             break;
 
-        JSObject *templateObject = js_CreateThisForFunctionWithProto(cx, fun, proto);
+        JSObject *templateObject = CreateThisForFunctionWithProto(cx, fun, proto);
         if (!templateObject)
             return false;
 
@@ -7754,14 +7791,18 @@ mjit::Compiler::fixDoubleTypes(jsbytecode *target)
     }
 }
 
-void
+bool
 mjit::Compiler::watchGlobalReallocation()
 {
     JS_ASSERT(cx->typeInferenceEnabled());
     if (hasGlobalReallocation)
-        return;
-    types::HeapTypeSet::WatchObjectStateChange(cx, globalObj->getType(cx));
+        return true;
+    types::TypeObject *globalType = globalObj->getType(cx);
+    if (!globalType)
+        return false;
+    types::HeapTypeSet::WatchObjectStateChange(cx, globalType);
     hasGlobalReallocation = true;
+    return true;
 }
 
 void
@@ -7952,8 +7993,6 @@ mjit::Compiler::BarrierState
 mjit::Compiler::pushAddressMaybeBarrier(Address address, JSValueType type, bool reuseBase,
                                         bool testUndefined)
 {
-    AssertCanGC();
-
     if (!hasTypeBarriers(PC) && !testUndefined) {
         frame.push(address, type, reuseBase);
         return BarrierState();

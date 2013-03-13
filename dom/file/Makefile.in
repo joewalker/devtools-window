@@ -11,7 +11,6 @@ include $(DEPTH)/config/autoconf.mk
 
 MODULE           = dom
 LIBRARY_NAME     = domfile_s
-XPIDL_MODULE     = dom_file
 LIBXUL_LIBRARY   = 1
 FORCE_STATIC_LIB = 1
 ifndef _MSC_VER
@@ -60,20 +59,5 @@ EXPORTS_mozilla/dom/file = \
   ArchiveRequest.h \
   $(NULL)
 
-XPIDLSRCS = \
-  nsIDOMFileHandle.idl \
-  nsIDOMFileRequest.idl \
-  nsIDOMLockedFile.idl \
-  nsIDOMArchiveReader.idl \
-  nsIDOMArchiveRequest.idl \
-  $(NULL)
-
-TEST_DIRS += test
-
 include $(topsrcdir)/config/rules.mk
 
-XPIDL_FLAGS += \
-  -I$(topsrcdir)/dom/base \
-  -I$(topsrcdir)/dom/interfaces/base \
-  -I$(topsrcdir)/dom/interfaces/events \
-  $(NULL)

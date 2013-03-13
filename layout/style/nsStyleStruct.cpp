@@ -15,22 +15,16 @@
 #include "nsString.h"
 #include "nsPresContext.h"
 #include "nsIWidget.h"
-#include "nsIStyleRule.h"
 #include "nsCRTGlue.h"
 #include "nsCSSProps.h"
 
 #include "nsCOMPtr.h"
-#include "nsIFrame.h"
-#include "nsHTMLReflowState.h"
-#include "prenv.h"
 
-#include "nsSVGUtils.h"
 #include "nsBidiUtils.h"
 #include "nsLayoutUtils.h"
 
 #include "imgIRequest.h"
 #include "imgIContainer.h"
-#include "prlog.h"
 
 #include "mozilla/Likely.h"
 #include <algorithm>
@@ -1009,8 +1003,7 @@ nsChangeHint nsStyleSVGReset::CalcDifference(const nsStyleSVGReset& aOther) cons
     NS_UpdateHint(hint, nsChangeHint_AllReflowHints);
     NS_UpdateHint(hint, nsChangeHint_RepaintFrame);
   } else if (mDominantBaseline != aOther.mDominantBaseline) {
-    NS_UpdateHint(hint, nsChangeHint_NeedReflow);
-    NS_UpdateHint(hint, nsChangeHint_NeedDirtyReflow);
+    NS_UpdateHint(hint, NS_STYLE_HINT_REFLOW);
   } else if (mStopColor     != aOther.mStopColor     ||
              mFloodColor    != aOther.mFloodColor    ||
              mLightingColor != aOther.mLightingColor ||
@@ -1375,25 +1368,6 @@ nsStyleGradient::HasCalc()
   }
   return mBgPosX.IsCalcUnit() || mBgPosY.IsCalcUnit() || mAngle.IsCalcUnit() ||
          mRadiusX.IsCalcUnit() || mRadiusX.IsCalcUnit();
-}
-
-uint32_t
-nsStyleGradient::Hash(PLDHashNumber aHash)
-{
-  aHash = mozilla::AddToHash(aHash, mShape);
-  aHash = mozilla::AddToHash(aHash, mSize);
-  aHash = mozilla::AddToHash(aHash, mRepeating);
-  aHash = mozilla::AddToHash(aHash, mLegacySyntax);
-  aHash = mBgPosX.HashValue(aHash);
-  aHash = mBgPosY.HashValue(aHash);
-  aHash = mAngle.HashValue(aHash);
-  aHash = mRadiusX.HashValue(aHash);
-  aHash = mRadiusY.HashValue(aHash);
-  for (uint32_t i = 0; i < mStops.Length(); i++) {
-    aHash = mStops[i].mLocation.HashValue(aHash);
-    aHash = mozilla::AddToHash(aHash, mStops[i].mColor);
-  }
-  return aHash;
 }
 
 // --------------------

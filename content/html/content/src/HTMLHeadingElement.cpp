@@ -13,7 +13,6 @@
 #include "nsRuleData.h"
 #include "mozAutoDocUpdate.h"
 
-DOMCI_NODE_DATA(HTMLHeadingElement, mozilla::dom::HTMLHeadingElement)
 NS_IMPL_NS_NEW_HTML_ELEMENT(Heading)
 
 namespace mozilla {
@@ -32,15 +31,15 @@ NS_INTERFACE_TABLE_HEAD(HTMLHeadingElement)
                                    nsIDOMHTMLHeadingElement)
   NS_HTML_CONTENT_INTERFACE_TABLE_TO_MAP_SEGUE(HTMLHeadingElement,
                                                nsGenericHTMLElement)
-NS_HTML_CONTENT_INTERFACE_TABLE_TAIL_CLASSINFO(HTMLHeadingElement)
+NS_HTML_CONTENT_INTERFACE_MAP_END
 
 
 NS_IMPL_ELEMENT_CLONE(HTMLHeadingElement)
 
 JSObject*
-HTMLHeadingElement::WrapNode(JSContext *aCx, JSObject *aScope, bool *aTriedToWrap)
+HTMLHeadingElement::WrapNode(JSContext *aCx, JSObject *aScope)
 {
-  return HTMLHeadingElementBinding::Wrap(aCx, aScope, this, aTriedToWrap);
+  return HTMLHeadingElementBinding::Wrap(aCx, aScope, this);
 }
 
 NS_IMPL_STRING_ATTR(HTMLHeadingElement, Align, align)

@@ -19,11 +19,15 @@ XPCOMUtils.defineLazyModuleGetter(this, "CommandUtils",
 
 XPCOMUtils.defineLazyGetter(this, "toolboxStrings", function() {
   let bundle = Services.strings.createBundle("chrome://browser/locale/devtools/toolbox.properties");
-  let l10n = function(name) {
+  let l10n = function(aName, ...aArgs) {
     try {
-      return bundle.GetStringFromName(name);
+      if (aArgs.length == 0) {
+        return bundle.GetStringFromName(aName);
+      } else {
+        return bundle.formatStringFromName(aName, aArgs, aArgs.length);
+      }
     } catch (ex) {
-      Services.console.logStringMessage("Error reading '" + name + "'");
+      Services.console.logStringMessage("Error reading '" + aName + "'");
     }
   };
   return l10n;
@@ -122,7 +126,7 @@ this.Toolbox = function Toolbox(target, selectedTool, hostType) {
   this._toolUnregistered = this._toolUnregistered.bind(this);
   this.destroy = this.destroy.bind(this);
 
-  this._target.once("close", this.destroy);
+  this._target.on("close", this.destroy);
 
   if (!hostType) {
     hostType = Services.prefs.getCharPref(this._prefs.LAST_HOST);
@@ -139,6 +143,11 @@ this.Toolbox = function Toolbox(target, selectedTool, hostType) {
   this._host = this._createHost(hostType);
 
   EventEmitter.decorate(this);
+
+  this._refreshHostTitle = this._refreshHostTitle.bind(this);
+  this._target.on("navigate", this._refreshHostTitle);
+  this.on("host-changed", this._refreshHostTitle);
+  this.on("select", this._refreshHostTitle);
 
   gDevTools.on("tool-registered", this._toolRegistered);
   gDevTools.on("tool-unregistered", this._toolUnregistered);
@@ -423,11 +432,12 @@ Toolbox.prototype = {
    *        The id of the tool to switch to
    */
   selectTool: function TBOX_selectTool(id) {
-    if (this._currentToolId == id) {
-      return;
-    }
-
     let deferred = Promise.defer();
+
+    if (this._currentToolId == id) {
+      // Return the existing panel in order to have a consistent return value.
+      return Promise.resolve(this._toolPanels.get(id));
+    }
 
     if (!this.isReady) {
       throw new Error("Can't select tool, wait for toolbox 'ready' event");
@@ -465,6 +475,7 @@ Toolbox.prototype = {
       iframe.className = "toolbox-panel-iframe";
       iframe.id = "toolbox-panel-iframe-" + id;
       iframe.setAttribute("flex", 1);
+      iframe.setAttribute("forceOwnRefreshDriver", "");
 
       let vbox = this.doc.getElementById("toolbox-panel-" + id);
       vbox.appendChild(iframe);
@@ -506,6 +517,24 @@ Toolbox.prototype = {
    */
   raise: function TBOX_raise() {
     this._host.raise();
+  },
+
+  /**
+   * Refresh the host's title.
+   */
+  _refreshHostTitle: function TBOX_refreshHostTitle() {
+    let toolName;
+    let toolId = this.currentToolId;
+    if (toolId) {
+      let toolDef = gDevTools.getToolDefinitionMap().get(toolId);
+      toolName = toolDef.label;
+    } else {
+      // no tool is selected
+      toolName = toolboxStrings("toolbox.defaultTitle");
+    }
+    let title = toolboxStrings("toolbox.titleTemplate",
+                               toolName, this.target.url);
+    this._host.setTitle(title);
   },
 
   /**
@@ -648,14 +677,20 @@ Toolbox.prototype = {
     if (this._destroyer) {
       return this._destroyer;
     }
+    // Assign the "_destroyer" property before calling the other
+    // destroyer methods to guarantee that the Toolbox's destroy
+    // method is only executed once.
+    let deferred = Promise.defer();
+    this._destroyer = deferred.promise;
+
+    this._target.off("navigate", this._refreshHostTitle);
+    this.off("select", this._refreshHostTitle);
+    this.off("host-changed", this._refreshHostTitle);
+
+    gDevTools.off("tool-registered", this._toolRegistered);
+    gDevTools.off("tool-unregistered", this._toolUnregistered);
 
     let outstanding = [];
-
-    // Remote targets need to be notified that the toolbox is being torn down.
-    if (this._target && this._target.isRemote) {
-      outstanding.push(this._target.destroy());
-    }
-    this._target = null;
 
     for (let [id, panel] of this._toolPanels) {
       outstanding.push(panel.destroy());
@@ -663,18 +698,19 @@ Toolbox.prototype = {
 
     outstanding.push(this._host.destroy());
 
-    gDevTools.off("tool-registered", this._toolRegistered);
-    gDevTools.off("tool-unregistered", this._toolUnregistered);
+    // Targets need to be notified that the toolbox is being torn down, so that
+    // remote protocol connections can be gracefully terminated.
+    if (this._target) {
+      this._target.off("close", this.destroy);
+      outstanding.push(this._target.destroy());
+    }
+    this._target = null;
 
-    this._destroyer = Promise.all(outstanding);
-    this._destroyer.then(function() {
+    Promise.all(outstanding).then(function() {
       this.emit("destroyed");
+      deferred.resolve();
     }.bind(this));
 
-    return this._destroyer.then(function() {
-      // Ensure that the promise resolves to nothing, rather than an array of
-      // several nothings, which is what we get from Promise.all
-      return undefined;
-    });
+    return this._destroyer;
   }
 };

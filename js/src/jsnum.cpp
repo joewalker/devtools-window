@@ -720,9 +720,9 @@ num_toLocaleString_impl(JSContext *cx, CallArgs args)
         strcpy(tmpDest, nint);
     }
 
-    if (cx->localeCallbacks && cx->localeCallbacks->localeToUnicode) {
+    if (cx->runtime->localeCallbacks && cx->runtime->localeCallbacks->localeToUnicode) {
         Rooted<Value> v(cx, StringValue(str));
-        bool ok = !!cx->localeCallbacks->localeToUnicode(cx, buf, v.address());
+        bool ok = !!cx->runtime->localeCallbacks->localeToUnicode(cx, buf, v.address());
         if (ok)
             args.rval().set(v);
         js_free(buf);
@@ -1028,7 +1028,7 @@ js::InitRuntimeNumberState(JSRuntime *rt)
 
     /*
      * Our NaN must be one particular canonical value, because we rely on NaN
-     * encoding for our value representation.  See jsval.h.
+     * encoding for our value representation.  See Value.h.
      */
     d = MOZ_DOUBLE_SPECIFIC_NaN(0, 0x8000000000000ULL);
     number_constants[NC_NaN].dval = js_NaN = d;
@@ -1329,7 +1329,6 @@ js::NumberValueToStringBuffer(JSContext *cx, const Value &v, StringBuffer &sb)
 JS_PUBLIC_API(bool)
 js::ToNumberSlow(JSContext *cx, Value v, double *out)
 {
-    AssertCanGC();
 #ifdef DEBUG
     /*
      * MSVC bizarrely miscompiles this, complaining about the first brace below
@@ -1375,8 +1374,10 @@ js::ToNumberSlow(JSContext *cx, Value v, double *out)
             break;
 
         JS_ASSERT(v.isObject());
-        if (!ToPrimitive(cx, JSTYPE_NUMBER, &v))
+        RootedValue v2(cx, v);
+        if (!ToPrimitive(cx, JSTYPE_NUMBER, &v2))
             return false;
+        v = v2;
         if (v.isObject())
             break;
     }

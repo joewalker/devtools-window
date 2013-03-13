@@ -13,50 +13,6 @@ VPATH		= @srcdir@
 include $(DEPTH)/config/autoconf.mk
 
 MODULE		= dom
-XPIDL_MODULE	= dom_svg
-
-XPIDLSRCS	= \
-		nsIDOMGetSVGDocument.idl \
-		nsIDOMSVGAElement.idl \
-		nsIDOMSVGAnimatedEnum.idl \
-		nsIDOMSVGAnimatedInteger.idl \
-		nsIDOMSVGAnimatedLength.idl \
-		nsIDOMSVGAnimatedNumber.idl \
-		nsIDOMSVGAnimatedRect.idl \
-		nsIDOMSVGAnimatedString.idl \
-		nsIDOMSVGClipPathElement.idl \
-		nsIDOMSVGDocument.idl \
-		nsIDOMSVGElement.idl \
-		nsIDOMSVGEvent.idl \
-		nsIDOMSVGFilterElement.idl \
-		nsIDOMSVGFilters.idl \
-		nsIDOMSVGImageElement.idl \
-		nsIDOMSVGLength.idl \
-		nsIDOMSVGMarkerElement.idl \
-		nsIDOMSVGMaskElement.idl \
-		nsIDOMSVGNumber.idl \
-		nsIDOMSVGRect.idl \
-		nsIDOMSVGSVGElement.idl \
-		nsIDOMSVGStringList.idl \
-		nsIDOMSVGSwitchElement.idl \
-		nsIDOMSVGSymbolElement.idl \
-		nsIDOMSVGTextContentElement.idl \
-		nsIDOMSVGTextElement.idl \
-		nsIDOMSVGTextPathElement.idl \
-		nsIDOMSVGTextPositionElem.idl \
-		nsIDOMSVGTitleElement.idl \
-		nsIDOMSVGTSpanElement.idl \
-		nsIDOMSVGURIReference.idl \
-		nsIDOMSVGUnitTypes.idl \
-		nsIDOMSVGUseElement.idl \
-		nsIDOMSVGViewElement.idl \
-		nsIDOMSVGZoomEvent.idl \
-		$(NULL)
 
 include $(topsrcdir)/config/rules.mk
 
-XPIDL_FLAGS += \
-  -I$(topsrcdir)/dom/interfaces/base \
-  -I$(topsrcdir)/dom/interfaces/core \
-  -I$(topsrcdir)/dom/interfaces/events \
-  $(NULL)

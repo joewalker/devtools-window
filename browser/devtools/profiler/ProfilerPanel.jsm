@@ -6,18 +6,22 @@
 
 const Cu = Components.utils;
 
+Cu.import("resource:///modules/devtools/gDevTools.jsm");
 Cu.import("resource:///modules/devtools/ProfilerController.jsm");
 Cu.import("resource:///modules/devtools/ProfilerHelpers.jsm");
-Cu.import("resource://gre/modules/commonjs/sdk/core/promise.js");
 Cu.import("resource:///modules/devtools/EventEmitter.jsm");
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 
 this.EXPORTED_SYMBOLS = ["ProfilerPanel"];
 
-XPCOMUtils.defineLazyGetter(this, "DebuggerServer", function () {
-  Cu.import("resource://gre/modules/devtools/dbg-server.jsm");
-  return DebuggerServer;
-});
+XPCOMUtils.defineLazyModuleGetter(this, "Promise",
+    "resource://gre/modules/commonjs/sdk/core/promise.js");
+
+XPCOMUtils.defineLazyModuleGetter(this, "DebuggerServer",
+  "resource://gre/modules/devtools/dbg-server.jsm");
+
+XPCOMUtils.defineLazyModuleGetter(this, "Services",
+  "resource://gre/modules/Services.jsm");
 
 /**
  * An instance of a profile UI. Profile UI consists of
@@ -27,10 +31,13 @@ XPCOMUtils.defineLazyGetter(this, "DebuggerServer", function () {
  * Its main function is to talk to the Cleopatra instance
  * inside of the iframe.
  *
- * ProfileUI is also an event emitter. Currently, it emits
- * only one event, 'ready', when Cleopatra is done loading.
- * You can also check 'isReady' property to see if a
- * particular instance has been loaded yet.
+ * ProfileUI is also an event emitter. It emits the following events:
+ *  - ready, when Cleopatra is done loading (you can also check the isReady
+ *    property to see if a particular instance has been loaded yet.
+ *  - disabled, when Cleopatra gets disabled. Happens when another ProfileUI
+ *    instance starts the profiler.
+ *  - enabled, when Cleopatra gets enabled. Happens when another ProfileUI
+ *    instance stops the profiler.
  *
  * @param number uid
  *   Unique ID for this profile.
@@ -63,27 +70,48 @@ function ProfileUI(uid, panel) {
       return;
     }
 
+    let label = doc.querySelector("li#profile-" + this.uid + " > h1");
     switch (event.data.status) {
       case "loaded":
+        if (this.panel._runningUid !== null) {
+          this.iframe.contentWindow.postMessage(JSON.stringify({
+            uid: this._runningUid,
+            isCurrent: this._runningUid === uid,
+            task: "onStarted"
+          }), "*");
+        }
+
         this.isReady = true;
         this.emit("ready");
         break;
       case "start":
-        // Start profiling and, once started, notify the
-        // underlying page so that it could update the UI.
+        // Start profiling and, once started, notify the underlying page
+        // so that it could update the UI. Also, once started, we add a
+        // star to the profile name to indicate which profile is currently
+        // running.
         this.panel.startProfiling(function onStart() {
-          var data = JSON.stringify({task: "onStarted"});
-          this.iframe.contentWindow.postMessage(data, "*");
+          this.panel.broadcast(this.uid, {task: "onStarted"});
+          label.textContent = label.textContent + " *";
         }.bind(this));
 
         break;
       case "stop":
-        // Stop profiling and, once stopped, notify the
-        // underlying page so that it could update the UI.
+        // Stop profiling and, once stopped, notify the underlying page so
+        // that it could update the UI and remove a star from the profile
+        // name.
         this.panel.stopProfiling(function onStop() {
-          var data = JSON.stringify({task: "onStopped"});
-          this.iframe.contentWindow.postMessage(data, "*");
+          this.panel.broadcast(this.uid, {task: "onStopped"});
+          label.textContent = label.textContent.replace(/\s\*$/, "");
         }.bind(this));
+        break;
+      case "disabled":
+        this.emit("disabled");
+        break;
+      case "enabled":
+        this.emit("enabled");
+        break;
+      case "displaysource":
+        this.panel.displaySource(event.data.data);
     }
   }.bind(this));
 }
@@ -179,7 +207,6 @@ function ProfilerPanel(frame, toolbox) {
   this.window = frame.window;
   this.document = frame.document;
   this.target = toolbox.target;
-  this.controller = new ProfilerController(this.target);
 
   this.profiles = new Map();
   this._uid = 0;
@@ -188,15 +215,17 @@ function ProfilerPanel(frame, toolbox) {
 }
 
 ProfilerPanel.prototype = {
-  isReady:    null,
-  window:     null,
-  document:   null,
-  target:     null,
-  controller: null,
-  profiles:   null,
+  isReady:     null,
+  window:      null,
+  document:    null,
+  target:      null,
+  controller:  null,
+  profiles:    null,
 
-  _uid:       null,
-  _activeUid: null,
+  _uid:        null,
+  _activeUid:  null,
+  _runningUid: null,
+  _browserWin: null,
 
   get activeProfile() {
     return this.profiles.get(this._activeUid);
@@ -206,30 +235,61 @@ ProfilerPanel.prototype = {
     this._activeUid = profile.uid;
   },
 
+  get browserWindow() {
+    if (this._browserWin) {
+      return this._browserWin;
+    }
+
+    let win = this.window.top;
+    let type = win.document.documentElement.getAttribute("windowtype");
+
+    if (type !== "navigator:browser") {
+      win = Services.wm.getMostRecentWindow("navigator:browser");
+    }
+
+    return this._browserWin = win;
+  },
+
   /**
-   * Open a debug connection and, on success, switch to
-   * the newly created profile.
+   * Open a debug connection and, on success, switch to the newly created
+   * profile.
    *
    * @return Promise
    */
   open: function PP_open() {
-    let deferred = Promise.defer();
+    let promise;
+    // Local profiling needs to make the target remote.
+    if (!this.target.isRemote) {
+      promise = this.target.makeRemote();
+    } else {
+      promise = Promise.resolve(this.target);
+    }
 
-    this.controller.connect(function onConnect() {
-      let create = this.document.getElementById("profiler-create");
-      create.addEventListener("click", this.createProfile.bind(this), false);
-      create.removeAttribute("disabled");
+    return promise
+      .then(function(target) {
+        let deferred = Promise.defer();
+        this.controller = new ProfilerController(this.target);
 
-      let profile = this.createProfile();
-      this.switchToProfile(profile, function () {
-        this.isReady = true;
-        this.emit("ready");
+        this.controller.connect(function onConnect() {
+          let create = this.document.getElementById("profiler-create");
+          create.addEventListener("click", this.createProfile.bind(this), false);
+          create.removeAttribute("disabled");
 
-        deferred.resolve(this);
+          let profile = this.createProfile();
+          this.switchToProfile(profile, function () {
+            this.isReady = true;
+            this.emit("ready");
+
+            deferred.resolve(this);
+          }.bind(this))
+        }.bind(this));
+
+        return deferred.promise;
       }.bind(this))
-    }.bind(this));
-
-    return deferred.promise;
+      .then(null, function onError(reason) {
+        Cu.reportError("ProfilerPanel open failed. " +
+                       reason.error + ": " + reason.message);
+      });
   },
 
   /**
@@ -356,6 +416,85 @@ ProfilerPanel.prototype = {
         onStop();
         this.emit("stopped");
       }.bind(this));
+    }.bind(this));
+  },
+
+  /**
+   * Broadcast messages to all Cleopatra instances.
+   *
+   * @param number target
+   *   UID of the recepient profile. All profiles will receive the message
+   *   but the profile specified by 'target' will have a special property,
+   *   isCurrent, set to true.
+   * @param object data
+   *   An object with a property 'task' that will be sent over to Cleopatra.
+   */
+  broadcast: function PP_broadcast(target, data) {
+    if (!this.profiles) {
+      return;
+    }
+
+    if (data.task === "onStarted") {
+      this._runningUid = target;
+    } else {
+      this._runningUid = null;
+    }
+
+    let uid = this._uid;
+    while (uid >= 0) {
+      if (this.profiles.has(uid)) {
+        let iframe = this.profiles.get(uid).iframe;
+        iframe.contentWindow.postMessage(JSON.stringify({
+          uid: target,
+          isCurrent: target === uid,
+          task: data.task
+        }), "*");
+      }
+      uid -= 1;
+    }
+  },
+
+  /**
+   * Open file specified in data in either a debugger or view-source.
+   *
+   * @param object data
+   *   An object describing the file. It must have three properties:
+   *    - uri
+   *    - line
+   *    - isChrome (chrome files are opened via view-source)
+   */
+  displaySource: function PP_displaySource(data, onOpen=function() {}) {
+    let win = this.window;
+    let panelWin, timeout;
+
+    function onSourceShown(event) {
+      if (event.detail.url !== data.uri) {
+        return;
+      }
+
+      panelWin.removeEventListener("Debugger:SourceShown", onSourceShown, false);
+      panelWin.editor.setCaretPosition(data.line - 1);
+      onOpen();
+    }
+
+    if (data.isChrome) {
+      return void this.browserWindow.gViewSourceUtils.
+        viewSource(data.uri, null, this.document, data.line);
+    }
+
+    gDevTools.showToolbox(this.target, "jsdebugger").then(function (toolbox) {
+      let dbg = toolbox.getCurrentPanel();
+      panelWin = dbg.panelWin;
+
+      let view = dbg.panelWin.DebuggerView;
+      if (view.Sources.selectedValue === data.uri) {
+        view.editor.setCaretPosition(data.line - 1);
+        onOpen();
+        return;
+      }
+
+      panelWin.addEventListener("Debugger:SourceShown", onSourceShown, false);
+      panelWin.DebuggerView.Sources.preferredSource = data.uri;
     }.bind(this));
   },
 

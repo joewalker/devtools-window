@@ -9,28 +9,20 @@
 #include "nsSVGElement.h"
 
 #include "mozilla/dom/SVGSVGElement.h"
+#include "mozilla/dom/SVGTests.h"
+#include "nsICSSDeclaration.h"
 #include "nsIDocument.h"
-#include "nsRange.h"
-#include "nsIDOMAttr.h"
 #include "nsIDOMEventTarget.h"
 #include "nsIDOMMutationEvent.h"
 #include "nsMutationEvent.h"
-#include "nsXBLPrototypeBinding.h"
-#include "nsBindingManager.h"
-#include "nsXBLBinding.h"
-#include "nsStyleConsts.h"
 #include "nsError.h"
 #include "nsIPresShell.h"
-#include "nsIServiceManager.h"
 #include "nsGkAtoms.h"
 #include "mozilla/css/StyleRule.h"
 #include "nsRuleWalker.h"
 #include "mozilla/css/Declaration.h"
 #include "nsCSSProps.h"
 #include "nsCSSParser.h"
-#include "nsGenericHTMLElement.h"
-#include "nsNodeInfoManager.h"
-#include "nsIScriptGlobalObject.h"
 #include "nsEventListenerManager.h"
 #include "nsSVGLength2.h"
 #include "nsSVGNumber2.h"
@@ -48,17 +40,12 @@
 #include "SVGAnimatedPathSegList.h"
 #include "SVGAnimatedTransformList.h"
 #include "SVGContentUtils.h"
-#include "DOMSVGTests.h"
-#include "nsIDOMSVGUnitTypes.h"
-#include "nsSVGRect.h"
 #include "nsIFrame.h"
-#include "prdtoa.h"
 #include <stdarg.h>
 #include "nsSMILMappedAttribute.h"
 #include "SVGMotionSMILAttr.h"
 #include "nsAttrValueOrString.h"
 #include "nsSMILAnimationController.h"
-#include "nsDOMCSSDeclaration.h"
 #include "mozilla/dom/SVGElementBinding.h"
 
 using namespace mozilla;
@@ -72,8 +59,8 @@ PR_STATIC_ASSERT(sizeof(void*) == sizeof(nullptr));
 
 
 nsSVGEnumMapping nsSVGElement::sSVGUnitTypesMap[] = {
-  {&nsGkAtoms::userSpaceOnUse, nsIDOMSVGUnitTypes::SVG_UNIT_TYPE_USERSPACEONUSE},
-  {&nsGkAtoms::objectBoundingBox, nsIDOMSVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX},
+  {&nsGkAtoms::userSpaceOnUse, SVG_UNIT_TYPE_USERSPACEONUSE},
+  {&nsGkAtoms::objectBoundingBox, SVG_UNIT_TYPE_OBJECTBOUNDINGBOX},
   {nullptr, 0}
 };
 
@@ -83,15 +70,9 @@ nsSVGElement::nsSVGElement(already_AddRefed<nsINodeInfo> aNodeInfo)
 }
 
 JSObject*
-nsSVGElement::WrapNode(JSContext *aCx, JSObject *aScope, bool *aTriedToWrap)
+nsSVGElement::WrapNode(JSContext *aCx, JSObject *aScope)
 {
-  return SVGElementBinding::Wrap(aCx, aScope, this, aTriedToWrap);
-}
-
-bool
-nsSVGElement::PrefEnabled()
-{
-  return nsGenericHTMLElement::PrefEnabled();
+  return SVGElementBinding::Wrap(aCx, aScope, this);
 }
 
 //----------------------------------------------------------------------
@@ -552,7 +533,7 @@ nsSVGElement::ParseAttribute(int32_t aNamespaceID,
 
     if (!foundMatch) {
       // Check for conditional processing attributes
-      nsCOMPtr<DOMSVGTests> tests(do_QueryInterface(this));
+      nsCOMPtr<SVGTests> tests(do_QueryInterface(this));
       if (tests && tests->ParseConditionalProcessingAttribute(
                             aAttribute, aValue, aResult)) {
         foundMatch = true;
@@ -836,7 +817,7 @@ nsSVGElement::UnsetAttrInternal(int32_t aNamespaceID, nsIAtom* aName,
     }
 
     // Check for conditional processing attributes
-    nsCOMPtr<DOMSVGTests> tests(do_QueryInterface(this));
+    nsCOMPtr<SVGTests> tests(do_QueryInterface(this));
     if (tests && tests->IsConditionalProcessingAttribute(aName)) {
       MaybeSerializeAttrBeforeRemoval(aName, aNotify);
       tests->UnsetAttr(aName);
@@ -887,10 +868,10 @@ nsSVGElement::GetAttributeChangeHint(const nsIAtom* aAttribute,
   nsChangeHint retval =
     nsSVGElementBase::GetAttributeChangeHint(aAttribute, aModType);
 
-  nsCOMPtr<DOMSVGTests> tests(do_QueryInterface(const_cast<nsSVGElement*>(this)));
+  nsCOMPtr<SVGTests> tests(do_QueryInterface(const_cast<nsSVGElement*>(this)));
   if (tests && tests->IsConditionalProcessingAttribute(aAttribute)) {
     // It would be nice to only reconstruct the frame if the value returned by
-    // DOMSVGTests::PassesConditionalProcessingTests has changed, but we don't
+    // SVGTests::PassesConditionalProcessingTests has changed, but we don't
     // know that
     NS_UpdateHint(retval, nsChangeHint_ReconstructFrame);
   }
@@ -1123,7 +1104,7 @@ NS_IMETHODIMP nsSVGElement::SetId(const nsAString & aId)
 
 /* readonly attribute nsIDOMSVGSVGElement ownerSVGElement; */
 NS_IMETHODIMP
-nsSVGElement::GetOwnerSVGElement(nsIDOMSVGSVGElement * *aOwnerSVGElement)
+nsSVGElement::GetOwnerSVGElement(nsIDOMSVGElement * *aOwnerSVGElement)
 {
   ErrorResult rv;
   NS_IF_ADDREF(*aOwnerSVGElement = GetOwnerSVGElement(rv));
@@ -1163,9 +1144,7 @@ nsSVGElement::GetViewportElement()
 already_AddRefed<nsIDOMSVGAnimatedString>
 nsSVGElement::ClassName()
 {
-  nsCOMPtr<nsIDOMSVGAnimatedString> className;
-  mClassAttribute.ToDOMAnimatedString(getter_AddRefs(className), this);
-  return className.forget();
+  return mClassAttribute.ToDOMAnimatedString(this);
 }
 
 //------------------------------------------------------------------------
@@ -2456,7 +2435,7 @@ nsSVGElement::WillChangeStringList(bool aIsConditionalProcessingAttribute,
 {
   nsIAtom* name;
   if (aIsConditionalProcessingAttribute) {
-    nsCOMPtr<DOMSVGTests> tests(do_QueryInterface(this));
+    nsCOMPtr<SVGTests> tests(do_QueryInterface(this));
     name = tests->GetAttrName(aAttrEnum);
   } else {
     name = *GetStringListInfo().mStringListInfo[aAttrEnum].mName;
@@ -2471,7 +2450,7 @@ nsSVGElement::DidChangeStringList(bool aIsConditionalProcessingAttribute,
 {
   nsIAtom* name;
   nsAttrValue newValue;
-  nsCOMPtr<DOMSVGTests> tests;
+  nsCOMPtr<SVGTests> tests;
 
   if (aIsConditionalProcessingAttribute) {
     tests = do_QueryInterface(this);

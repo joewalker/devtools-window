@@ -12,7 +12,6 @@ include $(DEPTH)/config/autoconf.mk
 MODULE         = dom
 LIBRARY_NAME   = jsdompermissionsettings_s
 
-XPIDL_MODULE   = dom_permissionsettings
 GRE_MODULE     = 1
 
 EXTRA_COMPONENTS =        \
@@ -26,8 +25,6 @@ EXTRA_JS_MODULES =   \
   PermissionPromptHelper.jsm \
   PermissionSettings.jsm \
   $(NULL)
-
-TEST_DIRS += tests
 
 include $(topsrcdir)/config/config.mk
 include $(topsrcdir)/ipc/chromium/chromium-config.mk

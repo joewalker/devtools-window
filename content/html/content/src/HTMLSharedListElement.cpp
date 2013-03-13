@@ -16,12 +16,7 @@
 #include "nsMappedAttributes.h"
 #include "nsRuleData.h"
 
-NS_IMPL_NS_NEW_HTML_ELEMENT(OList)
-NS_IMPL_NS_NEW_HTML_ELEMENT(DList)
-NS_IMPL_NS_NEW_HTML_ELEMENT(UList)
-DOMCI_DATA(HTMLOListElement, mozilla::dom::HTMLSharedListElement)
-DOMCI_DATA(HTMLDListElement, mozilla::dom::HTMLSharedListElement)
-DOMCI_DATA(HTMLUListElement, mozilla::dom::HTMLSharedListElement)
+NS_IMPL_NS_NEW_HTML_ELEMENT(SharedList)
 
 namespace mozilla {
 namespace dom {
@@ -32,21 +27,6 @@ HTMLSharedListElement::~HTMLSharedListElement()
 
 NS_IMPL_ADDREF_INHERITED(HTMLSharedListElement, Element)
 NS_IMPL_RELEASE_INHERITED(HTMLSharedListElement, Element)
-
-nsIClassInfo* 
-HTMLSharedListElement::GetClassInfoInternal()
-{
-  if (mNodeInfo->Equals(nsGkAtoms::ol)) {
-    return NS_GetDOMClassInfoInstance(eDOMClassInfo_HTMLOListElement_id);
-  }
-  if (mNodeInfo->Equals(nsGkAtoms::dl)) {
-    return NS_GetDOMClassInfoInstance(eDOMClassInfo_HTMLDListElement_id);
-  }
-  if (mNodeInfo->Equals(nsGkAtoms::ul)) {
-    return NS_GetDOMClassInfoInstance(eDOMClassInfo_HTMLUListElement_id);
-  }
-  return nullptr;
-}
 
 // QueryInterface implementation for nsHTMLSharedListElement
 NS_INTERFACE_TABLE_HEAD(HTMLSharedListElement)
@@ -59,14 +39,10 @@ NS_INTERFACE_TABLE_HEAD(HTMLSharedListElement)
   NS_INTERFACE_MAP_ENTRY_IF_TAG(nsIDOMHTMLOListElement, ol)
   NS_INTERFACE_MAP_ENTRY_IF_TAG(nsIDOMHTMLDListElement, dl)
   NS_INTERFACE_MAP_ENTRY_IF_TAG(nsIDOMHTMLUListElement, ul)
-
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO_GETTER(GetClassInfoInternal)
 NS_HTML_CONTENT_INTERFACE_MAP_END
 
 
-NS_IMPL_ELEMENT_CLONE(HTMLOListElement)
-NS_IMPL_ELEMENT_CLONE(HTMLDListElement)
-NS_IMPL_ELEMENT_CLONE(HTMLUListElement)
+NS_IMPL_ELEMENT_CLONE(HTMLSharedListElement)
 
 
 NS_IMPL_BOOL_ATTR(HTMLSharedListElement, Compact, compact)
@@ -174,21 +150,16 @@ HTMLSharedListElement::GetAttributeMappingFunction() const
 }
 
 JSObject*
-HTMLDListElement::WrapNode(JSContext *aCx, JSObject *aScope, bool *aTriedToWrap)
+HTMLSharedListElement::WrapNode(JSContext *aCx, JSObject *aScope)
 {
-  return HTMLDListElementBinding::Wrap(aCx, aScope, this, aTriedToWrap);
-}
-
-JSObject*
-HTMLOListElement::WrapNode(JSContext *aCx, JSObject *aScope, bool *aTriedToWrap)
-{
-  return HTMLOListElementBinding::Wrap(aCx, aScope, this, aTriedToWrap);
-}
-
-JSObject*
-HTMLUListElement::WrapNode(JSContext *aCx, JSObject *aScope, bool *aTriedToWrap)
-{
-  return HTMLUListElementBinding::Wrap(aCx, aScope, this, aTriedToWrap);
+  if (mNodeInfo->Equals(nsGkAtoms::ol)) {
+    return HTMLOListElementBinding::Wrap(aCx, aScope, this);
+  }
+  if (mNodeInfo->Equals(nsGkAtoms::dl)) {
+    return HTMLDListElementBinding::Wrap(aCx, aScope, this);
+  }
+  MOZ_ASSERT(mNodeInfo->Equals(nsGkAtoms::ul));
+  return HTMLUListElementBinding::Wrap(aCx, aScope, this);
 }
 
 } // namespace dom

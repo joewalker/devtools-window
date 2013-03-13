@@ -65,7 +65,7 @@ private:
   constraints_map  mConstraints;
 };
 
-class RTCConfiguration
+class IceConfiguration
 {
 public:
   bool addServer(const std::string& addr, uint16_t port)
@@ -141,10 +141,11 @@ public:
 
   static PeerConnectionImpl* CreatePeerConnection();
   static nsresult ConvertRTCConfiguration(const JS::Value& aSrc,
-    RTCConfiguration *aDst, JSContext* aCx);
+    IceConfiguration *aDst, JSContext* aCx);
   static nsresult ConvertConstraints(
     const JS::Value& aConstraints, MediaConstraints* aObj, JSContext* aCx);
-  static nsresult MakeMediaStream(uint32_t aHint, nsIDOMMediaStream** aStream);
+  static nsresult MakeMediaStream(nsIDOMWindow* aWindow,
+                                  uint32_t aHint, nsIDOMMediaStream** aStream);
 
   Role GetRole() const {
     PC_AUTO_ENTER_API_CALL_NO_CHECK();
@@ -208,10 +209,10 @@ public:
     return mWindow;
   }
 
-  // Initialize PeerConnection from an RTCConfiguration object.
+  // Initialize PeerConnection from an IceConfiguration object.
   nsresult Initialize(IPeerConnectionObserver* aObserver,
                       nsIDOMWindow* aWindow,
-                      const RTCConfiguration& aConfiguration,
+                      const IceConfiguration& aConfiguration,
                       nsIThread* aThread) {
     return Initialize(aObserver, aWindow, &aConfiguration, nullptr, aThread, nullptr);
   }
@@ -226,7 +227,7 @@ private:
   PeerConnectionImpl& operator=(PeerConnectionImpl);
   nsresult Initialize(IPeerConnectionObserver* aObserver,
                       nsIDOMWindow* aWindow,
-                      const RTCConfiguration* aConfiguration,
+                      const IceConfiguration* aConfiguration,
                       const JS::Value* aRTCConfiguration,
                       nsIThread* aThread,
                       JSContext* aCx);
@@ -259,8 +260,8 @@ private:
   void ShutdownMedia(bool isSynchronous);
 
   // ICE callbacks run on the right thread.
-  nsresult IceGatheringCompleted_m(NrIceCtx *aCtx);
-  nsresult IceCompleted_m(NrIceCtx *aCtx);
+  nsresult IceGatheringCompleted_m();
+  nsresult IceCompleted_m();
 
   // The role we are adopting
   Role mRole;
@@ -304,6 +305,13 @@ private:
 #endif
 
   nsRefPtr<PeerConnectionMedia> mMedia;
+
+  // Temporary: used to prevent multiple audio streams or multiple video streams
+  // in a single PC. This is tied up in the IETF discussion around proper
+  // representation of multiple streams in SDP, and strongly related to
+  // Bug 840728.
+  int mNumAudioStreams;
+  int mNumVideoStreams;
 
 public:
   //these are temporary until the DataChannel Listen/Connect API is removed

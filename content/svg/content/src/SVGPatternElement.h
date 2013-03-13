@@ -6,8 +6,6 @@
 #ifndef mozilla_dom_SVGPatternElement_h
 #define mozilla_dom_SVGPatternElement_h
 
-#include "nsIDOMSVGUnitTypes.h"
-#include "nsIDOMSVGURIReference.h"
 #include "nsSVGEnum.h"
 #include "nsSVGLength2.h"
 #include "nsSVGString.h"
@@ -29,9 +27,7 @@ namespace dom {
 typedef nsSVGElement SVGPatternElementBase;
 
 class SVGPatternElement MOZ_FINAL : public SVGPatternElementBase,
-                                    public nsIDOMSVGElement,
-                                    public nsIDOMSVGURIReference,
-                                    public nsIDOMSVGUnitTypes
+                                    public nsIDOMSVGElement
 {
   friend class ::nsSVGPatternFrame;
 
@@ -39,16 +35,13 @@ protected:
   friend nsresult (::NS_NewSVGPatternElement(nsIContent **aResult,
                                              already_AddRefed<nsINodeInfo> aNodeInfo));
   SVGPatternElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope, bool *triedToWrap) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
 
 public:
   typedef mozilla::SVGAnimatedPreserveAspectRatio SVGAnimatedPreserveAspectRatio;
 
   // interfaces:
   NS_DECL_ISUPPORTS_INHERITED
-
-  // URI Reference
-  NS_DECL_NSIDOMSVGURIREFERENCE
 
   NS_FORWARD_NSIDOMNODE_TO_NSINODE
   NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
@@ -100,7 +93,6 @@ protected:
 
   nsAutoPtr<mozilla::SVGAnimatedTransformList> mPatternTransform;
 
-  // nsIDOMSVGURIReference properties
   enum { HREF };
   nsSVGString mStringAttributes[1];
   static StringInfo sStringInfo[1];

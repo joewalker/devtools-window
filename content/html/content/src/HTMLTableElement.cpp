@@ -10,13 +10,13 @@
 #include "nsAttrValueInlines.h"
 #include "nsRuleData.h"
 #include "nsHTMLStyleSheet.h"
+#include "nsMappedAttributes.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/HTMLCollectionBinding.h"
 #include "mozilla/dom/HTMLTableElementBinding.h"
 #include "nsContentUtils.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(Table)
-DOMCI_NODE_DATA(HTMLTableElement, mozilla::dom::HTMLTableElement)
 
 namespace mozilla {
 namespace dom {
@@ -51,11 +51,9 @@ public:
   NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(TableRowsCollection)
 
   // nsWrapperCache
-  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope,
-                               bool *triedToWrap)
+  virtual JSObject* WrapObject(JSContext *cx, JSObject *scope) MOZ_OVERRIDE
   {
-    return mozilla::dom::HTMLCollectionBinding::Wrap(cx, scope, this,
-                                                     triedToWrap);
+    return mozilla::dom::HTMLCollectionBinding::Wrap(cx, scope, this);
   }
 
 protected:
@@ -104,7 +102,6 @@ NS_INTERFACE_TABLE_HEAD(TableRowsCollection)
   NS_INTERFACE_TABLE2(TableRowsCollection, nsIHTMLCollection,
                       nsIDOMHTMLCollection)
   NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(TableRowsCollection)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(HTMLCollection)
 NS_INTERFACE_MAP_END
 
 // Macro that can be used to avoid copy/pasting code to iterate over the
@@ -322,9 +319,9 @@ HTMLTableElement::~HTMLTableElement()
 }
 
 JSObject*
-HTMLTableElement::WrapNode(JSContext *aCx, JSObject *aScope, bool *aTriedToWrap)
+HTMLTableElement::WrapNode(JSContext *aCx, JSObject *aScope)
 {
-  return HTMLTableElementBinding::Wrap(aCx, aScope, this, aTriedToWrap);
+  return HTMLTableElementBinding::Wrap(aCx, aScope, this);
 }
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLTableElement, nsGenericHTMLElement)
@@ -348,7 +345,7 @@ NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLTableElement)
   NS_HTML_CONTENT_INTERFACE_TABLE1(HTMLTableElement, nsIDOMHTMLTableElement)
   NS_HTML_CONTENT_INTERFACE_TABLE_TO_MAP_SEGUE(HTMLTableElement,
                                                nsGenericHTMLElement)
-NS_HTML_CONTENT_INTERFACE_TABLE_TAIL_CLASSINFO(HTMLTableElement)
+NS_HTML_CONTENT_INTERFACE_MAP_END
 
 
 NS_IMPL_ELEMENT_CLONE(HTMLTableElement)
@@ -901,12 +898,6 @@ static const nsAttrValue::EnumTable kRulesTable[] = {
   { 0 }
 };
 
-static const nsAttrValue::EnumTable kLayoutTable[] = {
-  { "auto",   NS_STYLE_TABLE_LAYOUT_AUTO },
-  { "fixed",  NS_STYLE_TABLE_LAYOUT_FIXED },
-  { 0 }
-};
-
 
 bool
 HTMLTableElement::ParseAttribute(int32_t aNamespaceID,
@@ -917,11 +908,9 @@ HTMLTableElement::ParseAttribute(int32_t aNamespaceID,
   /* ignore summary, just a string */
   if (aNamespaceID == kNameSpaceID_None) {
     if (aAttribute == nsGkAtoms::cellspacing ||
-        aAttribute == nsGkAtoms::cellpadding) {
+        aAttribute == nsGkAtoms::cellpadding ||
+        aAttribute == nsGkAtoms::border) {
       return aResult.ParseNonNegativeIntValue(aValue);
-    }
-    if (aAttribute == nsGkAtoms::border) {
-      return aResult.ParseIntWithBounds(aValue, 0);
     }
     if (aAttribute == nsGkAtoms::height) {
       return aResult.ParseSpecialIntValue(aValue);
@@ -947,9 +936,6 @@ HTMLTableElement::ParseAttribute(int32_t aNamespaceID,
     }
     if (aAttribute == nsGkAtoms::frame) {
       return aResult.ParseEnumValue(aValue, kFrameTable, false);
-    }
-    if (aAttribute == nsGkAtoms::layout) {
-      return aResult.ParseEnumValue(aValue, kLayoutTable, false);
     }
     if (aAttribute == nsGkAtoms::rules) {
       return aResult.ParseEnumValue(aValue, kRulesTable, false);
@@ -994,16 +980,6 @@ MapAttributesIntoRule(const nsMappedAttributes* aAttributes,
         borderSpacing->GetUnit() == eCSSUnit_Null) {
       borderSpacing->
         SetFloatValue(float(value->GetIntegerValue()), eCSSUnit_Pixel);
-    }
-  }
-  if (aData->mSIDs & NS_STYLE_INHERIT_BIT(Table)) {
-    const nsAttrValue* value;
-    // layout
-    nsCSSValue* tableLayout = aData->ValueForTableLayout();
-    if (tableLayout->GetUnit() == eCSSUnit_Null) {
-      value = aAttributes->GetAttr(nsGkAtoms::layout);
-      if (value && value->Type() == nsAttrValue::eEnum)
-        tableLayout->SetIntValue(value->GetEnumValue(), eCSSUnit_Enumerated);
     }
   }
   if (aData->mSIDs & NS_STYLE_INHERIT_BIT(Margin)) {
@@ -1123,7 +1099,6 @@ NS_IMETHODIMP_(bool)
 HTMLTableElement::IsAttributeMapped(const nsIAtom* aAttribute) const
 {
   static const MappedAttributeEntry attributes[] = {
-    { &nsGkAtoms::layout },
     { &nsGkAtoms::cellpadding },
     { &nsGkAtoms::cellspacing },
     { &nsGkAtoms::border },
@@ -1233,6 +1208,15 @@ HTMLTableElement::BuildInheritedAttributes()
     mTableInheritedAttributes = newAttrs;
     NS_IF_ADDREF(mTableInheritedAttributes);
   }
+}
+
+void
+HTMLTableElement::ReleaseInheritedAttributes()
+{
+  if (mTableInheritedAttributes &&
+      mTableInheritedAttributes != TABLE_ATTRS_DIRTY)
+    NS_RELEASE(mTableInheritedAttributes);
+  mTableInheritedAttributes = TABLE_ATTRS_DIRTY;
 }
 
 nsresult

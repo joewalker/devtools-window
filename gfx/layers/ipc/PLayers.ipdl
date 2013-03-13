@@ -26,6 +26,7 @@ using mozilla::TimeStamp;
 using mozilla::ScreenRotation;
 using nsCSSProperty;
 using mozilla::dom::ScreenOrientation;
+using mozilla::gfx::Margin;
 
 /**
  * The layers protocol is spoken between thread contexts that manage
@@ -139,11 +140,15 @@ struct AnimationSegment {
 // Transforms need extra information to correctly convert the list of transform
 // functions to a gfx3DMatrix that can be applied directly to the layer.
 struct TransformData {
+  // the origin of the frame being transformed in app units
   nsPoint origin;
+  // the -moz-transform-origin property for the transform in css pixels
   gfxPoint3D mozOrigin;
+  // the -moz-perspective-origin property for the transform in css pixels
   gfxPoint3D perspectiveOrigin;
   nsRect bounds;
   nscoord perspective;
+  int32_t appUnitsPerDevPixel;
 };
 
 union AnimationData {
@@ -181,6 +186,7 @@ struct CommonLayerAttributes {
   nsIntRect clipRect;
   bool isFixedPosition;
   gfxPoint fixedPositionAnchor;
+  Margin fixedPositionMargin;
   nullable PLayer maskLayer;
   // Animated colors will only honored for ColorLayers.
   Animation[] animations;

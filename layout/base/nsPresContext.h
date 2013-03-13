@@ -214,6 +214,12 @@ public:
   nsIWidget* GetNearestWidget(nsPoint* aOffset = nullptr);
 
   /**
+   * Returns the root widget for this.
+   * Note that the widget is a mediater with IME.
+   */
+  nsIWidget* GetRootWidget();
+
+  /**
    * Return the presentation context for the root of the view manager
    * hierarchy that contains this presentation context, or nullptr if it can't
    * be found (e.g. it's detached).
@@ -545,7 +551,7 @@ public:
   float ScreenWidthInchesForFontInflation(bool* aChanged = nullptr);
 
   static int32_t AppUnitsPerCSSPixel() { return nsDeviceContext::AppUnitsPerCSSPixel(); }
-  uint32_t AppUnitsPerDevPixel() const  { return mDeviceContext->AppUnitsPerDevPixel(); }
+  int32_t AppUnitsPerDevPixel() const  { return mDeviceContext->AppUnitsPerDevPixel(); }
   static int32_t AppUnitsPerCSSInch() { return nsDeviceContext::AppUnitsPerCSSInch(); }
 
   static nscoord CSSPixelsToAppUnits(int32_t aPixels)
@@ -606,10 +612,10 @@ public:
 
   // Margin-specific version, since they often need TwipsToAppUnits
   static nsMargin CSSTwipsToAppUnits(const nsIntMargin &marginInTwips)
-  { return nsMargin(CSSTwipsToAppUnits(float(marginInTwips.left)), 
-                    CSSTwipsToAppUnits(float(marginInTwips.top)),
+  { return nsMargin(CSSTwipsToAppUnits(float(marginInTwips.top)),
                     CSSTwipsToAppUnits(float(marginInTwips.right)),
-                    CSSTwipsToAppUnits(float(marginInTwips.bottom))); }
+                    CSSTwipsToAppUnits(float(marginInTwips.bottom)),
+                    CSSTwipsToAppUnits(float(marginInTwips.left))); }
 
   static nscoord CSSPointsToAppUnits(float aPoints)
   { return NSToCoordRound(aPoints * nsDeviceContext::AppUnitsPerCSSInch() /

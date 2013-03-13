@@ -12,18 +12,6 @@ VPATH=@srcdir@
 include $(DEPTH)/config/autoconf.mk
 
 MODULE=inspector
-XPIDL_MODULE=inspector
-
-XPIDLSRCS = inIDOMView.idl \
-            inIDeepTreeWalker.idl \
-            inIFlasher.idl \
-            inISearchProcess.idl \
-            inISearchObserver.idl \
-            inICSSValueSearch.idl \
-            inIDOMUtils.idl \
-            nsIDOMFontFace.idl \
-            nsIDOMFontFaceList.idl \
-	    $(NULL)
 
 include $(topsrcdir)/config/rules.mk
 

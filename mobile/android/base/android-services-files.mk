@@ -4,7 +4,7 @@
 
 # These files are managed in the android-sync repo. Do not modify directly, or your changes will be lost.
 SYNC_PP_JAVA_FILES := \
-  sync/GlobalConstants.java \
+  background/common/GlobalConstants.java \
   sync/SyncConstants.java \
   background/announcements/AnnouncementsConstants.java \
   $(NULL)
@@ -19,7 +19,23 @@ SYNC_JAVA_FILES := \
   background/announcements/AnnouncementsFetchResourceDelegate.java \
   background/announcements/AnnouncementsService.java \
   background/announcements/AnnouncementsStartReceiver.java \
-  background/BackgroundConstants.java \
+  background/BackgroundService.java \
+  background/bagheera/BagheeraClient.java \
+  background/bagheera/BagheeraRequestDelegate.java \
+  background/bagheera/BoundedByteArrayEntity.java \
+  background/bagheera/DeflateHelper.java \
+  background/common/log/Logger.java \
+  background/common/log/writers/AndroidLevelCachingLogWriter.java \
+  background/common/log/writers/AndroidLogWriter.java \
+  background/common/log/writers/LevelFilteringLogWriter.java \
+  background/common/log/writers/LogWriter.java \
+  background/common/log/writers/PrintLogWriter.java \
+  background/common/log/writers/SimpleTagLogWriter.java \
+  background/common/log/writers/StringLogWriter.java \
+  background/common/log/writers/TagLogWriter.java \
+  background/common/log/writers/ThreadLocalTagLogWriter.java \
+  background/db/CursorDumper.java \
+  background/db/Tab.java \
   sync/AlreadySyncingException.java \
   sync/CollectionKeys.java \
   sync/CommandProcessor.java \
@@ -78,16 +94,6 @@ SYNC_JAVA_FILES := \
   sync/jpake/Zkp.java \
   sync/JSONRecordFetcher.java \
   sync/KeyBundleProvider.java \
-  sync/log/writers/AndroidLevelCachingLogWriter.java \
-  sync/log/writers/AndroidLogWriter.java \
-  sync/log/writers/LevelFilteringLogWriter.java \
-  sync/log/writers/LogWriter.java \
-  sync/log/writers/PrintLogWriter.java \
-  sync/log/writers/SimpleTagLogWriter.java \
-  sync/log/writers/StringLogWriter.java \
-  sync/log/writers/TagLogWriter.java \
-  sync/log/writers/ThreadLocalTagLogWriter.java \
-  sync/Logger.java \
   sync/MetaGlobal.java \
   sync/MetaGlobalException.java \
   sync/MetaGlobalMissingEnginesException.java \
@@ -245,7 +251,6 @@ SYNC_JAVA_FILES := \
   sync/stage/ServerSyncStage.java \
   sync/stage/SyncClientsEngineStage.java \
   sync/stage/UploadMetaGlobalStage.java \
-  sync/StubActivity.java \
   sync/syncadapter/SyncAdapter.java \
   sync/syncadapter/SyncService.java \
   sync/SyncConfiguration.java \
@@ -304,6 +309,10 @@ SYNC_RES_LAYOUT := \
 
 SYNC_RES_VALUES := \
   res/values/sync_styles.xml \
+  $(NULL)
+
+SYNC_RES_VALUES_V11 := \
+  res/values-v11/sync_styles.xml \
   $(NULL)
 
 SYNC_RES_VALUES_LARGE_V11 := \

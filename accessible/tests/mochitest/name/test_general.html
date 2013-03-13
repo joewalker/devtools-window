@@ -91,6 +91,9 @@
       // Gets the name from html:input value, ignore @title attribute on input
       testName("from_input_ignoretitle", "Custom country");
 
+      // Insert spaces around the control's value to not jamm sibling text nodes
+      testName("insert_spaces_around_control", "start value end");
+
       // Gets the name from @title, ignore whitespace content
       testName("from_label_ignore_ws_subtree", "about");
 
@@ -168,6 +171,7 @@
       testName("ctrlvalue_scrollbar:input", "foo 5 baz");
       testName("ctrlvalue_slider:input", "foo 5 baz");
       testName("ctrlvalue_spinbutton:input", "foo 5 baz");
+      testName("ctrlvalue_combobox:input", "foo 5 baz");
 
 
       /////////////////////////////////////////////////////////////////////////
@@ -261,6 +265,16 @@
      href="https://bugzilla.mozilla.org/show_bug.cgi?id=812041"
      title="ARIA slider and spinbutton don't provide a value for name computation">
     Bug 812041
+  </a>
+  <a target="_blank"
+     href="https://bugzilla.mozilla.org/show_bug.cgi?id=823927"
+     title="Text is jammed with control's text in name computation">
+    Bug 823927
+  </a>
+  <a target="_blank"
+     href="https://bugzilla.mozilla.org/show_bug.cgi?id=835666"
+     title="ARIA combobox selected value is not a part of name computation">
+    Bug 835666
   </a>
   <p id="display"></p>
   <div id="content" style="display: none"></div>
@@ -389,6 +403,11 @@
          value="Custom country"
          title="Input your country of origin"/ >
 
+  <!-- name from subtree, surround control by spaces to not jamm the text -->
+  <label id="insert_spaces_around_control">
+    start<input value="value">end
+  </label>
+
   <!-- no name from subtree because it holds whitespaces only -->
   <a id="from_label_ignore_ws_subtree" href="about:" title="about">&nbsp;&nbsp;  </a>
 
@@ -489,6 +508,20 @@
                value="5" min="1" max="10"
                aria-valuenow="5" aria-valuemin="1"
                aria-valuemax="10">
+    baz
+  </label>
+
+  <input type="checkbox" id="ctrlvalue_combobox:input">
+  <label for="ctrlvalue_combobox:input">
+    foo
+    <div role="combobox">
+      <div role="textbox"></div>
+      <ul role="listbox" style="list-style-type: none;">
+        <li role="option">1</li>
+        <li role="option" aria-selected="true">5</li>
+        <li role="option">3</li>
+      </ul>
+    </div>
     baz
   </label>
 

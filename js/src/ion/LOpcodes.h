@@ -22,14 +22,20 @@
     _(TableSwitch)                  \
     _(TableSwitchV)                 \
     _(Goto)                         \
+    _(NewParallelArray)             \
     _(NewArray)                     \
     _(NewObject)                    \
     _(NewSlots)                     \
     _(NewDeclEnvObject)             \
     _(NewCallObject)                \
     _(NewStringObject)              \
+    _(ParNew)                       \
+    _(ParNewDenseArray)             \
+    _(ParNewCallObject)             \
+    _(ParBailout)                   \
     _(InitProp)                     \
     _(CheckOverRecursed)            \
+    _(ParCheckOverRecursed)         \
     _(RecompileCheck)               \
     _(DefVar)                       \
     _(DefFun)                       \
@@ -37,6 +43,9 @@
     _(CallGeneric)                  \
     _(CallNative)                   \
     _(ApplyArgsGeneric)             \
+    _(GetDynamicName)               \
+    _(FilterArguments)              \
+    _(CallDirectEval)               \
     _(StackArgT)                    \
     _(StackArgV)                    \
     _(CreateThis)                   \
@@ -63,6 +72,7 @@
     _(CompareDAndBranch)            \
     _(CompareS)                     \
     _(CompareStrictS)               \
+    _(ParCompareS)                  \
     _(CompareB)                     \
     _(CompareBAndBranch)            \
     _(CompareV)                     \
@@ -109,6 +119,7 @@
     _(RegExpTest)                   \
     _(Lambda)                       \
     _(LambdaForSingleton)           \
+    _(ParLambda)                    \
     _(ImplicitThis)                 \
     _(Slots)                        \
     _(Elements)                     \
@@ -119,6 +130,8 @@
     _(StoreSlotT)                   \
     _(GuardShape)                   \
     _(GuardClass)                   \
+    _(ParWriteGuard)                \
+    _(ParDump)                      \
     _(TypeBarrier)                  \
     _(MonitorTypes)                 \
     _(InitializedLength)            \
@@ -149,9 +162,11 @@
     _(StoreFixedSlotV)              \
     _(StoreFixedSlotT)              \
     _(FunctionEnvironment)          \
+    _(ParSlice)                     \
     _(GetPropertyCacheV)            \
     _(GetPropertyCacheT)            \
     _(GetElementCacheV)             \
+    _(GetElementCacheT)             \
     _(BindNameCache)                \
     _(CallGetProperty)              \
     _(GetNameCache)                 \
@@ -184,6 +199,7 @@
     _(InstanceOfV)                  \
     _(CallInstanceOf)               \
     _(InterruptCheck)               \
+    _(ParCheckInterrupt)            \
     _(FunctionBoundary)             \
     _(GetDOMProperty)               \
     _(SetDOMProperty)               \

@@ -76,7 +76,7 @@ Cu.import("resource://gre/modules/Services.jsm", this);
 Cu.import("resource://gre/modules/XPCOMUtils.jsm", this);
 // debug.js adds NS_ASSERT. cf. bug 669196
 Cu.import("resource://gre/modules/debug.js", this);
-Cu.import("resource:///modules/TelemetryTimestamps.jsm", this);
+Cu.import("resource://gre/modules/TelemetryTimestamps.jsm", this);
 Cu.import("resource://gre/modules/TelemetryStopwatch.jsm", this);
 Cu.import("resource://gre/modules/osfile.jsm", this);
 Cu.import("resource://gre/modules/PrivateBrowsingUtils.jsm", this);
@@ -291,6 +291,11 @@ let SessionStoreInternal = {
   // restart to make the third party add-on warning not trash the deferred
   // session
   _lastSessionState: null,
+
+  // When starting Firefox with a single private window, this is the place
+  // where we keep the session we actually wanted to restore in case the user
+  // decides to later open a non-private window as well.
+  _deferredInitialState: null,
 
   // A promise resolved once initialization is complete
   _promiseInitialization: Promise.defer(),
@@ -682,8 +687,9 @@ let SessionStoreInternal = {
     // and create its internal data object
     this._internalWindows[aWindow.__SSi] = { hosts: {} }
 
+    let isPrivateWindow = false;
     if (PrivateBrowsingUtils.isWindowPrivate(aWindow))
-      this._windows[aWindow.__SSi].isPrivate = true;
+      this._windows[aWindow.__SSi].isPrivate = isPrivateWindow = true;
     if (!this._isWindowLoaded(aWindow))
       this._windows[aWindow.__SSi]._restoring = true;
     if (!aWindow.toolbar.visible)
@@ -696,17 +702,28 @@ let SessionStoreInternal = {
 
       // restore a crashed session resp. resume the last session if requested
       if (this._initialState) {
-        TelemetryTimestamps.add("sessionRestoreRestoring");
-        // make sure that the restored tabs are first in the window
-        this._initialState._firstTabs = true;
-        this._restoreCount = this._initialState.windows ? this._initialState.windows.length : 0;
-        this.restoreWindow(aWindow, this._initialState,
-                           this._isCmdLineEmpty(aWindow, this._initialState));
-        delete this._initialState;
+        if (isPrivateWindow) {
+          // We're starting with a single private window. Save the state we
+          // actually wanted to restore so that we can do it later in case
+          // the user opens another, non-private window.
+          this._deferredInitialState = this._initialState;
+          delete this._initialState;
 
-        // _loadState changed from "stopped" to "running"
-        // force a save operation so that crashes happening during startup are correctly counted
-        this.saveState(true);
+          // Nothing to restore now, notify observers things are complete.
+          Services.obs.notifyObservers(null, NOTIFY_WINDOWS_RESTORED, "");
+        } else {
+          TelemetryTimestamps.add("sessionRestoreRestoring");
+          // make sure that the restored tabs are first in the window
+          this._initialState._firstTabs = true;
+          this._restoreCount = this._initialState.windows ? this._initialState.windows.length : 0;
+          this.restoreWindow(aWindow, this._initialState,
+                             this._isCmdLineEmpty(aWindow, this._initialState));
+          delete this._initialState;
+
+          // _loadState changed from "stopped" to "running"
+          // force a save operation so that crashes happening during startup are correctly counted
+          this.saveState(true);
+        }
       }
       else {
         // Nothing to restore, notify observers things are complete.
@@ -721,9 +738,20 @@ let SessionStoreInternal = {
       let followUp = this._statesToRestore[aWindow.__SS_restoreID].windows.length == 1;
       this.restoreWindow(aWindow, this._statesToRestore[aWindow.__SS_restoreID], true, followUp);
     }
+    // The user opened another, non-private window after starting up with
+    // a single private one. Let's restore the session we actually wanted to
+    // restore at startup.
+    else if (this._deferredInitialState && !isPrivateWindow &&
+             aWindow.toolbar.visible) {
+
+      this._deferredInitialState._firstTabs = true;
+      this._restoreCount = this._deferredInitialState.windows ?
+        this._deferredInitialState.windows.length : 0;
+      this.restoreWindow(aWindow, this._deferredInitialState, true);
+      this._deferredInitialState = null;
+    }
     else if (this._restoreLastWindow && aWindow.toolbar.visible &&
-             this._closedWindows.length &&
-             !PrivateBrowsingUtils.isWindowPrivate(aWindow)) {
+             this._closedWindows.length && !isPrivateWindow) {
 
       // default to the most-recently closed window
       // don't use popup windows
@@ -3613,10 +3641,12 @@ let SessionStoreInternal = {
     let pinnedOnly = this._loadState == STATE_RUNNING && !this._resume_from_crash;
 
     TelemetryStopwatch.start("FX_SESSION_RESTORE_COLLECT_DATA_MS");
+    TelemetryStopwatch.start("FX_SESSION_RESTORE_COLLECT_DATA_LONGEST_OP_MS");
 
     var oState = this._getCurrentState(aUpdateAll, pinnedOnly);
     if (!oState) {
       TelemetryStopwatch.cancel("FX_SESSION_RESTORE_COLLECT_DATA_MS");
+      TelemetryStopwatch.cancel("FX_SESSION_RESTORE_COLLECT_DATA_LONGEST_OP_MS");
       return;
     }
 
@@ -3629,6 +3659,15 @@ let SessionStoreInternal = {
         }
       }
     }
+
+    // Don't save invalid states.
+    // Looks like we currently have private windows, only.
+    if (oState.windows.length == 0) {
+      TelemetryStopwatch.cancel("FX_SESSION_RESTORE_COLLECT_DATA_MS");
+      TelemetryStopwatch.cancel("FX_SESSION_RESTORE_COLLECT_DATA_LONGEST_OP_MS");
+      return;
+    }
+
     for (let i = oState._closedWindows.length - 1; i >= 0; i--) {
       if (oState._closedWindows[i].isPrivate) {
         oState._closedWindows.splice(i, 1);
@@ -3670,6 +3709,7 @@ let SessionStoreInternal = {
       oState.lastSessionState = this._lastSessionState;
 
     TelemetryStopwatch.finish("FX_SESSION_RESTORE_COLLECT_DATA_MS");
+    TelemetryStopwatch.finish("FX_SESSION_RESTORE_COLLECT_DATA_LONGEST_OP_MS");
 
     this._saveStateObject(oState);
   },
@@ -3679,8 +3719,10 @@ let SessionStoreInternal = {
    */
   _saveStateObject: function ssi_saveStateObject(aStateObj) {
     TelemetryStopwatch.start("FX_SESSION_RESTORE_SERIALIZE_DATA_MS");
+    TelemetryStopwatch.start("FX_SESSION_RESTORE_SERIALIZE_DATA_LONGEST_OP_MS");
     let data = this._toJSONString(aStateObj);
     TelemetryStopwatch.finish("FX_SESSION_RESTORE_SERIALIZE_DATA_MS");
+    TelemetryStopwatch.finish("FX_SESSION_RESTORE_SERIALIZE_DATA_LONGEST_OP_MS");
 
     let stateString = this._createSupportsString(data);
     Services.obs.notifyObservers(stateString, "sessionstore-state-write", "");

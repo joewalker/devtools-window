@@ -22,20 +22,29 @@ class UnreachableCodeElimination
     MIRGraph &graph_;
     uint32_t marked_;
     bool redundantPhis_;
+    bool rerunAliasAnalysis_;
 
     bool prunePointlessBranchesAndMarkReachableBlocks();
-    void removeUsesFromUnmarkedBlocks(MDefinition *instr);
+    void checkDependencyAndRemoveUsesFromUnmarkedBlocks(MDefinition *instr);
     bool removeUnmarkedBlocksAndClearDominators();
+    bool removeUnmarkedBlocksAndCleanup();
 
   public:
     UnreachableCodeElimination(MIRGenerator *mir, MIRGraph &graph)
       : mir_(mir),
         graph_(graph),
         marked_(0),
-        redundantPhis_(false)
+        redundantPhis_(false),
+        rerunAliasAnalysis_(false)
     {}
 
+    // Walks the graph and discovers what is reachable. Removes everything else.
     bool analyze();
+
+    // Removes any blocks that are not marked.  Assumes that these blocks are not
+    // reachable.  The parameter |marked| should be the number of blocks that
+    // are marked.
+    bool removeUnmarkedBlocks(size_t marked);
 };
 
 } /* namespace ion */

@@ -20,7 +20,6 @@
 #include "jsatom.h"
 #include "jsclass.h"
 #include "jsfriendapi.h"
-#include "jsinfer.h"
 
 #include "gc/Barrier.h"
 #include "gc/Heap.h"
@@ -285,7 +284,7 @@ class JSObject : public js::ObjectImpl
     friend class  js::NewObjectCache;
 
     /* Make the type object to use for LAZY_TYPE objects. */
-    js::types::TypeObject *makeLazyType(JSContext *cx);
+    static js::types::TypeObject *makeLazyType(JSContext *cx, js::HandleObject obj);
 
   public:
     /*
@@ -295,18 +294,23 @@ class JSObject : public js::ObjectImpl
     static bool setLastProperty(JSContext *cx, JS::HandleObject obj, js::HandleShape shape);
 
     /* As above, but does not change the slot span. */
-    inline void setLastPropertyInfallible(js::UnrootedShape shape);
+    inline void setLastPropertyInfallible(js::RawShape shape);
 
-    /* Make a non-array object with the specified initial state. */
+    /*
+     * Make a non-array object with the specified initial state. This method
+     * takes ownership of any extantSlots it is passed.
+     */
     static inline JSObject *create(JSContext *cx,
                                    js::gc::AllocKind kind,
+                                   js::gc::InitialHeap heap,
                                    js::HandleShape shape,
                                    js::HandleTypeObject type,
-                                   js::HeapSlot *slots);
+                                   js::HeapSlot *extantSlots = NULL);
 
     /* Make an array object with the specified initial state. */
     static inline JSObject *createArray(JSContext *cx,
                                         js::gc::AllocKind kind,
+                                        js::gc::InitialHeap heap,
                                         js::HandleShape shape,
                                         js::HandleTypeObject type,
                                         uint32_t length);
@@ -445,7 +449,7 @@ class JSObject : public js::ObjectImpl
      */
     static inline bool setSingletonType(JSContext *cx, js::HandleObject obj);
 
-    inline js::types::TypeObject *getType(JSContext *cx);
+    inline js::types::TypeObject* getType(JSContext *cx);
 
     const js::HeapPtr<js::types::TypeObject> &typeFromGC() const {
         /* Direct field access for use by GC. */
@@ -734,8 +738,8 @@ class JSObject : public js::ObjectImpl
                     js::MutableHandleValue vp);
 
   private:
-    static js::UnrootedShape getChildProperty(JSContext *cx, JS::HandleObject obj,
-                                                   js::HandleShape parent, js::StackShape &child);
+    static js::RawShape getChildProperty(JSContext *cx, JS::HandleObject obj,
+                                         js::HandleShape parent, js::StackShape &child);
 
   protected:
     /*
@@ -745,12 +749,12 @@ class JSObject : public js::ObjectImpl
      * 1. getter and setter must be normalized based on flags (see jsscope.cpp).
      * 2. !isExtensible() checking must be done by callers.
      */
-    static js::UnrootedShape addPropertyInternal(JSContext *cx,
-                                                 JS::HandleObject obj, JS::HandleId id,
-                                                 JSPropertyOp getter, JSStrictPropertyOp setter,
-                                                 uint32_t slot, unsigned attrs,
-                                                 unsigned flags, int shortid, js::Shape **spp,
-                                                 bool allowDictionary);
+    static js::RawShape addPropertyInternal(JSContext *cx,
+                                            JS::HandleObject obj, JS::HandleId id,
+                                            JSPropertyOp getter, JSStrictPropertyOp setter,
+                                            uint32_t slot, unsigned attrs,
+                                            unsigned flags, int shortid, js::Shape **spp,
+                                            bool allowDictionary);
 
   private:
     bool toDictionaryMode(JSContext *cx);
@@ -764,45 +768,45 @@ class JSObject : public js::ObjectImpl
 
   public:
     /* Add a property whose id is not yet in this scope. */
-    static js::UnrootedShape addProperty(JSContext *cx, JS::HandleObject, JS::HandleId id,
-                                         JSPropertyOp getter, JSStrictPropertyOp setter,
-                                         uint32_t slot, unsigned attrs, unsigned flags,
-                                         int shortid, bool allowDictionary = true);
+    static js::RawShape addProperty(JSContext *cx, JS::HandleObject, JS::HandleId id,
+                                    JSPropertyOp getter, JSStrictPropertyOp setter,
+                                    uint32_t slot, unsigned attrs, unsigned flags,
+                                    int shortid, bool allowDictionary = true);
 
     /* Add a data property whose id is not yet in this scope. */
-    js::UnrootedShape addDataProperty(JSContext *cx, jsid id_, uint32_t slot, unsigned attrs) {
+    js::RawShape addDataProperty(JSContext *cx, jsid id_, uint32_t slot, unsigned attrs) {
         JS_ASSERT(!(attrs & (JSPROP_GETTER | JSPROP_SETTER)));
-        js::RootedObject self(cx, this);
-        js::RootedId id(cx, id_);
+        JS::RootedObject self(cx, this);
+        JS::RootedId id(cx, id_);
         return addProperty(cx, self, id, NULL, NULL, slot, attrs, 0, 0);
     }
 
-    js::UnrootedShape addDataProperty(JSContext *cx, js::HandlePropertyName name, uint32_t slot, unsigned attrs) {
+    js::RawShape addDataProperty(JSContext *cx, js::HandlePropertyName name, uint32_t slot, unsigned attrs) {
         JS_ASSERT(!(attrs & (JSPROP_GETTER | JSPROP_SETTER)));
-        js::RootedObject self(cx, this);
-        js::RootedId id(cx, NameToId(name));
+        JS::RootedObject self(cx, this);
+        JS::RootedId id(cx, NameToId(name));
         return addProperty(cx, self, id, NULL, NULL, slot, attrs, 0, 0);
     }
 
     /* Add or overwrite a property for id in this scope. */
-    static js::UnrootedShape putProperty(JSContext *cx, JS::HandleObject obj, JS::HandleId id,
-                                         JSPropertyOp getter, JSStrictPropertyOp setter,
-                                         uint32_t slot, unsigned attrs,
-                                         unsigned flags, int shortid);
-    static js::UnrootedShape putProperty(JSContext *cx, JS::HandleObject obj,
-                                         js::PropertyName *name,
-                                         JSPropertyOp getter, JSStrictPropertyOp setter,
-                                         uint32_t slot, unsigned attrs,
-                                         unsigned flags, int shortid)
+    static js::RawShape putProperty(JSContext *cx, JS::HandleObject obj, JS::HandleId id,
+                                    JSPropertyOp getter, JSStrictPropertyOp setter,
+                                    uint32_t slot, unsigned attrs,
+                                    unsigned flags, int shortid);
+    static js::RawShape putProperty(JSContext *cx, JS::HandleObject obj,
+                                    js::PropertyName *name,
+                                    JSPropertyOp getter, JSStrictPropertyOp setter,
+                                    uint32_t slot, unsigned attrs,
+                                    unsigned flags, int shortid)
     {
-        js::RootedId id(cx, js::NameToId(name));
+        JS::RootedId id(cx, js::NameToId(name));
         return putProperty(cx, obj, id, getter, setter, slot, attrs, flags, shortid);
     }
 
     /* Change the given property into a sibling with the same id in this scope. */
-    static js::UnrootedShape changeProperty(JSContext *cx, js::HandleObject obj,
-                                            js::HandleShape shape, unsigned attrs, unsigned mask,
-                                            JSPropertyOp getter, JSStrictPropertyOp setter);
+    static js::RawShape changeProperty(JSContext *cx, js::HandleObject obj,
+                                       js::HandleShape shape, unsigned attrs, unsigned mask,
+                                       JSPropertyOp getter, JSStrictPropertyOp setter);
 
     static inline bool changePropertyAttributes(JSContext *cx, js::HandleObject obj,
                                                 js::HandleShape shape, unsigned attrs);
@@ -924,12 +928,11 @@ class JSObject : public js::ObjectImpl
                                  JS::MutableHandleValue statep, JS::MutableHandleId idp);
     static inline bool defaultValue(JSContext *cx, js::HandleObject obj,
                                     JSType hint, js::MutableHandleValue vp);
-    static inline JSType typeOf(JSContext *cx, js::HandleObject obj);
     static inline JSObject *thisObject(JSContext *cx, js::HandleObject obj);
 
     static bool thisObject(JSContext *cx, const js::Value &v, js::Value *vp);
 
-    bool swap(JSContext *cx, JSObject *other);
+    static bool swap(JSContext *cx, JS::HandleObject a, JS::HandleObject b);
 
     inline void initArrayClass();
 
@@ -1160,24 +1163,11 @@ bool
 js_FindClassObject(JSContext *cx, JSProtoKey protoKey, js::MutableHandleValue vp,
                    js::Class *clasp = NULL);
 
-// Specialized call for constructing |this| with a known function callee,
-// and a known prototype.
-extern JSObject *
-js_CreateThisForFunctionWithProto(JSContext *cx, js::HandleObject callee, JSObject *proto);
-
-// Specialized call for constructing |this| with a known function callee.
-extern JSObject *
-js_CreateThisForFunction(JSContext *cx, js::HandleObject callee, bool newType);
-
-// Generic call for constructing |this|.
-extern JSObject *
-js_CreateThis(JSContext *cx, js::Class *clasp, js::HandleObject callee);
-
 /*
  * Find or create a property named by id in obj's scope, with the given getter
  * and setter, slot, attributes, and other members.
  */
-extern js::UnrootedShape
+extern js::RawShape
 js_AddNativeProperty(JSContext *cx, JS::HandleObject obj, JS::HandleId id,
                      JSPropertyOp getter, JSStrictPropertyOp setter, uint32_t slot,
                      unsigned attrs, unsigned flags, int shortid);
@@ -1188,7 +1178,52 @@ js_DefineOwnProperty(JSContext *cx, JS::HandleObject obj, JS::HandleId id,
 
 namespace js {
 
-JSObject *
+/*
+ * The NewObjectKind allows an allocation site to specify the type properties
+ * and lifetime requirements that must be fixed at allocation time.
+ */
+enum NewObjectKind {
+    /* This is the default. Most objects are generic. */
+    GenericObject,
+
+    /*
+     * Singleton objects are treated specially by the type system. This flag
+     * ensures that the new object is automatically set up correctly as a
+     * singleton and is allocated in the correct heap.
+     */
+    SingletonObject,
+
+    /*
+     * Objects which may be marked as a singleton after allocation must still
+     * be allocated on the correct heap, but are not automatically setup as a
+     * singleton after allocation.
+     */
+    MaybeSingletonObject
+};
+
+inline gc::InitialHeap
+GetInitialHeap(NewObjectKind newKind, const Class *clasp)
+{
+    if (clasp->finalize || newKind != GenericObject)
+        return gc::TenuredHeap;
+    return gc::DefaultHeap;
+}
+
+// Specialized call for constructing |this| with a known function callee,
+// and a known prototype.
+extern JSObject *
+CreateThisForFunctionWithProto(JSContext *cx, js::HandleObject callee, JSObject *proto,
+                               NewObjectKind newKind = GenericObject);
+
+// Specialized call for constructing |this| with a known function callee.
+extern JSObject *
+CreateThisForFunction(JSContext *cx, js::HandleObject callee, bool newType);
+
+// Generic call for constructing |this|.
+extern JSObject *
+CreateThis(JSContext *cx, js::Class *clasp, js::HandleObject callee);
+
+extern JSObject *
 CloneObject(JSContext *cx, HandleObject obj, Handle<js::TaggedProto> proto, HandleObject parent);
 
 /*

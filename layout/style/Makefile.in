@@ -9,18 +9,17 @@ VPATH		= @srcdir@
 
 include $(DEPTH)/config/autoconf.mk
 
-DIRS		= xbl-marquee
-
-ifdef ENABLE_TESTS
-TOOL_DIRS	= test
-endif
-
 MODULE		= layout
 LIBRARY_NAME	= gkstyle_s
 LIBXUL_LIBRARY	= 1
 ifndef _MSC_VER
 FAIL_ON_WARNINGS = 1
 endif # !_MSC_VER
+
+ifdef GNU_CC
+OS_CFLAGS := $(OS_CFLAGS) -Wshadow
+OS_CXXFLAGS := $(OS_CXXFLAGS) -Wshadow
+endif
 
 EXPORTS_NAMESPACES = mozilla/css mozilla/dom
 

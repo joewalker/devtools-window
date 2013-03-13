@@ -17,7 +17,6 @@
 
 struct ChromePackage;
 class nsIDOMBlob;
-class nsDOMFileBase;
 class nsIObserver;
 struct ResourceMapping;
 struct OverrideMapping;
@@ -203,9 +202,12 @@ public:
     bool IsForApp() { return mIsForApp; }
     bool IsForBrowser() { return mIsForBrowser; }
 
-    bool GetParamsForBlob(nsDOMFileBase* aBlob,
-                          BlobConstructorParams* aOutParams);
     BlobChild* GetOrCreateActorForBlob(nsIDOMBlob* aBlob);
+
+protected:
+    virtual bool RecvPBrowserConstructor(PBrowserChild* actor,
+                                         const IPCTabContext& context,
+                                         const uint32_t& chromeFlags);
 
 private:
     virtual void ActorDestroy(ActorDestroyReason why) MOZ_OVERRIDE;

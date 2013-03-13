@@ -47,6 +47,7 @@
     locale/browser/devtools/inspector.dtd          (%chrome/browser/devtools/inspector.dtd)
     locale/browser/devtools/connection-screen.dtd  (%chrome/browser/devtools/connection-screen.dtd)
     locale/browser/devtools/connection-screen.properties (%chrome/browser/devtools/connection-screen.properties)
+    locale/browser/devtools/font-inspector.dtd     (%chrome/browser/devtools/font-inspector.dtd)
     locale/browser/newTab.dtd                      (%chrome/browser/newTab.dtd)
     locale/browser/newTab.properties               (%chrome/browser/newTab.properties)
     locale/browser/openLocation.dtd                (%chrome/browser/openLocation.dtd)
@@ -130,7 +131,7 @@
     locale/pdfviewer/viewer.properties             (%pdfviewer/viewer.properties)
     locale/pdfviewer/chrome.properties             (%pdfviewer/chrome.properties)
 #ifdef MOZ_WEBAPP_RUNTIME
-../webapprt/chrome/@AB_CD@.jar:
+../../webapprt/chrome/@AB_CD@.jar:
 % locale webapprt @AB_CD@ %locale/webapprt/
     locale/webapprt/webapp.dtd                     (%webapprt/webapp.dtd)
     locale/webapprt/webapp.properties              (%webapprt/webapp.properties)

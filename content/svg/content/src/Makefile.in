@@ -30,21 +30,17 @@ CPPSRCS		= \
 		DOMSVGPoint.cpp \
 		DOMSVGPointList.cpp \
 		DOMSVGStringList.cpp \
-		DOMSVGTests.cpp \
 		DOMSVGTransform.cpp \
 		DOMSVGTransformList.cpp \
 		nsDOMSVGZoomEvent.cpp \
-		nsDOMSVGEvent.cpp \
 		nsISVGPoint.cpp \
 		nsSVGAngle.cpp \
 		nsSVGBoolean.cpp \
 		nsSVGClass.cpp \
 		nsSVGDataParser.cpp \
 		nsSVGElement.cpp \
-		nsSVGElementFactory.cpp \
 		nsSVGEnum.cpp \
 		nsSVGFeatures.cpp \
-		nsSVGFilterElement.cpp \
 		nsSVGFilters.cpp \
 		nsSVGInteger.cpp \
 		nsSVGIntegerPair.cpp \
@@ -80,7 +76,15 @@ CPPSRCS		= \
 		SVGContentUtils.cpp \
 		SVGDefsElement.cpp \
 		SVGDescElement.cpp \
+		SVGElementFactory.cpp \
 		SVGEllipseElement.cpp \
+		SVGFEBlendElement.cpp \
+		SVGFEFloodElement.cpp \
+		SVGFEImageElement.cpp \
+		SVGFEMergeElement.cpp \
+		SVGFEMergeNodeElement.cpp \
+		SVGFETileElement.cpp \
+		SVGFilterElement.cpp \
 		SVGForeignObjectElement.cpp \
 		SVGFragmentIdentifier.cpp \
 		SVGGElement.cpp \
@@ -124,6 +128,7 @@ CPPSRCS		= \
 		SVGSymbolElement.cpp \
 		SVGSVGElement.cpp \
 		SVGSwitchElement.cpp \
+		SVGTests.cpp \
 		SVGTextContentElement.cpp \
 		SVGTextElement.cpp \
 		SVGTextPathElement.cpp \
@@ -166,9 +171,17 @@ EXPORTS_mozilla/dom = \
 	SVGAnimationElement.h \
 	SVGClipPathElement.h \
 	SVGCircleElement.h \
+	SVGComponentTransferFunctionElement.h \
 	SVGDefsElement.h \
 	SVGDescElement.h \
 	SVGEllipseElement.h \
+	SVGFEBlendElement.h \
+	SVGFEFloodElement.h \
+	SVGFEImageElement.h \
+	SVGFEMergeElement.h \
+	SVGFEMergeNodeElement.h \
+	SVGFETileElement.h \
+	SVGFilterElement.h \
 	SVGForeignObjectElement.h \
 	SVGGElement.h \
 	SVGGradientElement.h \
@@ -192,6 +205,7 @@ EXPORTS_mozilla/dom = \
 	SVGSymbolElement.h \
 	SVGSVGElement.h \
 	SVGSwitchElement.h \
+	SVGTests.h \
 	SVGTextContentElement.h \
 	SVGTextElement.h \
 	SVGTextPathElement.h \

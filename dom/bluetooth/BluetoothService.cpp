@@ -30,6 +30,10 @@
 #include "nsThreadUtils.h"
 #include "nsXPCOM.h"
 
+#if defined(MOZ_WIDGET_GONK)
+#include "cutils/properties.h"
+#endif
+
 #if defined(MOZ_B2G_BT)
 # if defined(MOZ_BLUETOOTH_GONK)
 #  include "BluetoothGonkService.h"
@@ -43,6 +47,8 @@
 #define MOZSETTINGS_CHANGED_ID      "mozsettings-changed"
 #define BLUETOOTH_ENABLED_SETTING   "bluetooth.enabled"
 #define BLUETOOTH_DEBUGGING_SETTING "bluetooth.debugging.enabled"
+
+#define PROP_BLUETOOTH_ENABLED      "bluetooth.isEnabled"
 
 #define DEFAULT_SHUTDOWN_TIMER_MS 5000
 
@@ -121,8 +127,18 @@ public:
     }
 
     if (!gInShutdown) {
-      // Notify all the managers about the state change.
       gBluetoothService->SetEnabled(mEnabled);
+
+      nsAutoString signalName, signalPath;
+      BluetoothValue v = true;
+      if (mEnabled) {
+        signalName = NS_LITERAL_STRING("Enabled");
+      } else {
+        signalName = NS_LITERAL_STRING("Disabled");
+      }
+      signalPath = NS_LITERAL_STRING("/");
+      BluetoothSignal signal(signalName, signalPath, v);
+      gBluetoothService->DistributeSignal(signal);
     }
 
     if (!mEnabled || gInShutdown) {
@@ -183,6 +199,19 @@ public:
         }
       }
     }
+
+    // This is requested in Bug 836516. With settings this property, WLAN
+    // firmware could be aware of Bluetooth has been turned on/off, so that the
+    // mecahnism of handling coexistence of WIFI and Bluetooth could be started.
+    //
+    // In the future, we may have our own way instead of setting a system
+    // property to let firmware developers be able to sense that Bluetooth has
+    // been toggled.
+#if defined(MOZ_WIDGET_GONK)
+    if (property_set(PROP_BLUETOOTH_ENABLED, mEnabled ? "true" : "false") != 0) {
+      NS_WARNING("Failed to set bluetooth enabled property");
+    }
+#endif
 
     nsCOMPtr<nsIRunnable> ackTask = new BluetoothService::ToggleBtAck(mEnabled);
     if (NS_FAILED(NS_DispatchToMainThread(ackTask))) {
@@ -248,7 +277,7 @@ RemoveObserversExceptBluetoothManager
    void* arg)
 {
   if (!key.EqualsLiteral("/")) {
-    static_cast<BluetoothService*>(arg)->RemoveObserverFromTable(key);
+    return PL_DHASH_REMOVE;
   }
 
   return PL_DHASH_NEXT;
@@ -332,7 +361,6 @@ BluetoothService::RegisterBluetoothSignalHandler(
     mBluetoothSignalObserverTable.Put(aNodeName, ol);
   }
 
-  ol->RemoveObserver(aHandler);
   ol->AddObserver(aHandler);
 }
 
@@ -358,13 +386,22 @@ BluetoothService::UnregisterBluetoothSignalHandler(
   }
 }
 
+PLDHashOperator
+RemoveAllSignalHandlers(const nsAString& aKey,
+                        nsAutoPtr<BluetoothSignalObserverList>& aData,
+                        void* aUserArg)
+{
+  aData->RemoveObserver(static_cast<BluetoothSignalObserver*>(aUserArg));
+  return aData->Length() ? PL_DHASH_NEXT : PL_DHASH_REMOVE;
+}
+
 void
 BluetoothService::UnregisterAllSignalHandlers(BluetoothSignalObserver* aHandler)
 {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aHandler);
 
-  mBluetoothSignalObserverTable.Clear();
+  mBluetoothSignalObserverTable.Enumerate(RemoveAllSignalHandlers, aHandler);
 }
 
 void
@@ -440,20 +477,7 @@ BluetoothService::SetEnabled(bool aEnabled)
     unused << childActors[index]->SendEnabled(aEnabled);
   }
 
-  if (aEnabled) {
-    BluetoothManagerList::ForwardIterator iter(mLiveManagers);
-    nsString managerPath = NS_LITERAL_STRING("/");
-
-    /**
-     * Re-register managers since table mBluetoothSignalObserverTable was
-     * cleared after turned off bluetooth
-     */
-    while (iter.HasMore()) {
-      RegisterBluetoothSignalHandler(
-        managerPath,
-        (BluetoothSignalObserver*)iter.GetNext());
-    }
-  } else {
+  if (!aEnabled) {
     /**
      * Remove all handlers except BluetoothManager when turning off bluetooth
      * since it is possible that the event 'onAdapterAdded' would be fired after
@@ -461,7 +485,7 @@ BluetoothService::SetEnabled(bool aEnabled)
      * for more details.
      */
     mBluetoothSignalObserverTable.Enumerate(
-      RemoveObserversExceptBluetoothManager, this);
+      RemoveObserversExceptBluetoothManager, nullptr);
   }
 
   /**
@@ -474,14 +498,6 @@ BluetoothService::SetEnabled(bool aEnabled)
   }
 
   mEnabled = aEnabled;
-
-  // Fire onenabled/ondisabled event for each BluetoothManager
-  BluetoothManagerList::ForwardIterator iter(mLiveManagers);
-  while (iter.HasMore()) {
-    if (NS_FAILED(iter.GetNext()->FireEnabledDisabledEvent(aEnabled))) {
-      NS_WARNING("FireEnabledDisabledEvent failed!");
-    }
-  }
 
   gToggleInProgress = false;
 }
@@ -679,26 +695,6 @@ BluetoothService::HandleShutdown()
   }
 
   return NS_OK;
-}
-
-void
-BluetoothService::RegisterManager(BluetoothManager* aManager)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aManager);
-  MOZ_ASSERT(!mLiveManagers.Contains(aManager));
-
-  mLiveManagers.AppendElement(aManager);
-}
-
-void
-BluetoothService::UnregisterManager(BluetoothManager* aManager)
-{
-  MOZ_ASSERT(NS_IsMainThread());
-  MOZ_ASSERT(aManager);
-  MOZ_ASSERT(mLiveManagers.Contains(aManager));
-
-  mLiveManagers.RemoveElement(aManager);
 }
 
 // static

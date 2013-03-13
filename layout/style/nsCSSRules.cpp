@@ -14,7 +14,6 @@
 
 #include "nsString.h"
 #include "nsIAtom.h"
-#include "nsIURL.h"
 
 #include "nsCSSProps.h"
 #include "nsCSSStyleSheet.h"
@@ -25,10 +24,8 @@
 #include "nsICSSRuleList.h"
 #include "nsIDocument.h"
 #include "nsPresContext.h"
-#include "nsRuleNode.h"
 
 #include "nsContentUtils.h"
-#include "nsStyleConsts.h"
 #include "nsError.h"
 #include "nsStyleUtil.h"
 #include "mozilla/css/Declaration.h"
@@ -662,7 +659,7 @@ GroupRule::EnumerateRulesForwards(RuleEnumFunc aFunc, void * aData) const
 }
 
 /*
- * The next two methods (DeleteStyleRuleAt and InsertStyleRulesAt)
+ * The next two methods (DeleteStyleRuleAt and InsertStyleRuleAt)
  * should never be called unless you have first called WillDirty() on
  * the parents stylesheet.  After they are called, DidDirty() needs to
  * be called on the sheet
@@ -679,12 +676,11 @@ GroupRule::DeleteStyleRuleAt(uint32_t aIndex)
 }
 
 nsresult
-GroupRule::InsertStyleRulesAt(uint32_t aIndex,
-                              nsCOMArray<Rule>& aRules)
+GroupRule::InsertStyleRuleAt(uint32_t aIndex, Rule* aRule)
 {
-  aRules.EnumerateForwards(SetStyleSheetReference, GetStyleSheet());
-  aRules.EnumerateForwards(SetParentRuleReference, this);
-  if (! mRules.InsertObjectsAt(aRules, aIndex)) {
+  aRule->SetStyleSheet(GetStyleSheet());
+  aRule->SetParentRule(this);
+  if (! mRules.InsertObjectAt(aRule, aIndex)) {
     return NS_ERROR_FAILURE;
   }
   return NS_OK;
@@ -1746,11 +1742,9 @@ nsCSSFontFaceStyleDecl::GetParentObject()
 }
 
 JSObject*
-nsCSSFontFaceStyleDecl::WrapObject(JSContext *cx, JSObject *scope,
-                                   bool *triedToWrap)
+nsCSSFontFaceStyleDecl::WrapObject(JSContext *cx, JSObject *scope)
 {
-  return mozilla::dom::CSSStyleDeclarationBinding::Wrap(cx, scope, this,
-                                                        triedToWrap);
+  return mozilla::dom::CSSStyleDeclarationBinding::Wrap(cx, scope, this);
 }
 
 // -------------------------------------------
@@ -2013,7 +2007,16 @@ nsCSSKeyframeRule::Clone() const
 NS_IMPL_CYCLE_COLLECTING_ADDREF(nsCSSKeyframeRule)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(nsCSSKeyframeRule)
 
-NS_IMPL_CYCLE_COLLECTION_1(nsCSSKeyframeRule, mDOMDeclaration);
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsCSSKeyframeRule)
+  if (tmp->mDOMDeclaration) {
+    tmp->mDOMDeclaration->DropReference();
+    ImplCycleCollectionUnlink(tmp->mDOMDeclaration);
+  }
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(nsCSSKeyframeRule)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDOMDeclaration)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 DOMCI_DATA(MozCSSKeyframeRule, nsCSSKeyframeRule)
 
@@ -2307,7 +2310,7 @@ nsCSSKeyframesRule::GetCssRules(nsIDOMCSSRuleList* *aRuleList)
 }
 
 NS_IMETHODIMP
-nsCSSKeyframesRule::InsertRule(const nsAString& aRule)
+nsCSSKeyframesRule::AppendRule(const nsAString& aRule)
 {
   // The spec is confusing, and I think we should just append the rule,
   // which also turns out to match WebKit:

@@ -34,9 +34,13 @@ void
 BumpChunk::delete_(BumpChunk *chunk)
 {
 #ifdef DEBUG
-        memset(chunk, 0xcd, sizeof(*chunk) + chunk->bumpSpaceSize);
+    // Part of the chunk may have been marked as poisoned/noaccess.  Undo that
+    // before writing the 0xcd bytes.
+    size_t size = sizeof(*chunk) + chunk->bumpSpaceSize;
+    MOZ_MAKE_MEM_UNDEFINED(chunk, size);
+    memset(chunk, 0xcd, size);
 #endif
-        js_free(chunk);
+    js_free(chunk);
 }
 
 bool

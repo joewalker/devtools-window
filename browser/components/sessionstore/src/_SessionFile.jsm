@@ -155,12 +155,11 @@ let SessionFileInternal = {
     TelemetryStopwatch.start("FX_SESSION_RESTORE_SYNC_READ_FILE_MS");
     try {
       let file = new FileUtils.File(this.path);
-      if (!file.exists()) {
-        return null;
-      }
       let chan = NetUtil.newChannel(file);
       let stream = chan.open();
       text = NetUtil.readInputStreamToString(stream, stream.available(), {charset: "utf-8"});
+    } catch (e if e.result == Components.results.NS_ERROR_FILE_NOT_FOUND) {
+      return "";
     } catch(ex) {
       exn = ex;
     } finally {
@@ -222,11 +221,11 @@ let SessionFileInternal = {
     return TaskUtils.spawn(function task() {
       try {
         yield OS.File.copy(self.path, self.backupPath);
+      } catch (ex if self._isNoSuchFile(ex)) {
+        // Ignore exceptions about non-existent files.
       } catch (ex) {
-        if (!self._isNoSuchFile(ex)) {
-          Cu.reportError("Could not backup session state file: " + ex);
-          throw ex;
-        }
+        Cu.reportError("Could not backup session state file: " + ex);
+        throw ex;
       }
     });
   },
@@ -236,12 +235,17 @@ let SessionFileInternal = {
     return TaskUtils.spawn(function task() {
       try {
         yield OS.File.remove(self.path);
+      } catch (ex if self._isNoSuchFile(ex)) {
+        // Ignore exceptions about non-existent files.
       } catch (ex) {
         Cu.reportError("Could not remove session state file: " + ex);
         throw ex;
       }
+
       try {
         yield OS.File.remove(self.backupPath);
+      } catch (ex if self._isNoSuchFile(ex)) {
+        // Ignore exceptions about non-existent files.
       } catch (ex) {
         Cu.reportError("Could not remove session state backup file: " + ex);
         throw ex;

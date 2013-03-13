@@ -23,7 +23,7 @@ var tests = {
     // check dom values
     let portrait = document.getElementsByClassName("social-statusarea-user-portrait")[0].getAttribute("src");
     // this is the default image for the profile area when not logged in.
-    is(portrait, "chrome://global/skin/icons/information-32.png", "portrait is empty");
+    ok(!portrait, "portrait is empty");
     let userDetailsBroadcaster = document.getElementById("socialBroadcaster_userDetails");
     let notLoggedInStatusValue = userDetailsBroadcaster.getAttribute("notLoggedInLabel");
     let userButton = document.getElementsByClassName("social-statusarea-loggedInStatus")[0];
@@ -110,11 +110,15 @@ var tests = {
     }, function () {
       let badge = statusIcon.getAttribute("badge");
       is(badge, "42", "status value is correct");
+      // If there is a counter, the aria-label should reflect it.
+      is(statusIcon.getAttribute("aria-label"), "Test Ambient 1 \u2046 (42)");
 
       ambience.counter = 0;
       Social.provider.setAmbientNotification(ambience);
       badge = statusIcon.getAttribute("badge");
       is(badge, "", "status value is correct");
+      // If there is no counter, the aria-label should be the same as the label
+      is(statusIcon.getAttribute("aria-label"), "Test Ambient 1 \u2046");
 
       // The menu bar isn't as easy to instrument on Mac.
       if (navigator.platform.contains("Mac"))
@@ -153,8 +157,6 @@ var tests = {
     is(toggleDesktopNotificationsMenuitems.length, 2, "Toggle notifications menuitems exist");
     let toggleSocialMenuitems = document.getElementsByClassName("social-toggle-menuitem");
     is(toggleSocialMenuitems.length, 2, "Toggle Social menuitems exist");
-    let removeSocialMenuitems = document.getElementsByClassName("social-remove-menuitem");
-    is(removeSocialMenuitems.length, 2, "Remove Social menuitems exist");
     next();
   },
   testToggleNotifications: function(next) {

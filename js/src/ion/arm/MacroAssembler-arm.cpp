@@ -6,12 +6,15 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "mozilla/DebugOnly.h"
+#include "mozilla/MathAlgorithms.h"
 
 #include "ion/arm/MacroAssembler-arm.h"
 #include "ion/MoveEmitter.h"
 
 using namespace js;
 using namespace ion;
+
+using mozilla::Abs;
 
 bool
 isValueDTRDCandidate(ValueOperand &val)
@@ -66,6 +69,30 @@ MacroAssemblerARM::branchTruncateDouble(const FloatRegister &src, const Register
     ma_cmp(dest, Imm32(0x7fffffff));
     ma_cmp(dest, Imm32(0x80000000), Assembler::NotEqual);
     ma_b(fail, Assembler::Equal);
+}
+
+// Checks whether a double is representable as a 32-bit integer. If so, the
+// integer is written to the output register. Otherwise, a bailout is taken to
+// the given snapshot. This function overwrites the scratch float register.
+void
+MacroAssemblerARM::convertDoubleToInt32(const FloatRegister &src, const Register &dest, Label *fail, bool negativeZeroCheck)
+{
+    // convert the floating point value to an integer, if it did not fit,
+    //     then when we convert it *back* to  a float, it will have a
+    //     different value, which we can test.
+    ma_vcvt_F64_I32(src, ScratchFloatReg);
+    // move the value into the dest register.
+    ma_vxfer(ScratchFloatReg, dest);
+    ma_vcvt_I32_F64(ScratchFloatReg, ScratchFloatReg);
+    ma_vcmp(src, ScratchFloatReg);
+    as_vmrs(pc);
+    ma_b(fail, Assembler::VFP_NotEqualOrUnordered);
+    // If they're equal, test for 0.  It would be nicer to test for -0.0 explicitly, but that seems hard.
+    if (negativeZeroCheck) {
+        ma_cmp(dest, Imm32(0));
+        ma_b(fail, Assembler::Equal);
+        // guard for != 0.
+    }
 }
 
 void
@@ -1359,6 +1386,37 @@ MacroAssemblerARM::ma_vstr(VFPRegister src, Register base, Register index, int32
     ma_vstr(src, Operand(ScratchRegister, 0), cc);
 }
 
+
+int32_t
+MacroAssemblerARM::transferMultipleByRuns(FloatRegisterSet set, LoadStore ls,
+                                          Register rm, DTMMode mode)
+{
+    int32_t delta;
+    if (mode == IA) {
+        delta = sizeof(double);
+    } else if (mode == DB) {
+        delta = -sizeof(double);
+    } else {
+        JS_NOT_REACHED("Invalid data transfer addressing mode");
+    }
+
+    int32_t offset = 0;
+    FloatRegisterForwardIterator iter(set);
+    while (iter.more()) {
+        startFloatTransferM(ls, rm, mode, WriteBack);
+        int32_t reg = (*iter).code_;
+        do {
+            offset += delta;
+            transferFloatReg(*iter);
+        } while ((++iter).more() && (*iter).code_ == ++reg);
+        finishFloatTransfer();
+    }
+
+    JS_ASSERT(offset == set.size() * sizeof(double) * (mode == DB ? -1 : 1));
+    ma_sub(Imm32(offset), rm);
+    return offset;
+}
+
 bool
 MacroAssemblerARMCompat::buildFakeExitFrame(const Register &scratch, uint32_t *offset)
 {
@@ -1460,6 +1518,12 @@ void
 MacroAssemblerARMCompat::add32(Imm32 imm, Register dest)
 {
     ma_add(imm, dest, SetCond);
+}
+
+void
+MacroAssemblerARMCompat::xor32(Imm32 imm, Register dest)
+{
+    ma_eor(imm, dest, SetCond);
 }
 
 void
@@ -1972,6 +2036,12 @@ MacroAssemblerARMCompat::subPtr(const Address &addr, const Register dest)
 }
 
 void
+MacroAssemblerARMCompat::subPtr(const Register &src, const Register &dest)
+{
+    ma_sub(src, dest);
+}
+
+void
 MacroAssemblerARMCompat::addPtr(Imm32 imm, const Register dest)
 {
     ma_add(imm, dest);
@@ -2229,6 +2299,19 @@ MacroAssemblerARMCompat::branchTestValue(Condition cond, const ValueOperand &val
     ma_b(label, cond);
 }
 
+void
+MacroAssemblerARMCompat::branchTestValue(Condition cond, const Address &valaddr,
+                                         const ValueOperand &value, Label *label)
+{
+    JS_ASSERT(cond == Equal || cond == NotEqual);
+
+    ma_ldr(tagOf(valaddr), ScratchRegister);
+    branchPtr(cond, ScratchRegister, value.typeReg(), label);
+
+    ma_ldr(payloadOf(valaddr), ScratchRegister);
+    branchPtr(cond, ScratchRegister, value.payloadReg(), label);
+}
+
 // unboxing code
 void
 MacroAssemblerARMCompat::unboxInt32(const ValueOperand &operand, const Register &dest)
@@ -2441,41 +2524,51 @@ MacroAssemblerARMCompat::storeValue(ValueOperand val, Operand dst) {
 }
 
 void
-MacroAssemblerARMCompat::storeValue(ValueOperand val, Register base, Register index, int32_t shift)
+MacroAssemblerARMCompat::storeValue(ValueOperand val, const BaseIndex &dest)
 {
-    if (isValueDTRDCandidate(val)) {
+    if (isValueDTRDCandidate(val) && Abs(dest.offset) <= 255) {
         Register tmpIdx;
-        if (shift == 0) {
-            tmpIdx = index;
-        } else if (shift < 0) {
-            ma_asr(Imm32(-shift), index, ScratchRegister);
-            tmpIdx = ScratchRegister;
+        if (dest.offset == 0) {
+            if (dest.scale == TimesOne) {
+                tmpIdx = dest.index;
+            } else {
+                ma_lsl(Imm32(dest.scale), dest.index, ScratchRegister);
+                tmpIdx = ScratchRegister;
+            }
+            ma_strd(val.payloadReg(), val.typeReg(), EDtrAddr(dest.base, EDtrOffReg(tmpIdx)));
         } else {
-            ma_lsl(Imm32(shift), index, ScratchRegister);
-            tmpIdx = ScratchRegister;
+            ma_alu(dest.base, lsl(dest.index, dest.scale), ScratchRegister, op_add);
+            ma_strd(val.payloadReg(), val.typeReg(),
+                    EDtrAddr(ScratchRegister, EDtrOffImm(dest.offset)));
         }
-        ma_strd(val.payloadReg(), val.typeReg(), EDtrAddr(base, EDtrOffReg(tmpIdx)));
     } else {
-        // The ideal case is the base is dead so the sequence:
-        // str val.payloadReg(), [base, index LSL shift]!
-        // str val.typeReg(), [base, #4]
-        // only clobbers dead registers
-        // Sadly, this information is not available, so the scratch register is necessary.
-        ma_alu(base, lsl(index, shift), ScratchRegister, op_add);
-
-        // This case is handled by a simpler function.
-        storeValue(val, Address(ScratchRegister, 0));
+        ma_alu(dest.base, lsl(dest.index, dest.scale), ScratchRegister, op_add);
+        storeValue(val, Address(ScratchRegister, dest.offset));
     }
 }
 
 void
-MacroAssemblerARMCompat::loadValue(Register base, Register index, ValueOperand val, Imm32 off)
+MacroAssemblerARMCompat::loadValue(const BaseIndex &addr, ValueOperand val)
 {
-
-    ma_alu(base, lsl(index, TimesEight), ScratchRegister, op_add);
-
-    // This case is handled by a simpler function.
-    loadValue(Address(ScratchRegister, off.value), val);
+    if (isValueDTRDCandidate(val) && Abs(addr.offset) <= 255) {
+        Register tmpIdx;
+        if (addr.offset == 0) {
+            if (addr.scale == TimesOne) {
+                tmpIdx = addr.index;
+            } else {
+                ma_lsl(Imm32(addr.scale), addr.index, ScratchRegister);
+                tmpIdx = ScratchRegister;
+            }
+            ma_ldrd(EDtrAddr(addr.base, EDtrOffReg(tmpIdx)), val.payloadReg(), val.typeReg());
+        } else {
+            ma_alu(addr.base, lsl(addr.index, addr.scale), ScratchRegister, op_add);
+            ma_ldrd(EDtrAddr(ScratchRegister, EDtrOffImm(addr.offset)),
+                    val.payloadReg(), val.typeReg());
+        }
+    } else {
+        ma_alu(addr.base, lsl(addr.index, addr.scale), ScratchRegister, op_add);
+        loadValue(Address(ScratchRegister, addr.offset), val);
+    }
 }
 
 void

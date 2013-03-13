@@ -18,7 +18,7 @@ import java.util.ArrayList;
 import java.io.File;
 
 /**
- * Tests the Bookamrks Tab
+ * Tests the Bookmarks Tab
  * - opening the bookmarks tab
  * - items look correct
  * - clicking on an item
@@ -26,7 +26,6 @@ import java.io.File;
  * - editing the name, url and keyword of a bookmark from the context menu
  * - removing a bookmark
  */
-
 public class testBookmarksTab extends BaseTest {
     private View mFirstChild;
     private ListView list;
@@ -49,36 +48,34 @@ public class testBookmarksTab extends BaseTest {
 
     private void testList(String url) {
         View child;
-        ListView list = getBookmarksList();
+        ListView list = getBookmarksList("about:firefox", 5);
+        mAsserter.isnot(list, null, "checking that bookmarks list exists and has 5 children (defaults + a folder)");
 
-        mSolo.waitForText("Desktop Bookmarks");
-        mAsserter.isnot(list, null, "checking that bookmarks list exists");
-
-        int count = list.getChildCount();
-        mAsserter.is(count, 5, "bookmarks list has 5 children (defaults + a folder)");
- 
+        int count = list.getAdapter().getCount();
         for (int i = count - 1; i >= 0; i--) {
             child = list.getChildAt(i);
             compareRow(child, i == 0 ? 1 : 2, 1);
         }
 
         child = list.getChildAt(0);
+        mAsserter.ok(child != null, "first list item can be retrieved", child != null ? child.toString() : "null!");
         mSolo.clickOnView(child);
-        mSolo.waitForText("Bookmarks Toolbar");
+        waitForText("Bookmarks Toolbar");
 
-        mAsserter.is(list.getChildCount(), 4, "desktop folder has correct number of children");
-        count = list.getChildCount();
+        count = list.getAdapter().getCount();
+        mAsserter.is(count, 4, "desktop folder has correct number of children");
         for (int i = count - 1; i >= 0; i--) {
             child = list.getChildAt(i);
             compareRow(child, 1, i == 0 ? 0 : 1);
         }
 
         child = list.getChildAt(1);
+        mAsserter.ok(child != null, "second list item can be retrieved", child != null ? child.toString() : "null!");
         mSolo.clickOnView(child);
-        mSolo.waitForText("BOOKMARK_TITLE");
+        waitForText("BOOKMARK_TITLE");
 
-        mAsserter.is(list.getChildCount(), 2, "toolbar folder has correct number of children");
-        count = list.getChildCount();
+        count = list.getAdapter().getCount();
+        mAsserter.is(count, 2, "toolbar folder has correct number of children");
         for (int i = count - 1; i >= 0; i--) {
             child = list.getChildAt(i);
             compareRow(child, i == 0 ? 1:2, i == 0 ? 0:1);
@@ -95,13 +92,12 @@ public class testBookmarksTab extends BaseTest {
     }
 
     private void testContextMenu(String url) {
-        list = getBookmarksList();
-        mSolo.waitForText(url);
-
+        list = getBookmarksList(url);
         // wait for the bookmarks list to be populated
         View child;
         mFirstChild = null;
         boolean success = waitForTest(new BooleanTest() {
+            @Override
             public boolean test() {
                 mFirstChild = list.getChildAt(1);
                 if (mFirstChild == null) {
@@ -143,13 +139,14 @@ public class testBookmarksTab extends BaseTest {
 
             // test long tap on a folder, this should fail but will still open the folder
             child = list.getChildAt(0);
+            mAsserter.ok(child != null, "first list item can be retrieved", child != null ? child.toString() : "null!");
             mSolo.clickLongOnView(child);
             mAsserter.is(mSolo.waitForText("Open in New Tab"), false, "Folders have no context menu");
         } else {
             mAsserter.ok(false, "waiting for bookmark item", "bookmark item available");
         }
 
-        list = getBookmarksList();
+        list = getBookmarksList(url);
 
         // Test edit bookmark name
         editBookmark(1,0," Bookmark Name ");
@@ -164,19 +161,21 @@ public class testBookmarksTab extends BaseTest {
         mAsserter.is(checkBookmarkEdit(1,"Bookmark Keyword"), true, "Bookmark Keyword was changed");
 
         // Remove Bookmark from Context Menu
-        mSolo.waitForText("Bookmarks");
+        waitForText("Bookmarks");
         child = list.getChildAt(1);
+        mAsserter.ok(child != null, "second list item can be retrieved", child != null ? child.toString() : "null!");
         mSolo.clickLongOnView(child);
-        mSolo.waitForText("Open in New Tab");
+        waitForText("Open in New Tab");
         mSolo.clickOnText("Remove");
 
         // Wait for the toaster notification
-        mSolo.waitForText("Bookmark Removed");
+        waitForText("Bookmark removed");
 
         // Verify Bookmark is removed
         child = list.getChildAt(1);
+        mAsserter.ok(child != null, "second list item can be retrieved", child != null ? child.toString() : "null!");
         mSolo.clickLongOnView(child);
-        mSolo.waitForText("Open in New Tab");
+        waitForText("Open in New Tab");
         mAsserter.is(mSolo.searchText("Bookmark Name"), false, "Removed bookmark has been deleted");
         mActions.sendSpecialKey(Actions.SpecialKey.BACK); // Exit the Context Menu
 
@@ -190,11 +189,12 @@ public class testBookmarksTab extends BaseTest {
         View child;
         mSolo.clickOnText("Bookmarks");
         child = list.getChildAt(bookmarkIndex);
-        mSolo.waitForText("Desktop Bookmarks");
+        mAsserter.ok(child != null, "edit item can be retrieved", child != null ? child.toString() : "null!");
+        waitForText("about:home");
         mSolo.clickLongOnView(child);
-        mSolo.waitForText("Open in New Tab");
+        waitForText("Open in New Tab");
         mSolo.clickOnText("Edit");
-        mSolo.waitForText("Edit Bookmark");
+        waitForText("Edit Bookmark");
 
         // Clear the Field
         mSolo.clearEditText(fieldIndex);
@@ -203,7 +203,7 @@ public class testBookmarksTab extends BaseTest {
         mSolo.clickOnEditText(fieldIndex);
         mActions.sendKeys(addedText);
         mSolo.clickOnText("OK");
-        mSolo.waitForText("Bookmark Updated");
+        waitForText("Bookmark updated");
         mActions.sendSpecialKey(Actions.SpecialKey.BACK); // close the VKB
     }
 
@@ -213,11 +213,12 @@ public class testBookmarksTab extends BaseTest {
         View child;
         mSolo.clickOnText("Bookmarks");
         child = list.getChildAt(bookmarkIndex);
-        mSolo.waitForText("Desktop Bookmarks");
+        mAsserter.ok(child != null, "check item can be retrieved", child != null ? child.toString() : "null!");
+        waitForText("about:home");
         mSolo.clickLongOnView(child);
-        mSolo.waitForText("Open in New Tab");
+        waitForText("Open in New Tab");
         mSolo.clickOnText("Edit");
-        mSolo.waitForText("Edit Bookmark");
+        waitForText("Edit Bookmark");
 
         // If the OS is not Gingerbread the vkb will be opened so we need to close it in order to press the "Cancel" button
         if (!(mDevice.version.equals("2.x"))) {
@@ -227,18 +228,23 @@ public class testBookmarksTab extends BaseTest {
         // Check if the new text was added
         if (mSolo.searchText(addedText)) {
            mSolo.clickOnText("Cancel");
-           mSolo.waitForText("Desktop Bookmarks");
+           waitForText("about:home");
            mActions.sendSpecialKey(Actions.SpecialKey.BACK); // close the VKB
            return true;
         } else {
            mSolo.clickOnText("Cancel");
-           mSolo.waitForText("Desktop Bookmarks");
+           waitForText("about:home");
            mActions.sendSpecialKey(Actions.SpecialKey.BACK); // close the VKB
            return false;
         }
     }
 
     private void compareRow(View child, int numTextViews, int numImageViews) {
+        if (child == null) {
+            // this list item may be obscured or offscreen
+            mAsserter.dumpLog("ListView child not available for comparison - offscreen?");
+            return;
+        }
         ArrayList<View> views = mSolo.getViews(child);
         ArrayList<ImageView> imageViews = new ArrayList<ImageView>();
         ArrayList<TextView> textViews = new ArrayList<TextView>();
@@ -271,6 +277,7 @@ public class testBookmarksTab extends BaseTest {
         mAsserter.is(textViews.size(), numTextViews, "Correct number of TextViews visible");
     }
 
+    @Override
     public void tearDown() throws Exception {
         deleteBookmark("BOOKMARK_TITLE");
         super.tearDown();

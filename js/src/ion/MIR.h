@@ -302,7 +302,7 @@ class MDefinition : public MNode
     MDefinition()
       : id_(0),
         valueNumber_(NULL),
-        range_(),
+        range_(NULL),
         resultType_(MIRType_None),
         flags_(0),
         dependency_(NULL),
@@ -310,6 +310,7 @@ class MDefinition : public MNode
     { }
 
     virtual Opcode op() const = 0;
+    virtual const char *opName() const = 0;
     void printName(FILE *fp);
     static void PrintOpcodeName(FILE *fp, Opcode op);
     virtual void printOpcode(FILE *fp);
@@ -337,7 +338,10 @@ class MDefinition : public MNode
     virtual MDefinition *foldsTo(bool useValueNumbers);
     virtual void analyzeEdgeCasesForward();
     virtual void analyzeEdgeCasesBackward();
-    virtual void analyzeTruncateBackward();
+
+    virtual bool truncate();
+    virtual bool isOperandTruncated(size_t index) const;
+
     bool earlyAbortCheck();
 
     // Compute an absolute or symbolic range for the value of this node.
@@ -497,14 +501,6 @@ class MDefinition : public MNode
         JS_ASSERT(getAliasSet().flags() & store->getAliasSet().flags());
         return true;
     }
-    // This indicates if this instruction is "integral at heart".  This will
-    // be the case if
-    // a) its result type is int32
-    // b) it is an instruction that is very likely to produce an integer or integer-truncatable
-    //    result (add, mul, sub), and both of its inputs are ints. (currently only implemented for add)
-    virtual bool isBigIntOutput() { return resultType_ == MIRType_Int32; }
-    virtual void recalculateBigInt() {}
-
 };
 
 // An MUseDefIterator walks over uses in a definition, skipping any use that is
@@ -579,6 +575,9 @@ class MInstruction
     Opcode op() const {                                                     \
         return MDefinition::Op_##opcode;                                    \
     }                                                                       \
+    const char *opName() const {                                            \
+        return #opcode;                                                     \
+    }                                                                       \
     bool accept(MInstructionVisitor *visitor) {                             \
         return visitor->visit##opcode(this);                                \
     }
@@ -609,6 +608,15 @@ class MAryInstruction : public MInstruction
 
 class MNullaryInstruction : public MAryInstruction<0>
 { };
+
+class MUnaryInstruction : public MAryInstruction<1>
+{
+  protected:
+    MUnaryInstruction(MDefinition *ins)
+    {
+        setOperand(0, ins);
+    }
+};
 
 // Generates an LSnapshot without further effect.
 class MStart : public MNullaryInstruction
@@ -702,27 +710,8 @@ class MConstant : public MNullaryInstruction
         return AliasSet::None();
     }
 
-    void analyzeTruncateBackward();
-
-    // Returns true if constant is integer between -2^33 & 2^33,
-    // Max cap could be 2^53, if not for the 20 additions hack.
-    bool isBigIntOutput() {
-        if (value_.isInt32())
-            return true;
-        if (value_.isDouble()) {
-            double value = value_.toDouble();
-            int64_t valint = value;
-            int64_t max = 1LL<<33;
-            if (double(valint) != value)
-                return false;
-            if (valint < 0)
-                valint = -valint;
-            return valint < max;
-        }
-        return false;
-    }
-
     void computeRange();
+    bool truncate();
 };
 
 class MParameter : public MNullaryInstruction
@@ -1038,6 +1027,9 @@ class MReturn
         return new MReturn(ins);
     }
 
+    MDefinition *input() const {
+        return getOperand(0);
+    }
     TypePolicy *typePolicy() {
         return this;
     }
@@ -1065,6 +1057,28 @@ class MThrow
     }
     virtual AliasSet getAliasSet() const {
         return AliasSet::None();
+    }
+};
+
+class MNewParallelArray : public MNullaryInstruction
+{
+    CompilerRootObject templateObject_;
+
+    MNewParallelArray(JSObject *templateObject)
+      : templateObject_(templateObject)
+    {
+        setResultType(MIRType_Object);
+    }
+
+  public:
+    INSTRUCTION_HEADER(NewParallelArray);
+
+    static MNewParallelArray *New(JSObject *templateObject) {
+        return new MNewParallelArray(templateObject);
+    }
+
+    JSObject *templateObject() const {
+        return templateObject_;
     }
 };
 
@@ -1107,6 +1121,10 @@ class MNewArray : public MNullaryInstruction
         return allocating_ == NewArray_Allocating;
     }
 
+    // Returns true if the code generator should call through to the
+    // VM rather than the fast path.
+    bool shouldUseVM() const;
+
     // NewArray is marked as non-effectful because all our allocations are
     // either lazy when we are using "new Array(length)" or bounded by the
     // script or the stack size when we are using "new Array(...)" or "[...]"
@@ -1135,8 +1153,51 @@ class MNewObject : public MNullaryInstruction
         return new MNewObject(templateObject);
     }
 
+    // Returns true if the code generator should call through to the
+    // VM rather than the fast path.
+    bool shouldUseVM() const;
+
     JSObject *templateObject() const {
         return templateObject_;
+    }
+};
+
+// Could be allocating either a new array or a new object.
+class MParNew : public MUnaryInstruction
+{
+    CompilerRootObject templateObject_;
+
+  public:
+    INSTRUCTION_HEADER(ParNew);
+
+    MParNew(MDefinition *parSlice,
+            JSObject *templateObject)
+      : MUnaryInstruction(parSlice),
+        templateObject_(templateObject)
+    {
+        setResultType(MIRType_Object);
+    }
+
+    MDefinition *parSlice() const {
+        return getOperand(0);
+    }
+
+    JSObject *templateObject() const {
+        return templateObject_;
+    }
+};
+
+// Could be allocating either a new array or a new object.
+class MParBailout : public MAryControlInstruction<0, 0>
+{
+  public:
+    INSTRUCTION_HEADER(ParBailout);
+
+    MParBailout()
+      : MAryControlInstruction<0, 0>()
+    {
+        setResultType(MIRType_Undefined);
+        setGuard();
     }
 };
 
@@ -1270,6 +1331,9 @@ class MCall
         return setOperand(FunctionOperandIndex, func);
     }
 
+    MPrepareCall *getPrepareCall() {
+        return getOperand(PrepareCallOperandIndex)->toPrepareCall();
+    }
     MDefinition *getFunction() const {
         return getOperand(FunctionOperandIndex);
     }
@@ -1360,12 +1424,101 @@ class MApplyArgs
     }
 };
 
-class MUnaryInstruction : public MAryInstruction<1>
+class MGetDynamicName
+  : public MAryInstruction<2>,
+    public MixPolicy<ObjectPolicy<0>, StringPolicy<1> >
 {
   protected:
-    MUnaryInstruction(MDefinition *ins)
+    MGetDynamicName(MDefinition *scopeChain, MDefinition *name)
     {
-        setOperand(0, ins);
+        setOperand(0, scopeChain);
+        setOperand(1, name);
+        setResultType(MIRType_Value);
+    }
+
+  public:
+    INSTRUCTION_HEADER(GetDynamicName)
+
+    static MGetDynamicName *
+    New(MDefinition *scopeChain, MDefinition *name) {
+        return new MGetDynamicName(scopeChain, name);
+    }
+
+    MDefinition *getScopeChain() const {
+        return getOperand(0);
+    }
+    MDefinition *getName() const {
+        return getOperand(1);
+    }
+
+    TypePolicy *typePolicy() {
+        return this;
+    }
+};
+
+// Bailout if the input string contains 'arguments'
+class MFilterArguments
+  : public MAryInstruction<1>,
+    public StringPolicy<0>
+{
+  protected:
+    MFilterArguments(MDefinition *string)
+    {
+        setOperand(0, string);
+        setGuard();
+        setResultType(MIRType_None);
+    }
+
+  public:
+    INSTRUCTION_HEADER(FilterArguments)
+
+    static MFilterArguments *
+    New(MDefinition *string) {
+        return new MFilterArguments(string);
+    }
+
+    MDefinition *getString() const {
+        return getOperand(0);
+    }
+
+    TypePolicy *typePolicy() {
+        return this;
+    }
+};
+
+class MCallDirectEval
+  : public MAryInstruction<3>,
+    public MixPolicy<ObjectPolicy<0>, MixPolicy<StringPolicy<1>, BoxPolicy<2> > >
+{
+  protected:
+    MCallDirectEval(MDefinition *scopeChain, MDefinition *string, MDefinition *thisValue)
+    {
+        setOperand(0, scopeChain);
+        setOperand(1, string);
+        setOperand(2, thisValue);
+        setResultType(MIRType_Value);
+    }
+
+  public:
+    INSTRUCTION_HEADER(CallDirectEval)
+
+    static MCallDirectEval *
+    New(MDefinition *scopeChain, MDefinition *string, MDefinition *thisValue) {
+        return new MCallDirectEval(scopeChain, string, thisValue);
+    }
+
+    MDefinition *getScopeChain() const {
+        return getOperand(0);
+    }
+    MDefinition *getString() const {
+        return getOperand(1);
+    }
+    MDefinition *getThisValue() const {
+        return getOperand(2);
+    }
+
+    TypePolicy *typePolicy() {
+        return this;
     }
 };
 
@@ -1610,6 +1763,7 @@ class MBox : public MUnaryInstruction
 
         return new MBox(ins);
     }
+
     bool congruentTo(MDefinition *const &ins) const {
         return congruentIfOperandsEqual(ins);
     }
@@ -1683,6 +1837,7 @@ class MUnbox : public MUnaryInstruction
     AliasSet getAliasSet() const {
         return AliasSet::None();
     }
+    void printOpcode(FILE *fp);
 };
 
 class MGuardObject : public MUnaryInstruction, public SingleObjectPolicy
@@ -1716,7 +1871,7 @@ class MGuardObject : public MUnaryInstruction, public SingleObjectPolicy
 
 class MGuardString
   : public MUnaryInstruction,
-    public StringPolicy
+    public StringPolicy<0>
 {
     MGuardString(MDefinition *ins)
       : MUnaryInstruction(ins)
@@ -1953,6 +2108,10 @@ class MToDouble
     AliasSet getAliasSet() const {
         return AliasSet::None();
     }
+
+    void computeRange();
+    bool truncate();
+    bool isOperandTruncated(size_t index) const;
 };
 
 // Converts a primitive (either typed or untyped) to an int32. If the input is
@@ -2000,6 +2159,7 @@ class MToInt32 : public MUnaryInstruction
     AliasSet getAliasSet() const {
         return AliasSet::None();
     }
+    void computeRange();
 };
 
 // Converts a value or typed input to a truncated int32, for use with bitwise
@@ -2032,6 +2192,9 @@ class MTruncateToInt32 : public MUnaryInstruction
     AliasSet getAliasSet() const {
         return AliasSet::None();
     }
+
+    void computeRange();
+    bool isOperandTruncated(size_t index) const;
 };
 
 // Converts any type to a string
@@ -2192,6 +2355,8 @@ class MBinaryBitwiseInstruction
             return AliasSet::Store(AliasSet::Any);
         return AliasSet::None();
     }
+
+    bool isOperandTruncated(size_t index) const;
 };
 
 class MBitAnd : public MBinaryBitwiseInstruction
@@ -2365,9 +2530,20 @@ class MBinaryArithInstruction
   : public MBinaryInstruction,
     public ArithPolicy
 {
+    // Implicit truncate flag is set by the truncate backward range analysis
+    // optimization phase, and by asm.js pre-processing. It is used in
+    // NeedNegativeZeroCheck to check if the result of a multiplication needs to
+    // produce -0 double value, and for avoiding overflow checks.
+
+    // This optimization happens when the multiplication cannot be truncated
+    // even if all uses are truncating its result, such as when the range
+    // analysis detect a precision loss in the multiplication.
+    bool implicitTruncate_;
+
   public:
     MBinaryArithInstruction(MDefinition *left, MDefinition *right)
-      : MBinaryInstruction(left, right)
+      : MBinaryInstruction(left, right),
+        implicitTruncate_(false)
     {
         setMovable();
     }
@@ -2397,6 +2573,13 @@ class MBinaryArithInstruction
         if (specialization_ >= MIRType_Object)
             return AliasSet::Store(AliasSet::Any);
         return AliasSet::None();
+    }
+
+    bool isTruncated() const {
+        return implicitTruncate_;
+    }
+    void setTruncated(bool truncate) {
+        implicitTruncate_ = truncate;
     }
 };
 
@@ -2607,7 +2790,11 @@ class MMathFunction
         Log,
         Sin,
         Cos,
-        Tan
+        Exp,
+        Tan,
+        ACos,
+        ASin,
+        ATan
     };
 
   private:
@@ -2653,13 +2840,9 @@ class MMathFunction
 
 class MAdd : public MBinaryArithInstruction
 {
-    int implicitTruncate_;
     // Is this instruction really an int at heart?
-    bool isBigInt_;
     MAdd(MDefinition *left, MDefinition *right)
-      : MBinaryArithInstruction(left, right),
-        implicitTruncate_(0),
-        isBigInt_(left->isBigIntOutput() && right->isBigIntOutput())
+      : MBinaryArithInstruction(left, right)
     {
         setResultType(MIRType_Value);
     }
@@ -2669,39 +2852,21 @@ class MAdd : public MBinaryArithInstruction
     static MAdd *New(MDefinition *left, MDefinition *right) {
         return new MAdd(left, right);
     }
-    void analyzeTruncateBackward();
 
-    int isTruncated() const {
-        return implicitTruncate_;
-    }
-    void setTruncated(int truncate) {
-        implicitTruncate_ = truncate;
-    }
-    bool updateForReplacement(MDefinition *ins);
     double getIdentity() {
         return 0;
     }
 
     bool fallible();
     void computeRange();
-    // This is an add, so the return value is from only
-    // integer sources if we know we return an int32
-    // or it has been explicitly marked as being a large int.
-    bool isBigIntOutput() {
-        return (type() == MIRType_Int32) || isBigInt_;
-    }
-    // An add will produce a big int if both of its sources are big ints.
-    void recalculateBigInt() {
-        isBigInt_ = (lhs()->isBigIntOutput() && rhs()->isBigIntOutput());
-    }
+    bool truncate();
+    bool isOperandTruncated(size_t index) const;
 };
 
 class MSub : public MBinaryArithInstruction
 {
-    int implicitTruncate_;
     MSub(MDefinition *left, MDefinition *right)
-      : MBinaryArithInstruction(left, right),
-        implicitTruncate_(0)
+      : MBinaryArithInstruction(left, right)
     {
         setResultType(MIRType_Value);
     }
@@ -2712,21 +2877,14 @@ class MSub : public MBinaryArithInstruction
         return new MSub(left, right);
     }
 
-    void analyzeTruncateBackward();
-    int isTruncated() const {
-        return implicitTruncate_;
-    }
-    void setTruncated(int truncate) {
-        implicitTruncate_ = truncate;
-    }
-    bool updateForReplacement(MDefinition *ins);
-
     double getIdentity() {
         return 0;
     }
 
     bool fallible();
     void computeRange();
+    bool truncate();
+    bool isOperandTruncated(size_t index) const;
 };
 
 class MMul : public MBinaryArithInstruction
@@ -2742,29 +2900,18 @@ class MMul : public MBinaryArithInstruction
     // and we need to guard this during execution.
     bool canBeNegativeZero_;
 
-    // Annotation the result of this Mul is only used in int32 domain
-    // and we could possible truncate the result.
-    bool possibleTruncate_;
-
-    // Annotation the Mul can truncate. This is only set after range analysis,
-    // because the result could be in the imprecise double range.
-    // In that case the truncated result isn't correct.
-    bool implicitTruncate_;
-
     Mode mode_;
 
     MMul(MDefinition *left, MDefinition *right, MIRType type, Mode mode)
       : MBinaryArithInstruction(left, right),
         canBeNegativeZero_(true),
-        possibleTruncate_(false),
-        implicitTruncate_(false),
         mode_(mode)
     {
         if (mode == Integer) {
             // This implements the required behavior for Math.imul, which
             // can never fail and always truncates its output to int32.
             canBeNegativeZero_ = false;
-            possibleTruncate_ = implicitTruncate_ = true;
+            setTruncated(true);
         }
         JS_ASSERT_IF(mode != Integer, mode == Normal);
 
@@ -2785,7 +2932,6 @@ class MMul : public MBinaryArithInstruction
     MDefinition *foldsTo(bool useValueNumbers);
     void analyzeEdgeCasesForward();
     void analyzeEdgeCasesBackward();
-    void analyzeTruncateBackward();
 
     double getIdentity() {
         return 1;
@@ -2807,21 +2953,8 @@ class MMul : public MBinaryArithInstruction
     }
 
     void computeRange();
-
-    bool isPossibleTruncated() const {
-        return possibleTruncate_;
-    }
-
-    void setPossibleTruncated(bool truncate) {
-        possibleTruncate_ = truncate;
-
-        // We can remove the negative zero check, because op if it is only used truncated.
-        // The "Possible" in the function name means that we are not sure,
-        // that "integer mul and disregarding overflow" == "double mul and ToInt32"
-        // Note: when removing truncated state, we have to add negative zero check again,
-        // because we are not sure if it was removed by this or other passes.
-        canBeNegativeZero_ = !truncate;
-    }
+    bool truncate();
+    bool isOperandTruncated(size_t index) const;
 
     Mode mode() { return mode_; }
 };
@@ -2831,14 +2964,12 @@ class MDiv : public MBinaryArithInstruction
     bool canBeNegativeZero_;
     bool canBeNegativeOverflow_;
     bool canBeDivideByZero_;
-    int implicitTruncate_;
 
     MDiv(MDefinition *left, MDefinition *right, MIRType type)
       : MBinaryArithInstruction(left, right),
         canBeNegativeZero_(true),
         canBeNegativeOverflow_(true),
-        canBeDivideByZero_(true),
-        implicitTruncate_(0)
+        canBeDivideByZero_(true)
     {
         if (type != MIRType_Value)
             specialization_ = type;
@@ -2857,18 +2988,10 @@ class MDiv : public MBinaryArithInstruction
     MDefinition *foldsTo(bool useValueNumbers);
     void analyzeEdgeCasesForward();
     void analyzeEdgeCasesBackward();
-    void analyzeTruncateBackward();
 
     double getIdentity() {
         JS_NOT_REACHED("not used");
         return 1;
-    }
-
-    int isTruncated() const {
-        return implicitTruncate_;
-    }
-    void setTruncated(int truncate) {
-        implicitTruncate_ = truncate;
     }
 
     bool canBeNegativeZero() {
@@ -2886,17 +3009,14 @@ class MDiv : public MBinaryArithInstruction
         return canBeDivideByZero_;
     }
 
-    bool updateForReplacement(MDefinition *ins);
     bool fallible();
+    bool truncate();
 };
 
 class MMod : public MBinaryArithInstruction
 {
-    int implicitTruncate_;
-
     MMod(MDefinition *left, MDefinition *right)
-      : MBinaryArithInstruction(left, right),
-        implicitTruncate_(0)
+      : MBinaryArithInstruction(left, right)
     {
         setResultType(MIRType_Value);
     }
@@ -2908,23 +3028,16 @@ class MMod : public MBinaryArithInstruction
     }
 
     MDefinition *foldsTo(bool useValueNumbers);
-    void analyzeTruncateBackward();
 
     double getIdentity() {
         JS_NOT_REACHED("not used");
         return 1;
     }
 
-    int isTruncated() const {
-        return implicitTruncate_;
-    }
-    void setTruncated(int truncate) {
-        implicitTruncate_ = truncate;
-    }
-
-    bool updateForReplacement(MDefinition *ins);
-    void computeRange();
     bool fallible();
+
+    void computeRange();
+    bool truncate();
 };
 
 class MConcat
@@ -2957,7 +3070,7 @@ class MConcat
 
 class MCharCodeAt
   : public MBinaryInstruction,
-    public MixPolicy<StringPolicy, IntPolicy<1> >
+    public MixPolicy<StringPolicy<0>, IntPolicy<1> >
 {
     MCharCodeAt(MDefinition *str, MDefinition *index)
         : MBinaryInstruction(str, index)
@@ -3188,6 +3301,45 @@ class MCheckOverRecursed : public MNullaryInstruction
     INSTRUCTION_HEADER(CheckOverRecursed)
 };
 
+// Check the current frame for over-recursion past the global stack limit.
+// Uses the per-thread recursion limit.
+class MParCheckOverRecursed : public MUnaryInstruction
+{
+  public:
+    INSTRUCTION_HEADER(ParCheckOverRecursed);
+
+    MParCheckOverRecursed(MDefinition *parForkJoinSlice)
+      : MUnaryInstruction(parForkJoinSlice)
+    {
+        setResultType(MIRType_None);
+        setGuard();
+        setMovable();
+    }
+
+    MDefinition *parSlice() const {
+        return getOperand(0);
+    }
+};
+
+// Check for an interrupt (or rendezvous) in parallel mode.
+class MParCheckInterrupt : public MUnaryInstruction
+{
+  public:
+    INSTRUCTION_HEADER(ParCheckInterrupt);
+
+    MParCheckInterrupt(MDefinition *parForkJoinSlice)
+      : MUnaryInstruction(parForkJoinSlice)
+    {
+        setResultType(MIRType_None);
+        setGuard();
+        setMovable();
+    }
+
+    MDefinition *parSlice() const {
+        return getOperand(0);
+    }
+};
+
 // Check the script's use count and trigger recompilation to inline
 // calls when the script becomes hot.
 class MRecompileCheck : public MNullaryInstruction
@@ -3343,7 +3495,7 @@ class MRegExp : public MNullaryInstruction
 
 class MRegExpTest
   : public MBinaryInstruction,
-    public MixPolicy<ObjectPolicy<1>, StringPolicy >
+    public MixPolicy<ObjectPolicy<1>, StringPolicy<0> >
 {
   private:
 
@@ -3398,6 +3550,47 @@ class MLambda
     }
     TypePolicy *typePolicy() {
         return this;
+    }
+};
+
+class MParLambda
+  : public MBinaryInstruction,
+    public SingleObjectPolicy
+{
+    CompilerRootFunction fun_;
+
+    MParLambda(MDefinition *parSlice,
+               MDefinition *scopeChain, JSFunction *fun)
+      : MBinaryInstruction(parSlice, scopeChain), fun_(fun)
+    {
+        setResultType(MIRType_Object);
+    }
+
+  public:
+    INSTRUCTION_HEADER(ParLambda);
+
+    static MParLambda *New(MDefinition *parSlice,
+                           MDefinition *scopeChain, JSFunction *fun) {
+        return new MParLambda(parSlice, scopeChain, fun);
+    }
+
+    static MParLambda *New(MDefinition *parSlice,
+                           MLambda *originalInstruction) {
+        return New(parSlice,
+                   originalInstruction->scopeChain(),
+                   originalInstruction->fun());
+    }
+
+    MDefinition *parSlice() const {
+        return getOperand(0);
+    }
+
+    MDefinition *scopeChain() const {
+        return getOperand(1);
+    }
+
+    JSFunction *fun() const {
+        return fun_;
     }
 };
 
@@ -3960,11 +4153,13 @@ class MStoreElementCommon
 {
     bool needsBarrier_;
     MIRType elementType_;
+    bool racy_; // if true, exempted from normal data race req. during par. exec.
 
   protected:
     MStoreElementCommon()
       : needsBarrier_(false),
-        elementType_(MIRType_Value)
+        elementType_(MIRType_Value),
+        racy_(false)
     { }
 
   public:
@@ -3980,6 +4175,12 @@ class MStoreElementCommon
     }
     void setNeedsBarrier() {
         needsBarrier_ = true;
+    }
+    bool racy() const {
+        return racy_;
+    }
+    void setRacy() {
+        racy_ = true;
     }
 };
 
@@ -4288,9 +4489,12 @@ class MStoreTypedArrayElement
 {
     int arrayType_;
 
+    // See note in MStoreElementCommon.
+    bool racy_;
+
     MStoreTypedArrayElement(MDefinition *elements, MDefinition *index, MDefinition *value,
                             int arrayType)
-      : MTernaryInstruction(elements, index, value), arrayType_(arrayType)
+      : MTernaryInstruction(elements, index, value), arrayType_(arrayType), racy_(false)
     {
         setResultType(MIRType_Value);
         setMovable();
@@ -4333,6 +4537,12 @@ class MStoreTypedArrayElement
     }
     AliasSet getAliasSet() const {
         return AliasSet::Store(AliasSet::TypedArrayElement);
+    }
+    bool racy() const {
+        return racy_;
+    }
+    void setRacy() {
+        racy_ = true;
     }
 };
 
@@ -4440,7 +4650,7 @@ class MStoreFixedSlot
       : MBinaryInstruction(obj, rval),
         needsBarrier_(barrier),
         slot_(slot)
-    {}
+    { }
 
   public:
     INSTRUCTION_HEADER(StoreFixedSlot)
@@ -4484,22 +4694,18 @@ class InlinePropertyTable : public TempObject
         CompilerRootFunction func;
 
         Entry(types::TypeObject *typeObj, JSFunction *func)
-          : typeObj(typeObj),
-            func(func)
-        {
-        }
+          : typeObj(typeObj), func(func)
+        { }
     };
+
     jsbytecode *pc_;
     MResumePoint *priorResumePoint_;
     Vector<Entry *, 4, IonAllocPolicy> entries_;
 
   public:
     InlinePropertyTable(jsbytecode *pc)
-      : pc_(pc),
-        priorResumePoint_(NULL),
-        entries_()
-    {
-    }
+      : pc_(pc), priorResumePoint_(NULL), entries_()
+    { }
 
     void setPriorResumePoint(MResumePoint *resumePoint) {
         JS_ASSERT(priorResumePoint_ == NULL);
@@ -4532,26 +4738,7 @@ class InlinePropertyTable : public TempObject
         return entries_[i]->func;
     }
 
-    void trimToAndMaybePatchTargets(AutoObjectVector &targets, AutoObjectVector &originals) {
-        size_t i = 0;
-        while (i < numEntries()) {
-            bool foundFunc = false;
-            // Compare using originals, but if we find a matching function,
-            // patch it to the target, which might be a clone.
-            for (size_t j = 0; j < originals.length(); j++) {
-                if (entries_[i]->func == originals[j]) {
-                    if (entries_[i]->func != targets[j])
-                        entries_[i] = new Entry(entries_[i]->typeObj, targets[j]->toFunction());
-                    foundFunc = true;
-                    break;
-                }
-            }
-            if (!foundFunc)
-                entries_.erase(&(entries_[i]));
-            else
-                i++;
-        }
-    }
+    void trimToAndMaybePatchTargets(AutoObjectVector &targets, AutoObjectVector &originals);
 };
 
 class MGetPropertyCache
@@ -4806,9 +4993,11 @@ class MPolyInlineDispatch : public MControlInstruction, public SingleObjectPolic
 
 
 class MGetElementCache
-  : public MBinaryInstruction,
-    public MixPolicy<ObjectPolicy<0>, BoxPolicy<1> >
+  : public MBinaryInstruction
 {
+    MixPolicy<ObjectPolicy<0>, BoxPolicy<1> > PolicyV;
+    MixPolicy<ObjectPolicy<0>, IntPolicy<1> > PolicyT;
+
     // See the comment in IonBuilder::jsop_getelem.
     bool monitoredResult_;
 
@@ -4835,7 +5024,9 @@ class MGetElementCache
         return monitoredResult_;
     }
     TypePolicy *typePolicy() {
-        return this;
+        if (type() == MIRType_Value)
+            return &PolicyV;
+        return &PolicyT;
     }
 };
 
@@ -4847,7 +5038,7 @@ class MBindNameCache
     CompilerRootScript script_;
     jsbytecode *pc_;
 
-    MBindNameCache(MDefinition *scopeChain, PropertyName *name, UnrootedScript script, jsbytecode *pc)
+    MBindNameCache(MDefinition *scopeChain, PropertyName *name, RawScript script, jsbytecode *pc)
       : MUnaryInstruction(scopeChain), name_(name), script_(script), pc_(pc)
     {
         setResultType(MIRType_Object);
@@ -4856,7 +5047,7 @@ class MBindNameCache
   public:
     INSTRUCTION_HEADER(BindNameCache)
 
-    static MBindNameCache *New(MDefinition *scopeChain, PropertyName *name, UnrootedScript script,
+    static MBindNameCache *New(MDefinition *scopeChain, PropertyName *name, RawScript script,
                                jsbytecode *pc) {
         return new MBindNameCache(scopeChain, name, script, pc);
     }
@@ -4870,7 +5061,7 @@ class MBindNameCache
     PropertyName *name() const {
         return name_;
     }
-    UnrootedScript script() const {
+    RawScript script() const {
         return script_;
     }
     jsbytecode *pc() const {
@@ -4886,7 +5077,7 @@ class MGuardShape
     CompilerRootShape shape_;
     BailoutKind bailoutKind_;
 
-    MGuardShape(MDefinition *obj, UnrootedShape shape, BailoutKind bailoutKind)
+    MGuardShape(MDefinition *obj, RawShape shape, BailoutKind bailoutKind)
       : MUnaryInstruction(obj),
         shape_(shape),
         bailoutKind_(bailoutKind)
@@ -4899,7 +5090,7 @@ class MGuardShape
   public:
     INSTRUCTION_HEADER(GuardShape)
 
-    static MGuardShape *New(MDefinition *obj, UnrootedShape shape, BailoutKind bailoutKind) {
+    static MGuardShape *New(MDefinition *obj, RawShape shape, BailoutKind bailoutKind) {
         return new MGuardShape(obj, shape, bailoutKind);
     }
 
@@ -4909,7 +5100,7 @@ class MGuardShape
     MDefinition *obj() const {
         return getOperand(0);
     }
-    const UnrootedShape shape() const {
+    const RawShape shape() const {
         return shape_;
     }
     BailoutKind bailoutKind() const {
@@ -5051,6 +5242,27 @@ class MFunctionEnvironment
 
     MDefinition *function() const {
         return getOperand(0);
+    }
+};
+
+// Loads the current js::ForkJoinSlice*.
+// Only applicable in ParallelExecution.
+class MParSlice
+  : public MNullaryInstruction
+{
+  public:
+    MParSlice()
+        : MNullaryInstruction()
+    {
+        setResultType(MIRType_ForkJoinSlice);
+    }
+
+    INSTRUCTION_HEADER(ParSlice);
+
+    AliasSet getAliasSet() const {
+        // Indicate that this instruction reads nothing, stores nothing.
+        // (For all intents and purposes)
+        return AliasSet::None();
     }
 };
 
@@ -5541,7 +5753,7 @@ class MGetDOMProperty
 
 class MStringLength
   : public MUnaryInstruction,
-    public StringPolicy
+    public StringPolicy<0>
 {
     MStringLength(MDefinition *string)
       : MUnaryInstruction(string)
@@ -5895,31 +6107,99 @@ class MGetArgument
    }
 };
 
+class MParWriteGuard
+  : public MBinaryInstruction,
+    public ObjectPolicy<1>
+{
+    MParWriteGuard(MDefinition *parThreadContext,
+                   MDefinition *obj)
+      : MBinaryInstruction(parThreadContext, obj)
+    {
+        setResultType(MIRType_None);
+        setGuard();
+        setMovable();
+    }
+
+  public:
+    INSTRUCTION_HEADER(ParWriteGuard);
+
+    static MParWriteGuard *New(MDefinition *parThreadContext, MDefinition *obj) {
+        return new MParWriteGuard(parThreadContext, obj);
+    }
+    MDefinition *parSlice() const {
+        return getOperand(0);
+    }
+    MDefinition *object() const {
+        return getOperand(1);
+    }
+    BailoutKind bailoutKind() const {
+        return Bailout_Normal;
+    }
+    AliasSet getAliasSet() const {
+        return AliasSet::None();
+    }
+};
+
+class MParDump
+  : public MUnaryInstruction,
+    public BoxPolicy<0>
+{
+  public:
+    INSTRUCTION_HEADER(ParDump);
+
+    MParDump(MDefinition *v)
+      : MUnaryInstruction(v)
+    {
+        setResultType(MIRType_None);
+    }
+
+    MDefinition *value() const {
+        return getOperand(0);
+    }
+
+    TypePolicy *typePolicy() {
+        return this;
+    }
+};
+
+
 // Given a value, guard that the value is in a particular TypeSet, then returns
 // that value.
-class MTypeBarrier : public MUnaryInstruction
+class MTypeBarrier
+  : public MUnaryInstruction,
+    public BoxInputsPolicy
 {
     BailoutKind bailoutKind_;
     const types::StackTypeSet *typeSet_;
 
-    MTypeBarrier(MDefinition *def, const types::StackTypeSet *types)
+    MTypeBarrier(MDefinition *def, const types::StackTypeSet *types, BailoutKind bailoutKind)
       : MUnaryInstruction(def),
         typeSet_(types)
     {
         setResultType(MIRType_Value);
         setGuard();
         setMovable();
-        bailoutKind_ = def->isEffectful()
-                       ? Bailout_TypeBarrier
-                       : Bailout_Normal;
+        bailoutKind_ = bailoutKind;
     }
 
   public:
     INSTRUCTION_HEADER(TypeBarrier)
 
     static MTypeBarrier *New(MDefinition *def, const types::StackTypeSet *types) {
-        return new MTypeBarrier(def, types);
+        BailoutKind bailoutKind = def->isEffectful()
+                                  ? Bailout_TypeBarrier
+                                  : Bailout_Normal;
+        return new MTypeBarrier(def, types, bailoutKind);
     }
+    static MTypeBarrier *New(MDefinition *def, const types::StackTypeSet *types,
+                             BailoutKind bailoutKind) {
+        return new MTypeBarrier(def, types, bailoutKind);
+    }
+
+    TypePolicy *typePolicy() {
+        return this;
+    }
+
     bool congruentTo(MDefinition * const &def) const {
         return false;
     }
@@ -5938,7 +6218,6 @@ class MTypeBarrier : public MUnaryInstruction
     virtual bool neverHoist() const {
         return typeSet()->empty();
     }
-
 };
 
 // Like MTypeBarrier, guard that the value is in the given type set. This is
@@ -6045,7 +6324,7 @@ class MNewCallObject : public MUnaryInstruction
     MDefinition *slots() {
         return getOperand(0);
     }
-    JSObject *templateObj() {
+    JSObject *templateObject() {
         return templateObj_;
     }
     AliasSet getAliasSet() const {
@@ -6053,9 +6332,54 @@ class MNewCallObject : public MUnaryInstruction
     }
 };
 
+class MParNewCallObject : public MBinaryInstruction
+{
+    CompilerRootObject templateObj_;
+
+    MParNewCallObject(MDefinition *parSlice,
+                      JSObject *templateObj, MDefinition *slots)
+        : MBinaryInstruction(parSlice, slots),
+          templateObj_(templateObj)
+    {
+        setResultType(MIRType_Object);
+    }
+
+  public:
+    INSTRUCTION_HEADER(ParNewCallObject);
+
+    static MParNewCallObject *New(MDefinition *parSlice,
+                                  JSObject *templateObj,
+                                  MDefinition *slots) {
+        return new MParNewCallObject(parSlice, templateObj, slots);
+    }
+
+    static MParNewCallObject *New(MDefinition *parSlice,
+                                  MNewCallObject *originalInstruction) {
+        return New(parSlice,
+                   originalInstruction->templateObject(),
+                   originalInstruction->slots());
+    }
+
+    MDefinition *parSlice() const {
+        return getOperand(0);
+    }
+
+    MDefinition *slots() const {
+        return getOperand(1);
+    }
+
+    JSObject *templateObj() const {
+        return templateObj_;
+    }
+
+    AliasSet getAliasSet() const {
+        return AliasSet::None();
+    }
+};
+
 class MNewStringObject :
   public MUnaryInstruction,
-  public StringPolicy
+  public StringPolicy<0>
 {
     CompilerRootObject templateObj_;
 
@@ -6105,7 +6429,7 @@ class MFunctionBoundary : public MNullaryInstruction
     Type type_;
     unsigned inlineLevel_;
 
-    MFunctionBoundary(UnrootedScript script, Type type, unsigned inlineLevel)
+    MFunctionBoundary(RawScript script, Type type, unsigned inlineLevel)
       : script_(script), type_(type), inlineLevel_(inlineLevel)
     {
         JS_ASSERT_IF(type != Inline_Exit, script != NULL);
@@ -6116,12 +6440,12 @@ class MFunctionBoundary : public MNullaryInstruction
   public:
     INSTRUCTION_HEADER(FunctionBoundary)
 
-    static MFunctionBoundary *New(UnrootedScript script, Type type,
+    static MFunctionBoundary *New(RawScript script, Type type,
                                   unsigned inlineLevel = 0) {
         return new MFunctionBoundary(script, type, inlineLevel);
     }
 
-    UnrootedScript script() {
+    RawScript script() {
         return script_;
     }
 
@@ -6155,6 +6479,38 @@ class MEnclosingScope : public MLoadFixedSlot
     AliasSet getAliasSet() const {
         // ScopeObject reserved slots are immutable.
         return AliasSet::None();
+    }
+};
+
+// Creates a dense array of the given length.
+//
+// Note: the template object should be an *empty* dense array!
+class MParNewDenseArray : public MBinaryInstruction
+{
+    CompilerRootObject templateObject_;
+
+  public:
+    INSTRUCTION_HEADER(ParNewDenseArray);
+
+    MParNewDenseArray(MDefinition *parSlice,
+                      MDefinition *length,
+                      JSObject *templateObject)
+      : MBinaryInstruction(parSlice, length),
+        templateObject_(templateObject)
+    {
+        setResultType(MIRType_Object);
+    }
+
+    MDefinition *parSlice() const {
+        return getOperand(0);
+    }
+
+    MDefinition *length() const {
+        return getOperand(1);
+    }
+
+    JSObject *templateObject() const {
+        return templateObject_;
     }
 };
 

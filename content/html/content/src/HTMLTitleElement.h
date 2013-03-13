@@ -66,13 +66,11 @@ public:
 
   virtual void DoneAddingChildren(bool aHaveNotified);
 
-  virtual nsXPCClassInfo* GetClassInfo();
-
   virtual nsIDOMNode* AsDOMNode() { return this; }
 
 protected:
 
-  virtual JSObject* WrapNode(JSContext* cx, JSObject* scope, bool* triedToWrap)
+  virtual JSObject* WrapNode(JSContext* cx, JSObject* scope)
     MOZ_OVERRIDE MOZ_FINAL;
 
 private:

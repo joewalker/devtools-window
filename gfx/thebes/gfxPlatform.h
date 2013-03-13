@@ -37,6 +37,12 @@ class gfxTextRun;
 class nsIURI;
 class nsIAtom;
 
+namespace mozilla {
+namespace gl {
+class GLContext;
+}
+}
+
 extern cairo_user_data_key_t kDrawTarget;
 
 // pref lang id's for font prefs
@@ -217,9 +223,15 @@ public:
       CreateDrawTargetForData(unsigned char* aData, const mozilla::gfx::IntSize& aSize, 
                               int32_t aStride, mozilla::gfx::SurfaceFormat aFormat);
 
+    virtual mozilla::RefPtr<mozilla::gfx::DrawTarget>
+      CreateDrawTargetForFBO(unsigned int aFBOID, mozilla::gl::GLContext* aGLContext,
+                             const mozilla::gfx::IntSize& aSize, mozilla::gfx::SurfaceFormat aFormat);
+
     bool SupportsAzureContent() {
       return GetContentBackend() != mozilla::gfx::BACKEND_NONE;
     }
+
+    virtual bool UseAcceleratedSkiaCanvas();
 
     void GetAzureBackendInfo(mozilla::widget::InfoObject &aObj) {
       aObj.DefineProperty("AzureCanvasBackend", GetBackendName(mPreferredCanvasBackend));
@@ -352,13 +364,11 @@ public:
      */
     bool UseCmapsDuringSystemFallback();
 
-#ifdef MOZ_GRAPHITE
     /**
      * Whether to use the SIL Graphite rendering engine
      * (for fonts that include Graphite tables)
      */
     bool UseGraphiteShaping();
-#endif
 
     /**
      * Whether to use the harfbuzz shaper (depending on script complexity).
@@ -565,9 +575,7 @@ protected:
     }
 
     int8_t  mAllowDownloadableFonts;
-#ifdef MOZ_GRAPHITE
     int8_t  mGraphiteShapingEnabled;
-#endif
 
     int8_t  mBidiNumeralOption;
 

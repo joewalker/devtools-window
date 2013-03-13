@@ -6,8 +6,6 @@
 #ifndef mozilla_dom_SVGMaskElement_h
 #define mozilla_dom_SVGMaskElement_h
 
-#include "nsIDOMSVGMaskElement.h"
-#include "nsIDOMSVGUnitTypes.h"
 #include "nsSVGEnum.h"
 #include "nsSVGLength2.h"
 #include "nsSVGElement.h"
@@ -25,8 +23,7 @@ namespace dom {
 typedef nsSVGElement SVGMaskElementBase;
 
 class SVGMaskElement MOZ_FINAL : public SVGMaskElementBase,
-                                 public nsIDOMSVGMaskElement,
-                                 public nsIDOMSVGUnitTypes
+                                 public nsIDOMSVGElement
 {
   friend class ::nsSVGMaskFrame;
 
@@ -34,14 +31,11 @@ protected:
   friend nsresult (::NS_NewSVGMaskElement(nsIContent **aResult,
                                           already_AddRefed<nsINodeInfo> aNodeInfo));
   SVGMaskElement(already_AddRefed<nsINodeInfo> aNodeInfo);
-  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope, bool *triedToWrap) MOZ_OVERRIDE;
+  virtual JSObject* WrapNode(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
 
 public:
   // interfaces:
   NS_DECL_ISUPPORTS_INHERITED
-
-  // Mask Element
-  NS_DECL_NSIDOMSVGMASKELEMENT
 
   NS_FORWARD_NSIDOMNODE_TO_NSINODE
   NS_FORWARD_NSIDOMELEMENT_TO_GENERIC
@@ -50,8 +44,6 @@ public:
   // nsIContent interface
   virtual nsresult Clone(nsINodeInfo *aNodeInfo, nsINode **aResult) const;
   NS_IMETHOD_(bool) IsAttributeMapped(const nsIAtom* aAttribute) const;
-
-  virtual nsXPCClassInfo* GetClassInfo();
 
   virtual nsIDOMNode* AsDOMNode() { return this; }
 
@@ -71,7 +63,6 @@ protected:
   virtual LengthAttributesInfo GetLengthInfo();
   virtual EnumAttributesInfo GetEnumInfo();
 
-  // nsIDOMSVGMaskElement values
   enum { ATTR_X, ATTR_Y, ATTR_WIDTH, ATTR_HEIGHT };
   nsSVGLength2 mLengthAttributes[4];
   static LengthInfo sLengthInfo[4];

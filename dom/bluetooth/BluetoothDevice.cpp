@@ -12,6 +12,8 @@
 
 #include "nsDOMClassInfo.h"
 #include "nsContentUtils.h"
+#include "nsTArrayHelpers.h"
+
 #include "mozilla/dom/bluetooth/BluetoothTypes.h"
 
 USING_BLUETOOTH_NAMESPACE
@@ -59,15 +61,18 @@ BluetoothDevice::BluetoothDevice(nsPIDOMWindow* aWindow,
   for (uint32_t i = 0; i < values.Length(); ++i) {
     SetPropertyByValue(values[i]);
   }
+
+  BluetoothService* bs = BluetoothService::Get();
+  NS_ENSURE_TRUE_VOID(bs);
+  bs->RegisterBluetoothSignalHandler(mPath, this);
 }
 
 BluetoothDevice::~BluetoothDevice()
 {
   BluetoothService* bs = BluetoothService::Get();
   // bs can be null on shutdown, where destruction might happen.
-  if (bs) {
-    bs->UnregisterBluetoothSignalHandler(mPath, this);
-  }
+  NS_ENSURE_TRUE_VOID(bs);
+  bs->UnregisterBluetoothSignalHandler(mPath, this);
   Unroot();
 }
 
@@ -117,7 +122,9 @@ BluetoothDevice::SetPropertyByValue(const BluetoothNamedValue& aValue)
     nsIScriptContext* sc = GetContextForEventHandlers(&rv);
     NS_ENSURE_SUCCESS_VOID(rv);
 
-    if (!SetJsObject(sc->GetNativeContext(), value, mJsUuids)) {
+    if (NS_FAILED(nsTArrayToJSArray(sc->GetNativeContext(),
+                                    mUuids,
+                                    &mJsUuids))) {
       NS_WARNING("Cannot set JS UUIDs object!");
       return;
     }
@@ -128,8 +135,10 @@ BluetoothDevice::SetPropertyByValue(const BluetoothNamedValue& aValue)
     nsIScriptContext* sc = GetContextForEventHandlers(&rv);
     NS_ENSURE_SUCCESS_VOID(rv);
 
-    if (!SetJsObject(sc->GetNativeContext(), value, mJsServices)) {
-      NS_WARNING("Cannot set JS Devices object!");
+    if (NS_FAILED(nsTArrayToJSArray(sc->GetNativeContext(),
+                                    mServices,
+                                    &mJsServices))) {
+      NS_WARNING("Cannot set JS Services object!");
       return;
     }
     Root();
@@ -150,13 +159,8 @@ BluetoothDevice::Create(nsPIDOMWindow* aWindow,
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aWindow);
 
-  BluetoothService* bs = BluetoothService::Get();
-  NS_ENSURE_TRUE(bs, nullptr);
-
   nsRefPtr<BluetoothDevice> device =
     new BluetoothDevice(aWindow, aAdapterPath, aValue);
-  bs->RegisterBluetoothSignalHandler(device->mPath, device);
-
   return device.forget();
 }
 
@@ -169,8 +173,8 @@ BluetoothDevice::Notify(const BluetoothSignal& aData)
   if (aData.name().EqualsLiteral("PropertyChanged")) {
     NS_ASSERTION(v.type() == BluetoothValue::TArrayOfBluetoothNamedValue,
                  "PropertyChanged: Invalid value type");
-     const InfallibleTArray<BluetoothNamedValue>& arr =
-       v.get_ArrayOfBluetoothNamedValue();
+    const InfallibleTArray<BluetoothNamedValue>& arr =
+      v.get_ArrayOfBluetoothNamedValue();
 
     NS_ASSERTION(arr.Length() == 1,
                  "Got more than one property in a change message!");

@@ -16,16 +16,14 @@
 #include "nsContentUtils.h"
 
 NS_IMPL_NS_NEW_HTML_ELEMENT(TableRow)
-DOMCI_NODE_DATA(HTMLTableRowElement, mozilla::dom::HTMLTableRowElement)
 
 namespace mozilla {
 namespace dom {
 
 JSObject*
-HTMLTableRowElement::WrapNode(JSContext *aCx, JSObject *aScope,
-                              bool *aTriedToWrap)
+HTMLTableRowElement::WrapNode(JSContext *aCx, JSObject *aScope)
 {
-  return HTMLTableRowElementBinding::Wrap(aCx, aScope, this, aTriedToWrap);
+  return HTMLTableRowElementBinding::Wrap(aCx, aScope, this);
 }
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLTableRowElement,
@@ -42,7 +40,7 @@ NS_INTERFACE_TABLE_HEAD_CYCLE_COLLECTION_INHERITED(HTMLTableRowElement)
                                    nsIDOMHTMLTableRowElement)
   NS_HTML_CONTENT_INTERFACE_TABLE_TO_MAP_SEGUE(HTMLTableRowElement,
                                                nsGenericHTMLElement)
-NS_HTML_CONTENT_INTERFACE_TABLE_TAIL_CLASSINFO(HTMLTableRowElement)
+NS_HTML_CONTENT_INTERFACE_MAP_END
 
 
 NS_IMPL_ELEMENT_CLONE(HTMLTableRowElement)

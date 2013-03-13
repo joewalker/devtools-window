@@ -292,17 +292,17 @@ public:
 
   virtual void UpdateCanvasBackground();
 
-  virtual nsresult AddCanvasBackgroundColorItem(nsDisplayListBuilder& aBuilder,
-                                                nsDisplayList& aList,
-                                                nsIFrame* aFrame,
-                                                const nsRect& aBounds,
-                                                nscolor aBackstopColor,
-                                                uint32_t aFlags);
+  virtual void AddCanvasBackgroundColorItem(nsDisplayListBuilder& aBuilder,
+                                            nsDisplayList& aList,
+                                            nsIFrame* aFrame,
+                                            const nsRect& aBounds,
+                                            nscolor aBackstopColor,
+                                            uint32_t aFlags);
 
-  virtual nsresult AddPrintPreviewBackgroundItem(nsDisplayListBuilder& aBuilder,
-                                                 nsDisplayList& aList,
-                                                 nsIFrame* aFrame,
-                                                 const nsRect& aBounds);
+  virtual void AddPrintPreviewBackgroundItem(nsDisplayListBuilder& aBuilder,
+                                             nsDisplayList& aList,
+                                             nsIFrame* aFrame,
+                                             const nsRect& aBounds);
 
   virtual nscolor ComputeBackstopColor(nsView* aDisplayRoot);
 
@@ -334,6 +334,12 @@ public:
     ScrollAxis mContentScrollHAxis;
     uint32_t   mContentToScrollToFlags;
   };
+
+  virtual void ScheduleImageVisibilityUpdate();
+
+  virtual void RebuildImageVisibility(const nsDisplayList& aList);
+
+  virtual void EnsureImageInVisibleList(nsIImageLoadingContent* aImage);
 
 protected:
   virtual ~PresShell();
@@ -640,6 +646,7 @@ protected:
 #endif
   bool InZombieDocument(nsIContent *aContent);
   already_AddRefed<nsIPresShell> GetParentPresShell();
+  nsIContent* GetCurrentEventContent();
   nsIFrame* GetCurrentEventFrame();
   nsresult RetargetEventToParent(nsGUIEvent* aEvent,
                                  nsEventStatus*  aEventStatus);
@@ -703,6 +710,17 @@ protected:
   virtual void ThemeChanged() { mPresContext->ThemeChanged(); }
   virtual void BackingScaleFactorChanged() { mPresContext->UIResolutionChanged(); }
 
+  void UpdateImageVisibility();
+
+  nsRevocableEventPtr<nsRunnableMethod<PresShell> > mUpdateImageVisibilityEvent;
+
+  void ClearVisibleImagesList();
+  static void ClearImageVisibilityVisited(nsView* aView, bool aClear);
+  static void MarkImagesInListVisible(const nsDisplayList& aList);
+
+  // A list of images that are visible or almost visible.
+  nsTArray< nsCOMPtr<nsIImageLoadingContent > > mVisibleImages;
+
 #ifdef DEBUG
   // The reflow root under which we're currently reflowing.  Null when
   // not in reflow.
@@ -737,10 +755,12 @@ protected:
   nsTArray<nsAutoPtr<nsDelayedEvent> > mDelayedEvents;
   nsRevocableEventPtr<nsRunnableMethod<PresShell> > mResizeEvent;
   nsCOMPtr<nsITimer>        mAsyncResizeEventTimer;
+private:
   nsIFrame*                 mCurrentEventFrame;
   nsCOMPtr<nsIContent>      mCurrentEventContent;
   nsTArray<nsIFrame*>       mCurrentEventFrameStack;
   nsCOMArray<nsIContent>    mCurrentEventContentStack;
+protected:
   nsRevocableEventPtr<nsSynthMouseMoveEvent> mSynthMouseMoveEvent;
   nsCOMPtr<nsIContent>      mLastAnchorScrolledTo;
   nsRefPtr<nsCaret>         mCaret;
@@ -791,6 +811,8 @@ protected:
 
   bool                      mAsyncResizeTimerIsActive : 1;
   bool                      mInResize : 1;
+
+  bool                      mImageVisibilityVisited : 1;
 
   static bool               sDisableNonTestMouseEvents;
 };

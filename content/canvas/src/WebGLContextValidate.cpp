@@ -339,6 +339,16 @@ bool WebGLContext::ValidateGLSLVariableName(const nsAString& name, const char *i
         return false;
     }
 
+    nsString prefix1 = NS_LITERAL_STRING("webgl_");
+    nsString prefix2 = NS_LITERAL_STRING("_webgl_");
+
+    if (Substring(name, 0, prefix1.Length()).Equals(prefix1) ||
+        Substring(name, 0, prefix2.Length()).Equals(prefix2))
+    {
+        ErrorInvalidOperation("%s: string contains a reserved GLSL prefix", info);
+        return false;
+    }
+
     return true;
 }
 
@@ -686,6 +696,23 @@ WebGLContext::ValidateUniformLocation(const char* info, WebGLUniformLocation *lo
         return false;
     }
     return true;
+}
+
+bool
+WebGLContext::ValidateSamplerUniformSetter(const char* info, WebGLUniformLocation *location, WebGLint value)
+{
+    if (location->Info().type != SH_SAMPLER_2D &&
+        location->Info().type != SH_SAMPLER_CUBE)
+    {
+        return true;
+    }
+
+    if (value >= 0 && value < mGLMaxTextureUnits)
+        return true;
+
+    ErrorInvalidValue("%s: this uniform location is a sampler, but %d is not a valid texture unit",
+                      info, value);
+    return false;
 }
 
 bool

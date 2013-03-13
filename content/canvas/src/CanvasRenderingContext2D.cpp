@@ -43,8 +43,6 @@
 #include "nsIDocShell.h"
 #include "nsIDOMWindow.h"
 #include "nsPIDOMWindow.h"
-#include "nsIDocShellTreeItem.h"
-#include "nsIDocShellTreeNode.h"
 #include "nsIXPConnect.h"
 #include "nsDisplayList.h"
 
@@ -59,7 +57,6 @@
 #include "gfxFont.h"
 #include "gfxBlur.h"
 #include "gfxUtils.h"
-#include "gfxFontMissingGlyphs.h"
 
 #include "nsFrameManager.h"
 #include "nsFrameLoader.h"
@@ -86,6 +83,7 @@
 #include "mozilla/gfx/PathHelpers.h"
 #include "mozilla/ipc/DocumentRendererParent.h"
 #include "mozilla/ipc/PDocumentRendererParent.h"
+#include "mozilla/MathAlgorithms.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/unused.h"
@@ -97,8 +95,12 @@
 #include "mozilla/dom/HTMLImageElement.h"
 #include "nsHTMLVideoElement.h"
 #include "mozilla/dom/CanvasRenderingContext2DBinding.h"
-#include <cstdlib> // for std::abs(int/long)
-#include <cmath> // for std::abs(float/double)
+
+#ifdef USE_SKIA
+#include "GLContext.h"
+#include "GLContextProvider.h"
+#include "SurfaceTypes.h"
+#endif
 
 #ifdef XP_WIN
 #include "gfxWindowsPlatform.h"
@@ -302,10 +304,10 @@ public:
 
     // We need to enlarge and possibly offset our temporary surface
     // so that things outside of the canvas may cast shadows.
-    mTempRect.Inflate(Margin(blurRadius + std::max<Float>(state.shadowOffset.x, 0),
-                             blurRadius + std::max<Float>(state.shadowOffset.y, 0),
+    mTempRect.Inflate(Margin(blurRadius + std::max<Float>(state.shadowOffset.y, 0),
                              blurRadius + std::max<Float>(-state.shadowOffset.x, 0),
-                             blurRadius + std::max<Float>(-state.shadowOffset.y, 0)));
+                             blurRadius + std::max<Float>(-state.shadowOffset.y, 0),
+                             blurRadius + std::max<Float>(state.shadowOffset.x, 0)));
 
     if (aBounds) {
       // We actually include the bounds of the shadow blur, this makes it
@@ -464,6 +466,20 @@ public:
       mContext->mUserDatas.RemoveElement(this);
     }
   }
+
+#ifdef USE_SKIA
+  static void PreTransactionCallback(void* aData)
+  {
+    CanvasRenderingContext2DUserData* self =
+      static_cast<CanvasRenderingContext2DUserData*>(aData);
+    CanvasRenderingContext2D* context = self->mContext;
+    if (self->mContext && context->mGLContext) {
+      context->mGLContext->MakeCurrent();
+      context->mGLContext->PublishFrame();
+    }
+  }
+#endif
+
   static void DidTransactionCallback(void* aData)
   {
     CanvasRenderingContext2DUserData* self =
@@ -553,10 +569,9 @@ CanvasRenderingContext2D::~CanvasRenderingContext2D()
 }
 
 JSObject*
-CanvasRenderingContext2D::WrapObject(JSContext *cx, JSObject *scope,
-                                     bool *triedToWrap)
+CanvasRenderingContext2D::WrapObject(JSContext *cx, JSObject *scope)
 {
-  return CanvasRenderingContext2DBinding::Wrap(cx, scope, this, triedToWrap);
+  return CanvasRenderingContext2DBinding::Wrap(cx, scope, this);
 }
 
 bool
@@ -784,7 +799,16 @@ CanvasRenderingContext2D::EnsureTarget()
     }
 
      if (layerManager) {
-       mTarget = layerManager->CreateDrawTarget(size, format);
+#ifdef USE_SKIA
+       if (gfxPlatform::GetPlatform()->UseAcceleratedSkiaCanvas()) {
+         mGLContext = mozilla::gl::GLContextProvider::CreateOffscreen(gfxIntSize(size.width,
+                                                                                 size.height),
+                                                                      SurfaceCaps::ForRGBA(),
+                                                                      mozilla::gl::GLContext::ContextFlagsNone);
+         mTarget = gfxPlatform::GetPlatform()->CreateDrawTargetForFBO(0, mGLContext, size, format);
+       } else
+#endif
+         mTarget = layerManager->CreateDrawTarget(size, format);
      } else {
        mTarget = gfxPlatform::GetPlatform()->CreateOffscreenDrawTarget(size, format);
      }
@@ -2062,11 +2086,11 @@ CanvasRenderingContext2D::SetFont(const nsAString& font,
     return;
   }
 
-  const nsStyleFont* fontStyle = sc->GetStyleFont();
+  const nsStyleFont* fontStyle = sc->StyleFont();
 
   NS_ASSERTION(fontStyle, "Could not obtain font style");
 
-  nsIAtom* language = sc->GetStyleFont()->mLanguage;
+  nsIAtom* language = sc->StyleFont()->mLanguage;
   if (!language) {
     language = presShell->GetPresContext()->GetLanguageFromCharset();
   }
@@ -2303,7 +2327,7 @@ struct NS_STACK_CLASS CanvasBidiProcessor : public nsBidiPresUtils::BidiProcesso
 
     uint32_t numRuns;
     const gfxTextRun::GlyphRun *runs = mTextRun->GetGlyphRuns(&numRuns);
-    const uint32_t appUnitsPerDevUnit = mAppUnitsPerDevPixel;
+    const int32_t appUnitsPerDevUnit = mAppUnitsPerDevPixel;
     const double devUnitsPerAppUnit = 1.0/double(appUnitsPerDevUnit);
     Point baselineOrigin =
       Point(point.x * devUnitsPerAppUnit, point.y * devUnitsPerAppUnit);
@@ -2358,51 +2382,16 @@ struct NS_STACK_CLASS CanvasBidiProcessor : public nsBidiPresUtils::BidiProcesso
           mTextRun->GetDetailedGlyphs(i);
 
         if (glyphs[i].IsMissing()) {
-          float xpos;
-          float advance = detailedGlyphs[0].mAdvance * devUnitsPerAppUnit;
+          newGlyph.mIndex = 0;
           if (mTextRun->IsRightToLeft()) {
-            xpos = baselineOrigin.x - advanceSum - advance;
+            newGlyph.mPosition.x = baselineOrigin.x - advanceSum -
+              detailedGlyphs[0].mAdvance * devUnitsPerAppUnit;
           } else {
-            xpos = baselineOrigin.x + advanceSum;
+            newGlyph.mPosition.x = baselineOrigin.x + advanceSum;
           }
-          advanceSum += advance;
-
-          // default-ignorable characters will have zero advance width.
-          // we don't draw a hexbox for them, just leave them invisible
-          if (advance > 0) {
-            // for now, we use gfxFontMissingGlyphs to draw the hexbox;
-            // some day we should replace this with a direct Azure version
-
-            // get the DrawTarget's transform, so we can apply it to the
-            // thebes context for gfxFontMissingGlyphs
-            Matrix matrix = mCtx->mTarget->GetTransform();
-            nsRefPtr<gfxContext> thebes;
-            if (gfxPlatform::GetPlatform()->SupportsAzureContent()) {
-              // XXX See bug 808288 comment 5 - Bas says:
-              // This is a little tricky, potentially this could go wrong if
-              // we fell back to a Cairo context because of for example
-              // extremely large Canvas size. Cairo content is technically
-              // -not- supported, but SupportsAzureContent would return true
-              // as the browser uses D2D content.
-              // I'm thinking Cairo content will be good enough to do
-              // DrawMissingGlyph though.
-              thebes = new gfxContext(mCtx->mTarget);
-            } else {
-              nsRefPtr<gfxASurface> drawSurf;
-              mCtx->GetThebesSurface(getter_AddRefs(drawSurf));
-              thebes = new gfxContext(drawSurf);
-            }
-            thebes->SetMatrix(gfxMatrix(matrix._11, matrix._12, matrix._21,
-                                        matrix._22, matrix._31, matrix._32));
-
-            gfxFloat height = font->GetMetrics().maxAscent;
-            gfxRect glyphRect(xpos, baselineOrigin.y - height,
-                              advance, height);
-            gfxFontMissingGlyphs::DrawMissingGlyph(thebes, glyphRect,
-                                                   detailedGlyphs[0].mGlyphID);
-
-            mCtx->mTarget->SetTransform(matrix);
-          }
+          newGlyph.mPosition.y = baselineOrigin.y;
+          advanceSum += detailedGlyphs[0].mAdvance * devUnitsPerAppUnit;
+          glyphBuf.push_back(newGlyph);
           continue;
         }
 
@@ -2471,7 +2460,7 @@ struct NS_STACK_CLASS CanvasBidiProcessor : public nsBidiPresUtils::BidiProcesso
   gfxFontGroup* mFontgrp;
 
   // dev pixel conversion factor
-  uint32_t mAppUnitsPerDevPixel;
+  int32_t mAppUnitsPerDevPixel;
 
   // operation (fill or stroke)
   CanvasRenderingContext2D::TextDrawOperation mOp;
@@ -2531,7 +2520,7 @@ CanvasRenderingContext2D::DrawOrMeasureText(const nsAString& aRawText,
       return NS_ERROR_FAILURE;
     }
 
-    isRTL = canvasStyle->GetStyleVisibility()->mDirection ==
+    isRTL = canvasStyle->StyleVisibility()->mDirection ==
       NS_STYLE_DIRECTION_RTL;
   } else {
     isRTL = GET_BIDI_OPTION_DIRECTION(document->GetBidiOptions()) == IBMBIDI_TEXTDIRECTION_RTL;
@@ -3422,6 +3411,20 @@ CanvasRenderingContext2D::GetImageDataArray(JSContext* aCx,
     return NS_ERROR_DOM_SYNTAX_ERR;
   }
 
+  IntRect srcRect(0, 0, mWidth, mHeight);
+  IntRect destRect(aX, aY, aWidth, aHeight);
+  IntRect srcReadRect = srcRect.Intersect(destRect);
+  RefPtr<DataSourceSurface> readback;
+  if (!srcReadRect.IsEmpty() && !mZero) {
+    RefPtr<SourceSurface> snapshot = mTarget->Snapshot();
+    if (snapshot) {
+      readback = snapshot->GetDataSurface();
+    }
+    if (!readback || !readback->GetData()) {
+      return NS_ERROR_OUT_OF_MEMORY;
+    }
+  }
+
   JSObject* darray = JS_NewUint8ClampedArray(aCx, len.value());
   if (!darray) {
     return NS_ERROR_OUT_OF_MEMORY;
@@ -3434,25 +3437,14 @@ CanvasRenderingContext2D::GetImageDataArray(JSContext* aCx,
 
   uint8_t* data = JS_GetUint8ClampedArrayData(darray);
 
-  IntRect srcRect(0, 0, mWidth, mHeight);
-  IntRect destRect(aX, aY, aWidth, aHeight);
-
-  IntRect srcReadRect = srcRect.Intersect(destRect);
   IntRect dstWriteRect = srcReadRect;
   dstWriteRect.MoveBy(-aX, -aY);
 
   uint8_t* src = data;
   uint32_t srcStride = aWidth * 4;
-
-  RefPtr<DataSourceSurface> readback;
-  if (!srcReadRect.IsEmpty()) {
-    RefPtr<SourceSurface> snapshot = mTarget->Snapshot();
-    if (snapshot) {
-      readback = snapshot->GetDataSurface();
-
-      srcStride = readback->Stride();
-      src = readback->GetData() + srcReadRect.y * srcStride + srcReadRect.x * 4;
-    }
+  if (readback) {
+    srcStride = readback->Stride();
+    src = readback->GetData() + srcReadRect.y * srcStride + srcReadRect.x * 4;
   }
 
   // NOTE! dst is the same as src, and this relies on reading
@@ -3724,8 +3716,8 @@ CanvasRenderingContext2D::CreateImageData(JSContext* cx, double sw,
   int32_t wi = JS_DoubleToInt32(sw);
   int32_t hi = JS_DoubleToInt32(sh);
 
-  uint32_t w = std::abs(wi);
-  uint32_t h = std::abs(hi);
+  uint32_t w = Abs(wi);
+  uint32_t h = Abs(hi);
   return mozilla::dom::CreateImageData(cx, this, w, h, error);
 }
 
@@ -3794,8 +3786,17 @@ CanvasRenderingContext2D::GetCanvasLayer(nsDisplayListBuilder* aBuilder,
   canvasLayer->SetUserData(&g2DContextLayerUserData, userData);
 
   CanvasLayer::Data data;
+#ifdef USE_SKIA
+  if (mGLContext) {
+    canvasLayer->SetPreTransactionCallback(
+            CanvasRenderingContext2DUserData::PreTransactionCallback, userData);
+    data.mGLContext = mGLContext;
+  } else
+#endif
+  {
+    data.mDrawTarget = mTarget;
+  }
 
-  data.mDrawTarget = mTarget;
   data.mSize = nsIntSize(mWidth, mHeight);
 
   canvasLayer->Initialize(data);

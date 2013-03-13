@@ -331,6 +331,13 @@ ArrayLikeToIndexVector(JSContext *cx, HandleObject obj, IndexVector &indices,
     if (!MaybeGetParallelArrayObjectAndLength(cx, obj, &pa, &iv, &length))
         return false;
 
+    // We have to push one argument per index, so don't let this get
+    // too large!
+    if (length >= StackSpace::ARGS_LENGTH_MAX) {
+        ReportBadArg(cx);
+        return false;
+    }
+
     if (!indices.resize(length))
         return false;
 
@@ -974,7 +981,6 @@ Class ParallelArrayObject::class_ = {
         deleteElement,
         deleteSpecial,
         NULL,                // enumerate
-        NULL,                // typeof
         NULL,                // thisObject
     }
 };
@@ -1006,10 +1012,10 @@ ParallelArrayObject::initClass(JSContext *cx, JSObject *obj)
     RootedId shapeId(cx, AtomToId(cx->names().shape));
     unsigned flags = JSPROP_PERMANENT | JSPROP_SHARED | JSPROP_GETTER;
 
-    RootedObject scriptedLength(cx, js_NewFunction(cx, NullPtr(), NonGenericMethod<lengthGetter>,
-                                                   0, JSFunction::NATIVE_FUN, global, NullPtr()));
-    RootedObject scriptedShape(cx, js_NewFunction(cx, NullPtr(), NonGenericMethod<dimensionsGetter>,
-                                                  0, JSFunction::NATIVE_FUN, global, NullPtr()));
+    RootedObject scriptedLength(cx, NewFunction(cx, NullPtr(), NonGenericMethod<lengthGetter>,
+                                                0, JSFunction::NATIVE_FUN, global, NullPtr()));
+    RootedObject scriptedShape(cx, NewFunction(cx, NullPtr(), NonGenericMethod<dimensionsGetter>,
+                                               0, JSFunction::NATIVE_FUN, global, NullPtr()));
 
     RootedValue value(cx, UndefinedValue());
     if (!scriptedLength || !scriptedShape ||
@@ -1260,7 +1266,7 @@ ParallelArrayObject::construct(JSContext *cx, unsigned argc, Value *vp)
         return ReportBadLength(cx);
 
     // Extract second argument, the elemental function.
-    RootedObject elementalFun(cx, ValueToCallable(cx, &args[1]));
+    RootedObject elementalFun(cx, ValueToCallable(cx, args[1], args.length() - 2));
     if (!elementalFun)
         return false;
 
@@ -1301,7 +1307,7 @@ ParallelArrayObject::map(JSContext *cx, CallArgs args)
     if (!buffer)
         return false;
 
-    RootedObject elementalFun(cx, ValueToCallable(cx, &args[0]));
+    RootedObject elementalFun(cx, ValueToCallable(cx, args[0], args.length() - 1));
     if (!elementalFun)
         return false;
 
@@ -1339,7 +1345,7 @@ ParallelArrayObject::reduce(JSContext *cx, CallArgs args)
         return false;
     }
 
-    RootedObject elementalFun(cx, ValueToCallable(cx, &args[0]));
+    RootedObject elementalFun(cx, ValueToCallable(cx, args[0], args.length() - 1));
     if (!elementalFun)
         return false;
 
@@ -1377,7 +1383,7 @@ ParallelArrayObject::scan(JSContext *cx, CallArgs args)
     if (!buffer)
         return false;
 
-    RootedObject elementalFun(cx, ValueToCallable(cx, &args[0]));
+    RootedObject elementalFun(cx, ValueToCallable(cx, args[0], args.length() - 1));
     if (!elementalFun)
         return false;
 
@@ -1419,7 +1425,7 @@ ParallelArrayObject::scatter(JSContext *cx, CallArgs args)
         return false;
 
     // The default value is optional and defaults to undefined.
-    Value defaultValue;
+    RootedValue defaultValue(cx);
     if (args.length() >= 2)
         defaultValue = args[1];
     else
@@ -1428,7 +1434,7 @@ ParallelArrayObject::scatter(JSContext *cx, CallArgs args)
     // The conflict function is optional.
     RootedObject conflictFun(cx);
     if (args.length() >= 3 && !args[2].isUndefined()) {
-        conflictFun = ValueToCallable(cx, &args[2]);
+        conflictFun = ValueToCallable(cx, args[2], args.length() - 3);
         if (!conflictFun)
             return false;
     }
@@ -1608,7 +1614,7 @@ ParallelArrayObject::dimensionsGetter(JSContext *cx, CallArgs args)
 {
     RootedObject dimArray(cx, as(&args.thisv().toObject())->dimensionArray());
     RootedObject copy(cx, NewDenseCopiedArray(cx, dimArray->getDenseInitializedLength(),
-                                              dimArray->getDenseElements()));
+                                              dimArray, 0));
     if (!copy)
         return false;
     // Reuse the existing dimension array's type.

@@ -466,6 +466,10 @@ bool GetIntrinsicValue(JSContext *cx, HandlePropertyName name, MutableHandleValu
 
 bool CreateThis(JSContext *cx, HandleObject callee, MutableHandleValue rval);
 
+void GetDynamicName(JSContext *cx, JSObject *scopeChain, JSString *str, Value *vp);
+
+JSBool FilterArguments(JSContext *cx, JSString *str);
+
 } // namespace ion
 } // namespace js
 

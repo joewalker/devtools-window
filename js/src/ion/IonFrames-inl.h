@@ -30,12 +30,12 @@ SizeOfFramePrefix(FrameType type)
       case IonFrame_Entry:
         return IonEntryFrameLayout::Size();
       case IonFrame_OptimizedJS:
-      case IonFrame_Bailed_JS:
+      case IonFrame_Unwound_OptimizedJS:
         return IonJSFrameLayout::Size();
       case IonFrame_Rectifier:
         return IonRectifierFrameLayout::Size();
-      case IonFrame_Bailed_Rectifier:
-        return IonBailedRectifierFrameLayout::Size();
+      case IonFrame_Unwound_Rectifier:
+        return IonUnwoundRectifierFrameLayout::Size();
       case IonFrame_Exit:
         return IonExitFrameLayout::Size();
       case IonFrame_Osr:
@@ -81,10 +81,9 @@ IonFrameIterator::frameSize() const
 }
 
 // Returns the JSScript associated with the topmost Ion frame.
-inline UnrootedScript
+inline RawScript
 GetTopIonJSScript(JSContext *cx, const SafepointIndex **safepointIndexOut, void **returnAddrOut)
 {
-    AutoAssertNoGC nogc;
     IonFrameIterator iter(cx->mainThread().ionTop);
     JS_ASSERT(iter.type() == IonFrame_Exit);
     ++iter;

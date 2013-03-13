@@ -307,12 +307,7 @@ nsXREDirProvider::GetFile(const char* aProperty, bool* aPersistent,
     rv = GetUserAppDataDirectory(getter_AddRefs(file));
   }
   else if (!strcmp(aProperty, XRE_UPDATE_ROOT_DIR)) {
-#if defined(XP_WIN) || defined(MOZ_WIDGET_GONK)
     rv = GetUpdateRootDir(getter_AddRefs(file));
-#else
-    // Only supported on Windows, so just immediately fail.
-    return NS_ERROR_FAILURE;
-#endif
   }
   else if (!strcmp(aProperty, NS_APP_APPLICATION_REGISTRY_FILE)) {
     rv = GetUserAppDataDirectory(getter_AddRefs(file));
@@ -724,8 +719,18 @@ nsXREDirProvider::GetFilesInternal(const char* aProperty,
     rv = NS_NewArrayEnumerator(aResult, directories);
   }
   else if (!strcmp(aProperty, NS_APP_PLUGINS_DIR_LIST)) {
-    static const char *const kAppendPlugins[] = { "plugins", nullptr };
     nsCOMArray<nsIFile> directories;
+
+    if (mozilla::Preferences::GetBool("plugins.load_appdir_plugins", false)) {
+      nsCOMPtr<nsIFile> appdir;
+      rv = XRE_GetBinaryPath(gArgv[0], getter_AddRefs(appdir));
+      if (NS_SUCCEEDED(rv)) {
+        appdir->SetNativeLeafName(NS_LITERAL_CSTRING("plugins"));
+        directories.AppendObject(appdir);
+      }
+    }
+
+    static const char *const kAppendPlugins[] = { "plugins", nullptr };
 
     // The root dirserviceprovider does quite a bit for us: we're mainly
     // interested in xulapp and extension-provided plugins.
@@ -946,14 +951,30 @@ GetRegWindowsAppDataFolder(bool aLocal, nsAString& _retval)
 
   return NS_OK;
 }
+#endif
 
 nsresult
 nsXREDirProvider::GetUpdateRootDir(nsIFile* *aResult)
 {
-  nsCOMPtr<nsIFile> appDir = GetAppDir();
+  nsCOMPtr<nsIFile> updRoot;
+#if defined(MOZ_WIDGET_GONK)
 
+  nsresult rv = NS_NewNativeLocalFile(nsDependentCString("/data/local"),
+                                      true,
+                                      getter_AddRefs(updRoot));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+#else
+  nsCOMPtr<nsIFile> appFile;
+  bool per = false;
+  nsresult rv = GetFile(XRE_EXECUTABLE_FILE, &per, getter_AddRefs(appFile));
+  NS_ENSURE_SUCCESS(rv, rv);
+  rv = appFile->GetParent(getter_AddRefs(updRoot));
+  NS_ENSURE_SUCCESS(rv, rv);
+
+#ifdef XP_WIN
   nsAutoString appPath;
-  nsresult rv = appDir->GetPath(appPath);
+  rv = updRoot->GetPath(appPath);
   NS_ENSURE_SUCCESS(rv, rv);
 
   // AppDir may be a short path. Convert to long path to make sure
@@ -982,9 +1003,6 @@ nsXREDirProvider::GetUpdateRootDir(nsIFile* *aResult)
   programFiles.AppendLiteral("\\");
   uint32_t programFilesLen = programFiles.Length();
 
-  if (longPath.Length() < programFilesLen)
-    return NS_ERROR_FAILURE;
-
   nsAutoString programName;
   if (_wcsnicmp(programFiles.get(), longPath.get(), programFilesLen) == 0) {
     programName = Substring(longPath, programFilesLen);
@@ -996,33 +1014,17 @@ nsXREDirProvider::GetUpdateRootDir(nsIFile* *aResult)
     programName.AssignASCII(MOZ_APP_NAME);
   }
 
-  nsCOMPtr<nsIFile> updRoot;
   rv = GetUserLocalDataDirectory(getter_AddRefs(updRoot));
   NS_ENSURE_SUCCESS(rv, rv);
 
   rv = updRoot->AppendRelativePath(programName);
   NS_ENSURE_SUCCESS(rv, rv);
 
+#endif
+#endif
   NS_ADDREF(*aResult = updRoot);
   return NS_OK;
 }
-#endif
-
-#if defined(MOZ_WIDGET_GONK)
-nsresult
-nsXREDirProvider::GetUpdateRootDir(nsIFile* *aResult)
-{
-  nsCOMPtr<nsIFile> updRoot;
-
-  nsresult rv = NS_NewNativeLocalFile(nsDependentCString("/data/local"),
-                                      true,
-                                      getter_AddRefs(updRoot));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  NS_IF_ADDREF(*aResult = updRoot);
-  return NS_OK;
-}
-#endif
 
 nsresult
 nsXREDirProvider::GetProfileStartupDir(nsIFile* *aResult)
@@ -1147,8 +1149,26 @@ nsXREDirProvider::GetUserDataDirectoryHome(nsIFile** aFile, bool aLocal)
   if (!homeDir || !*homeDir)
     return NS_ERROR_FAILURE;
 
-  rv = NS_NewNativeLocalFile(nsDependentCString(homeDir), true,
-                             getter_AddRefs(localDir));
+#ifdef ANDROID /* We want (ProfD == ProfLD) on Android. */
+  aLocal = false;
+#endif
+
+  if (aLocal) {
+    // If $XDG_CACHE_HOME is defined use it, otherwise use $HOME/.cache.
+    const char* cacheHome = getenv("XDG_CACHE_HOME");
+    if (cacheHome && *cacheHome) {
+      rv = NS_NewNativeLocalFile(nsDependentCString(cacheHome), true,
+                                 getter_AddRefs(localDir));
+    } else {
+      rv = NS_NewNativeLocalFile(nsDependentCString(homeDir), true,
+                                 getter_AddRefs(localDir));
+      if (NS_SUCCEEDED(rv))
+        rv = localDir->AppendNative(NS_LITERAL_CSTRING(".cache"));
+    }
+  } else {
+    rv = NS_NewNativeLocalFile(nsDependentCString(homeDir), true,
+                               getter_AddRefs(localDir));
+  }
 #else
 #error "Don't know how to get product dir on your platform"
 #endif
@@ -1233,7 +1253,7 @@ nsXREDirProvider::GetUserDataDirectory(nsIFile** aFile, bool aLocal,
   nsresult rv = GetUserDataDirectoryHome(getter_AddRefs(localDir), aLocal);
   NS_ENSURE_SUCCESS(rv, rv);
 
-  rv = AppendProfilePath(localDir, aProfileName, aAppName, aVendorName);
+  rv = AppendProfilePath(localDir, aProfileName, aAppName, aVendorName, aLocal);
   NS_ENSURE_SUCCESS(rv, rv);
 
 #ifdef DEBUG_jungshik
@@ -1354,7 +1374,8 @@ nsresult
 nsXREDirProvider::AppendProfilePath(nsIFile* aFile,
                                     const nsACString* aProfileName,
                                     const nsACString* aAppName,
-                                    const nsACString* aVendorName)
+                                    const nsACString* aVendorName,
+                                    bool aLocal)
 {
   NS_ASSERTION(aFile, "Null pointer!");
   
@@ -1416,8 +1437,11 @@ nsXREDirProvider::AppendProfilePath(nsIFile* aFile,
   rv = aFile->AppendNative(nsDependentCString("mozilla"));
   NS_ENSURE_SUCCESS(rv, rv);
 #elif defined(XP_UNIX)
-  // Make it hidden (i.e. using the ".")
-  nsAutoCString folder(".");
+  nsAutoCString folder;
+  // Make it hidden (by starting with "."), except when local (the
+  // profile is already under ~/.cache or XDG_CACHE_HOME).
+  if (!aLocal)
+    folder.Assign('.');
 
   if (!profile.IsEmpty()) {
     // Skip any leading path characters
@@ -1427,7 +1451,7 @@ nsXREDirProvider::AppendProfilePath(nsIFile* aFile,
 
     // On the off chance that someone wanted their folder to be hidden don't
     // let it become ".."
-    if (*profileStart == '.')
+    if (*profileStart == '.' && !aLocal)
       profileStart++;
 
     folder.Append(profileStart);

@@ -81,22 +81,31 @@ StackFrameARM* StackwalkerARM::GetCallerByCFIFrameInfo(
     CFIFrameInfo* cfi_frame_info) {
   StackFrameARM* last_frame = static_cast<StackFrameARM*>(frames.back());
 
-  static const char* register_names[] = {
-    "r0",  "r1",  "r2",  "r3",  "r4",  "r5",  "r6",  "r7",
-    "r8",  "r9",  "r10", "r11", "r12", "sp",  "lr",  "pc",
-    "f0",  "f1",  "f2",  "f3",  "f4",  "f5",  "f6",  "f7",
-    "fps", "cpsr",
+  static const UniqueString *register_names[] = {
+    ToUniqueString("r0"),  ToUniqueString("r1"),
+    ToUniqueString("r2"),  ToUniqueString("r3"),
+    ToUniqueString("r4"),  ToUniqueString("r5"),
+    ToUniqueString("r6"),  ToUniqueString("r7"),
+    ToUniqueString("r8"),  ToUniqueString("r9"),
+    ToUniqueString("r10"), ToUniqueString("r11"),
+    ToUniqueString("r12"), ToUniqueString("sp"),
+    ToUniqueString("lr"),  ToUniqueString("pc"),
+    ToUniqueString("f0"),  ToUniqueString("f1"),
+    ToUniqueString("f2"),  ToUniqueString("f3"),
+    ToUniqueString("f4"),  ToUniqueString("f5"),
+    ToUniqueString("f6"),  ToUniqueString("f7"),
+    ToUniqueString("fps"), ToUniqueString("cpsr"),
     NULL
   };
 
   // Populate a dictionary with the valid register values in last_frame.
-  CFIFrameInfo::RegisterValueMap<u_int32_t> callee_registers;
+  CFIFrameInfo::RegisterValueMap<uint32_t> callee_registers;
   for (int i = 0; register_names[i]; i++)
     if (last_frame->context_validity & StackFrameARM::RegisterValidFlag(i))
-      callee_registers[register_names[i]] = last_frame->context.iregs[i];
+      callee_registers.set(register_names[i], last_frame->context.iregs[i]);
 
   // Use the STACK CFI data to recover the caller's register values.
-  CFIFrameInfo::RegisterValueMap<u_int32_t> caller_registers;
+  CFIFrameInfo::RegisterValueMap<uint32_t> caller_registers;
   if (!cfi_frame_info->FindCallerRegs(callee_registers, *memory_,
                                       &caller_registers))
     return NULL;
@@ -104,13 +113,13 @@ StackFrameARM* StackwalkerARM::GetCallerByCFIFrameInfo(
   // Construct a new stack frame given the values the CFI recovered.
   scoped_ptr<StackFrameARM> frame(new StackFrameARM());
   for (int i = 0; register_names[i]; i++) {
-    CFIFrameInfo::RegisterValueMap<u_int32_t>::iterator entry =
-      caller_registers.find(register_names[i]);
-    if (entry != caller_registers.end()) {
+    bool found = false;
+    uint32_t v = caller_registers.get(&found, register_names[i]);
+    if (found) {
       // We recovered the value of this register; fill the context with the
       // value from caller_registers.
       frame->context_validity |= StackFrameARM::RegisterValidFlag(i);
-      frame->context.iregs[i] = entry->second;
+      frame->context.iregs[i] = v;
     } else if (4 <= i && i <= 11 && (last_frame->context_validity &
                                      StackFrameARM::RegisterValidFlag(i))) {
       // If the STACK CFI data doesn't mention some callee-saves register, and
@@ -123,18 +132,18 @@ StackFrameARM* StackwalkerARM::GetCallerByCFIFrameInfo(
   }
   // If the CFI doesn't recover the PC explicitly, then use .ra.
   if (!(frame->context_validity & StackFrameARM::CONTEXT_VALID_PC)) {
-    CFIFrameInfo::RegisterValueMap<u_int32_t>::iterator entry =
-      caller_registers.find(".ra");
-    if (entry != caller_registers.end()) {
+    bool found = false;
+    uint32_t v = caller_registers.get(&found, ustr__ZDra());
+    if (found) {
       if (fp_register_ == -1) {
         frame->context_validity |= StackFrameARM::CONTEXT_VALID_PC;
-        frame->context.iregs[MD_CONTEXT_ARM_REG_PC] = entry->second;
+        frame->context.iregs[MD_CONTEXT_ARM_REG_PC] = v;
       } else {
         // The CFI updated the link register and not the program counter.
         // Handle getting the program counter from the link register.
         frame->context_validity |= StackFrameARM::CONTEXT_VALID_PC;
         frame->context_validity |= StackFrameARM::CONTEXT_VALID_LR;
-        frame->context.iregs[MD_CONTEXT_ARM_REG_LR] = entry->second;
+        frame->context.iregs[MD_CONTEXT_ARM_REG_LR] = v;
         frame->context.iregs[MD_CONTEXT_ARM_REG_PC] =
             last_frame->context.iregs[MD_CONTEXT_ARM_REG_LR];
       }
@@ -142,11 +151,11 @@ StackFrameARM* StackwalkerARM::GetCallerByCFIFrameInfo(
   }
   // If the CFI doesn't recover the SP explicitly, then use .cfa.
   if (!(frame->context_validity & StackFrameARM::CONTEXT_VALID_SP)) {
-    CFIFrameInfo::RegisterValueMap<u_int32_t>::iterator entry =
-      caller_registers.find(".cfa");
-    if (entry != caller_registers.end()) {
+    bool found = false;
+    uint32_t v = caller_registers.get(&found, ustr__ZDcfa());
+    if (found) {
       frame->context_validity |= StackFrameARM::CONTEXT_VALID_SP;
-      frame->context.iregs[MD_CONTEXT_ARM_REG_SP] = entry->second;
+      frame->context.iregs[MD_CONTEXT_ARM_REG_SP] = v;
     }
   }
 
@@ -163,8 +172,8 @@ StackFrameARM* StackwalkerARM::GetCallerByCFIFrameInfo(
 StackFrameARM* StackwalkerARM::GetCallerByStackScan(
     const vector<StackFrame*> &frames) {
   StackFrameARM* last_frame = static_cast<StackFrameARM*>(frames.back());
-  u_int32_t last_sp = last_frame->context.iregs[MD_CONTEXT_ARM_REG_SP];
-  u_int32_t caller_sp, caller_pc;
+  uint32_t last_sp = last_frame->context.iregs[MD_CONTEXT_ARM_REG_SP];
+  uint32_t caller_sp, caller_pc;
 
   // When searching for the caller of the context frame,
   // allow the scanner to look farther down the stack.
@@ -206,23 +215,23 @@ StackFrameARM* StackwalkerARM::GetCallerByFramePointer(
     return NULL;
   }
 
-  u_int32_t last_fp = last_frame->context.iregs[fp_register_];
+  uint32_t last_fp = last_frame->context.iregs[fp_register_];
 
-  u_int32_t caller_fp = 0;
+  uint32_t caller_fp = 0;
   if (last_fp && !memory_->GetMemoryAtAddress(last_fp, &caller_fp)) {
     BPLOG(ERROR) << "Unable to read caller_fp from last_fp: 0x"
                  << std::hex << last_fp;
     return NULL;
   }
 
-  u_int32_t caller_lr = 0;
+  uint32_t caller_lr = 0;
   if (last_fp && !memory_->GetMemoryAtAddress(last_fp + 4, &caller_lr)) {
     BPLOG(ERROR) << "Unable to read caller_lr from last_fp + 4: 0x"
                  << std::hex << (last_fp + 4);
     return NULL;
   }
 
-  u_int32_t caller_sp = last_fp ? last_fp + 8 :
+  uint32_t caller_sp = last_fp ? last_fp + 8 :
       last_frame->context.iregs[MD_CONTEXT_ARM_REG_SP];
 
   // Create a new stack frame (ownership will be transferred to the caller)

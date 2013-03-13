@@ -39,6 +39,7 @@
 #include "nsContentUtils.h"
 #include "nsLayoutStylesheetCache.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/dom/EncodingUtils.h"
 
 #include "nsIDeviceContextSpec.h"
 #include "nsViewManager.h"
@@ -53,8 +54,6 @@
 #include "nsIMarkupDocumentViewer.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIInterfaceRequestorUtils.h"
-#include "nsIDocShellTreeItem.h"
-#include "nsIDocShellTreeNode.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIDocShell.h"
 #include "nsIBaseWindow.h"
@@ -157,6 +156,7 @@ static const char sPrintOptionsContractID[]         = "@mozilla.org/gfx/printset
 #include "jsfriendapi.h"
 
 using namespace mozilla;
+using namespace mozilla::dom;
 
 #ifdef DEBUG
 
@@ -991,7 +991,7 @@ nsDocumentViewer::LoadComplete(nsresult aStatus)
   NS_ENSURE_TRUE(mDocument, NS_ERROR_NOT_AVAILABLE);
 
   // First, get the window from the document...
-  nsPIDOMWindow *window = mDocument->GetWindow();
+  nsCOMPtr<nsPIDOMWindow> window = mDocument->GetWindow();
 
   mLoaded = true;
 
@@ -1027,9 +1027,10 @@ nsDocumentViewer::LoadComplete(nsresult aStatus)
                     nsIDocument::READYSTATE_UNINITIALIZED &&
                   NS_IsAboutBlank(mDocument->GetDocumentURI())),
                  "Bad readystate");
+      nsCOMPtr<nsIDocument> d = mDocument;
       mDocument->SetReadyStateInternal(nsIDocument::READYSTATE_COMPLETE);
 
-      nsRefPtr<nsDOMNavigationTiming> timing(mDocument->GetNavigationTiming());
+      nsRefPtr<nsDOMNavigationTiming> timing(d->GetNavigationTiming());
       if (timing) {
         timing->NotifyLoadEventStart();
       }
@@ -1330,14 +1331,11 @@ AttachContainerRecurse(nsIDocShell* aShell)
   }
 
   // Now recurse through the children
-  nsCOMPtr<nsIDocShellTreeNode> node = do_QueryInterface(aShell);
-  NS_ASSERTION(node, "docshells must implement nsIDocShellTreeNode");
-
   int32_t childCount;
-  node->GetChildCount(&childCount);
+  aShell->GetChildCount(&childCount);
   for (int32_t i = 0; i < childCount; ++i) {
     nsCOMPtr<nsIDocShellTreeItem> childItem;
-    node->GetChildAt(i, getter_AddRefs(childItem));
+    aShell->GetChildAt(i, getter_AddRefs(childItem));
     AttachContainerRecurse(nsCOMPtr<nsIDocShell>(do_QueryInterface(childItem)));
   }
 }
@@ -1487,14 +1485,11 @@ DetachContainerRecurse(nsIDocShell *aShell)
   }
 
   // Now recurse through the children
-  nsCOMPtr<nsIDocShellTreeNode> node = do_QueryInterface(aShell);
-  NS_ASSERTION(node, "docshells must implement nsIDocShellTreeNode");
-
   int32_t childCount;
-  node->GetChildCount(&childCount);
+  aShell->GetChildCount(&childCount);
   for (int32_t i = 0; i < childCount; ++i) {
     nsCOMPtr<nsIDocShellTreeItem> childItem;
-    node->GetChildAt(i, getter_AddRefs(childItem));
+    aShell->GetChildAt(i, getter_AddRefs(childItem));
     DetachContainerRecurse(nsCOMPtr<nsIDocShell>(do_QueryInterface(childItem)));
   }
 }
@@ -2977,10 +2972,14 @@ nsDocumentViewer::GetDefaultCharacterSet(nsACString& aDefaultCharacterSet)
     const nsAdoptingCString& defCharset =
       Preferences::GetLocalizedCString("intl.charset.default");
 
-    if (!defCharset.IsEmpty()) {
-      mDefaultCharacterSet = defCharset;
+    // Don't let the user break things by setting intl.charset.default to
+    // not a rough ASCII superset
+    nsAutoCString canonical;
+    if (EncodingUtils::FindEncodingForLabel(defCharset, canonical) &&
+        EncodingUtils::IsAsciiCompatible(canonical)) {
+      mDefaultCharacterSet = canonical;
     } else {
-      mDefaultCharacterSet.AssignLiteral("ISO-8859-1");
+      mDefaultCharacterSet.AssignLiteral("windows-1252");
     }
   }
   aDefaultCharacterSet = mDefaultCharacterSet;
@@ -3659,6 +3658,9 @@ nsDocumentViewer::Print(nsIPrintSettings*       aPrintSettings,
   dom::Element* root = mDocument->GetRootElement();
   if (root && root->HasAttr(kNameSpaceID_None, nsGkAtoms::mozdisallowselectionprint)) {
     mPrintEngine->SetDisallowSelectionPrint(true);
+  }
+  if (root && root->HasAttr(kNameSpaceID_None, nsGkAtoms::moznomarginboxes)) {
+    mPrintEngine->SetNoMarginBoxes(true);
   }
   rv = mPrintEngine->Print(aPrintSettings, aWebProgressListener);
   if (NS_FAILED(rv)) {

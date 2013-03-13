@@ -314,17 +314,6 @@ nsSVGGlyphFrame::DidSetStyleContext(nsStyleContext* aOldStyleContext)
 }
 
 NS_IMETHODIMP
-nsSVGGlyphFrame::IsSelectable(bool* aIsSelectable,
-                              uint8_t* aSelectStyle) const
-{
-  nsresult rv = nsSVGGlyphFrameBase::IsSelectable(aIsSelectable, aSelectStyle);
-#if defined(DEBUG) && defined(SVG_DEBUG_SELECTION)
-  printf("nsSVGGlyphFrame(%p)::IsSelectable()=(%d,%d)\n", this, *aIsSelectable, aSelectStyle);
-#endif
-  return rv;
-}
-
-NS_IMETHODIMP
 nsSVGGlyphFrame::Init(nsIContent* aContent,
                       nsIFrame* aParent,
                       nsIFrame* aPrevInFlow)
@@ -352,16 +341,16 @@ nsSVGGlyphFrame::GetType() const
   return nsGkAtoms::svgGlyphFrame;
 }
 
-NS_IMETHODIMP
+void
 nsSVGGlyphFrame::BuildDisplayList(nsDisplayListBuilder*   aBuilder,
                                   const nsRect&           aDirtyRect,
                                   const nsDisplayListSet& aLists)
 {
-  if (GetStyleFont()->mFont.size <= 0) {
-    return NS_OK;
+  if (StyleFont()->mFont.size <= 0) {
+    return;
   }
-  return aLists.Content()->AppendNewToTop(
-           new (aBuilder) nsDisplaySVGGlyphs(aBuilder, this));
+  aLists.Content()->AppendNewToTop(
+    new (aBuilder) nsDisplaySVGGlyphs(aBuilder, this));
 }
 
 //----------------------------------------------------------------------
@@ -371,10 +360,10 @@ NS_IMETHODIMP
 nsSVGGlyphFrame::PaintSVG(nsRenderingContext *aContext,
                           const nsIntRect *aDirtyRect)
 {
-  if (!GetStyleVisibility()->IsVisible())
+  if (!StyleVisibility()->IsVisible())
     return NS_OK;
 
-  if (GetStyleFont()->mFont.size <= 0) {
+  if (StyleFont()->mFont.size <= 0) {
     // Don't even try to paint, or cairo will go into an error state.
     return NS_OK;
   }
@@ -384,7 +373,7 @@ nsSVGGlyphFrame::PaintSVG(nsRenderingContext *aContext,
   gfxContext *gfx = aContext->ThebesContext();
   uint16_t renderMode = SVGAutoRenderState::GetRenderMode(aContext);
 
-  switch (GetStyleSVG()->mTextRendering) {
+  switch (StyleSVG()->mTextRendering) {
   case NS_STYLE_TEXT_RENDERING_OPTIMIZESPEED:
     gfx->SetAntialiasMode(gfxContext::MODE_ALIASED);
     break;
@@ -668,7 +657,7 @@ nsSVGGlyphFrame::GetBBoxContribution(const gfxMatrix &aToBBoxUserspace,
   // Account for fill:
   if ((aFlags & nsSVGUtils::eBBoxIncludeFillGeometry) ||
       ((aFlags & nsSVGUtils::eBBoxIncludeFill) &&
-       GetStyleSVG()->mFill.mType != eStyleSVGPaintType_None)) {
+       StyleSVG()->mFill.mType != eStyleSVGPaintType_None)) {
     bbox = pathExtents;
   }
 
@@ -908,7 +897,7 @@ nsSVGGlyphFrame::GetBaselineOffset(float aMetricsScale)
   uint16_t dominantBaseline;
 
   for (nsIFrame *frame = GetParent(); frame; frame = frame->GetParent()) {
-    dominantBaseline = frame->GetStyleSVGReset()->mDominantBaseline;
+    dominantBaseline = frame->StyleSVGReset()->mDominantBaseline;
     if (dominantBaseline != NS_STYLE_DOMINANT_BASELINE_AUTO ||
         frame->GetType() == nsGkAtoms::svgTextFrame) {
       break;
@@ -957,7 +946,7 @@ nsSVGGlyphFrame::SetupCairoState(gfxContext *aContext,
     toDraw = DrawMode(toDraw | gfxFont::GLYPH_FILL);
   }
 
-  uint32_t paintOrder = GetStyleSVG()->mPaintOrder;
+  uint32_t paintOrder = StyleSVG()->mPaintOrder;
   while (paintOrder) {
     uint32_t component =
       paintOrder & ((1 << NS_STYLE_PAINT_ORDER_BITWIDTH) - 1);
@@ -985,7 +974,7 @@ nsSVGGlyphFrame::SetupCairoStroke(gfxContext *aContext,
     return false;
   }
 
-  const nsStyleSVG *style = GetStyleSVG();
+  const nsStyleSVG *style = StyleSVG();
   nsSVGUtils::SetupCairoStrokeHitGeometry(this, aContext, aOuterObjectPaint);
   float opacity = nsSVGUtils::GetOpacity(style->mStrokeOpacitySource,
                                          style->mStrokeOpacity,
@@ -1005,7 +994,7 @@ nsSVGGlyphFrame::SetupCairoFill(gfxContext *aContext,
                                 gfxTextObjectPaint *aOuterObjectPaint,
                                 SVGTextObjectPaint *aThisObjectPaint)
 {
-  const nsStyleSVG *style = GetStyleSVG();
+  const nsStyleSVG *style = StyleSVG();
   if (style->mFill.mType == eStyleSVGPaintType_None) {
     aThisObjectPaint->SetFillOpacity(0.0f);
     return false;
@@ -1032,7 +1021,7 @@ nsSVGGlyphFrame::SetupInheritablePaint(gfxContext *aContext,
                                        nsStyleSVGPaint nsStyleSVG::*aFillOrStroke,
                                        const FramePropertyDescriptor *aProperty)
 {
-  const nsStyleSVG *style = GetStyleSVG();
+  const nsStyleSVG *style = StyleSVG();
   nsSVGPaintServerFrame *ps =
     nsSVGEffects::GetPaintServer(this, &(style->*aFillOrStroke), aProperty);
 
@@ -1042,7 +1031,7 @@ nsSVGGlyphFrame::SetupInheritablePaint(gfxContext *aContext,
     aTargetPaint.SetObjectPaint(aOuterObjectPaint, (style->*aFillOrStroke).mType);
   } else {
     nscolor color = nsSVGUtils::GetFallbackOrPaintColor(aContext,
-                                                        GetStyleContext(),
+                                                        StyleContext(),
                                                         aFillOrStroke);
     aTargetPaint.SetColor(color);
 
@@ -1067,7 +1056,7 @@ nsSVGGlyphFrame::SetupObjectPaint(gfxContext *aContext,
     return false;
   }
 
-  const nsStyleSVG *style = GetStyleSVG();
+  const nsStyleSVG *style = StyleSVG();
   const nsStyleSVGPaint &paint = style->*aFillOrStroke;
 
   if (paint.mType != eStyleSVGPaintType_ObjectFill &&
@@ -1092,23 +1081,23 @@ nsSVGGlyphFrame::SetupObjectPaint(gfxContext *aContext,
 // SVGTextObjectPaint methods:
 
 already_AddRefed<gfxPattern>
-nsSVGGlyphFrame::SVGTextObjectPaint::GetFillPattern(float aOpacity,
-                                                    const gfxMatrix& aCTM)
+mozilla::SVGTextObjectPaint::GetFillPattern(float aOpacity,
+                                            const gfxMatrix& aCTM)
 {
   return mFillPaint.GetPattern(aOpacity, &nsStyleSVG::mFill, aCTM);
 }
 
 already_AddRefed<gfxPattern>
-nsSVGGlyphFrame::SVGTextObjectPaint::GetStrokePattern(float aOpacity,
-                                                      const gfxMatrix& aCTM)
+mozilla::SVGTextObjectPaint::GetStrokePattern(float aOpacity,
+                                              const gfxMatrix& aCTM)
 {
   return mStrokePaint.GetPattern(aOpacity, &nsStyleSVG::mStroke, aCTM);
 }
 
 already_AddRefed<gfxPattern>
-nsSVGGlyphFrame::SVGTextObjectPaint::Paint::GetPattern(float aOpacity,
-                                                       nsStyleSVGPaint nsStyleSVG::*aFillOrStroke,
-                                                       const gfxMatrix& aCTM)
+mozilla::SVGTextObjectPaint::Paint::GetPattern(float aOpacity,
+                                               nsStyleSVGPaint nsStyleSVG::*aFillOrStroke,
+                                               const gfxMatrix& aCTM)
 {
   nsRefPtr<gfxPattern> pattern;
   if (mPatternCache.Get(aOpacity, getter_AddRefs(pattern))) {
@@ -1163,125 +1152,6 @@ nsSVGGlyphFrame::SVGTextObjectPaint::Paint::GetPattern(float aOpacity,
   mPatternCache.Put(aOpacity, pattern);
   return pattern.forget();
 }
-
-//----------------------------------------------------------------------
-
-// Utilities for converting from indices in the uncompressed content
-// element strings to compressed frame string and back:
-static int
-CompressIndex(int index, const nsTextFragment*fragment)
-{
-  int ci=0;
-  if (fragment->Is2b()) {
-    const PRUnichar *data=fragment->Get2b();
-    while(*data && index) {
-      if (dom::IsSpaceCharacter(*data)){
-        do {
-          ++data;
-          --index;
-        }while(dom::IsSpaceCharacter(*data) && index);
-      }
-      else {
-        ++data;
-        --index;
-      }
-      ++ci;
-    }
-  }
-  else {
-    const char *data=fragment->Get1b();
-    while(*data && index) {
-      if (dom::IsSpaceCharacter(*data)){
-        do {
-          ++data;
-          --index;
-        }while(dom::IsSpaceCharacter(*data) && index);
-      }
-      else {
-        ++data;
-        --index;
-      }
-      ++ci;
-    }
-  }
-    
-  return ci;
-}
-
-nsresult
-nsSVGGlyphFrame::GetHighlight(uint32_t *charnum, uint32_t *nchars,
-                              nscolor *foreground, nscolor *background)
-{
-  *foreground = NS_RGB(255,255,255);
-  *background = NS_RGB(0,0,0); 
-  *charnum=0;
-  *nchars=0;
-
-  bool hasHighlight = IsSelected();
-  if (!hasHighlight) {
-    NS_ERROR("nsSVGGlyphFrame::GetHighlight() called by renderer when there is no highlight");
-    return NS_ERROR_FAILURE;
-  }
-
-  nsPresContext *presContext = PresContext();
-
-  // The selection ranges are relative to the uncompressed text in
-  // the content element. We'll need the text fragment:
-  const nsTextFragment *fragment = mContent->GetText();
-  NS_ASSERTION(fragment, "no text");
-  
-  // get the selection details 
-  SelectionDetails *details = nullptr;
-  {
-    nsRefPtr<nsFrameSelection> frameSelection = presContext->PresShell()->FrameSelection();
-    if (!frameSelection) {
-      NS_ERROR("no frameselection interface");
-      return NS_ERROR_FAILURE;
-    }
-
-    details = frameSelection->LookUpSelection(
-      mContent, 0, fragment->GetLength(), false
-      );
-  }
-
-#if defined(DEBUG) && defined(SVG_DEBUG_SELECTION)
-  {
-    SelectionDetails *dp = details;
-    printf("nsSVGGlyphFrame(%p)::GetHighlight() [\n", this);
-    while (dp) {
-      printf("selection detail: %d(%d)->%d(%d) type %d\n",
-             dp->mStart, CompressIndex(dp->mStart, fragment),
-             dp->mEnd, CompressIndex(dp->mEnd, fragment),
-             dp->mType);
-      dp = dp->mNext;
-    }
-    printf("]\n");
-      
-  }
-#endif
-  
-  if (details) {
-    NS_ASSERTION(details->mNext==nullptr, "can't do multiple selection ranges");
-
-    *charnum=CompressIndex(details->mStart, fragment);
-    *nchars=CompressIndex(details->mEnd, fragment)-*charnum;  
-
-    LookAndFeel::GetColor(LookAndFeel::eColorID_TextSelectBackground,
-                          background);
-    LookAndFeel::GetColor(LookAndFeel::eColorID_TextSelectForeground,
-                          foreground);
-
-    SelectionDetails *dp = details;
-    while ((dp=details->mNext) != nullptr) {
-      delete details;
-      details = dp;
-    }
-    delete details;
-  }
-  
-  return NS_OK;
-}
-
 
 //----------------------------------------------------------------------
 // Internal methods
@@ -1547,7 +1417,7 @@ nsSVGGlyphFrame::GetEffectiveRotate(int32_t strLength, nsTArray<float> &aRotate)
 uint16_t
 nsSVGGlyphFrame::GetTextAnchor()
 {
-  return GetStyleSVG()->mTextAnchor;
+  return StyleSVG()->mTextAnchor;
 }
 
 bool
@@ -1751,7 +1621,7 @@ nsSVGGlyphFrame::EnsureTextRun(float *aDrawScale, float *aMetricsScale,
                                bool aForceGlobalTransform)
 {
   // Compute the size at which the text should render (excluding the CTM)
-  const nsStyleFont* fontData = GetStyleFont();
+  const nsStyleFont* fontData = StyleFont();
   // Since SVG has its own scaling, we really don't want
   // fonts in SVG to respond to the browser's "TextZoom"
   // (Ctrl++,Ctrl+-)
@@ -1798,10 +1668,10 @@ nsSVGGlyphFrame::EnsureTextRun(float *aDrawScale, float *aMetricsScale,
     
     // Get the unicodeBidi property from the parent, because it doesn't
     // inherit
-    bool bidiOverride = !!(mParent->GetStyleTextReset()->mUnicodeBidi &
+    bool bidiOverride = !!(mParent->StyleTextReset()->mUnicodeBidi &
                            NS_STYLE_UNICODE_BIDI_OVERRIDE);
     nsBidiLevel baseDirection =
-      GetStyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL ?
+      StyleVisibility()->mDirection == NS_STYLE_DIRECTION_RTL ?
         NSBIDI_RTL : NSBIDI_LTR;
     nsBidiPresUtils::CopyLogicalToVisual(text, visualText,
                                          baseDirection, bidiOverride);
@@ -1823,7 +1693,7 @@ nsSVGGlyphFrame::EnsureTextRun(float *aDrawScale, float *aMetricsScale,
     gfxPoint p = m.Transform(gfxPoint(1, 1)) - m.Transform(gfxPoint(0, 0));
     double contextScale = SVGContentUtils::ComputeNormalizedHypotenuse(p.x, p.y);
 
-    if (GetStyleSVG()->mTextRendering ==
+    if (StyleSVG()->mTextRendering ==
         NS_STYLE_TEXT_RENDERING_GEOMETRICPRECISION) {
       textRunSize = PRECISE_SIZE;
     } else {
@@ -1836,7 +1706,7 @@ nsSVGGlyphFrame::EnsureTextRun(float *aDrawScale, float *aMetricsScale,
     bool printerFont = (presContext->Type() == nsPresContext::eContext_PrintPreview ||
                           presContext->Type() == nsPresContext::eContext_Print);
     gfxFontStyle fontStyle(font.style, font.weight, font.stretch, textRunSize,
-                           mStyleContext->GetStyleFont()->mLanguage,
+                           StyleFont()->mLanguage,
                            font.sizeAdjust, font.systemFont,
                            printerFont,
                            font.languageOverride);
@@ -1848,7 +1718,7 @@ nsSVGGlyphFrame::EnsureTextRun(float *aDrawScale, float *aMetricsScale,
 
     uint32_t flags = gfxTextRunFactory::TEXT_NEED_BOUNDING_BOX |
       GetTextRunFlags(text.Length()) |
-      nsLayoutUtils::GetTextRunFlagsForStyle(GetStyleContext(), GetStyleFont(), 0);
+      nsLayoutUtils::GetTextRunFlagsForStyle(StyleContext(), StyleFont(), 0);
 
     // XXX We should use a better surface here! But then we'd have to
     // change things so we can ensure we always have the "right" sort of

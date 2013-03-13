@@ -142,9 +142,9 @@ JSRuntime::sizeOfIncludingThis(JSMallocSizeOfFun mallocSizeOf, RuntimeSizes *rtS
 
     rtSizes->mathCache = mathCache_ ? mathCache_->sizeOfIncludingThis(mallocSizeOf) : 0;
 
-    rtSizes->scriptFilenames = scriptFilenameTable.sizeOfExcludingThis(mallocSizeOf);
-    for (ScriptFilenameTable::Range r = scriptFilenameTable.all(); !r.empty(); r.popFront())
-        rtSizes->scriptFilenames += mallocSizeOf(r.front());
+    rtSizes->scriptData = scriptDataTable.sizeOfExcludingThis(mallocSizeOf);
+    for (ScriptDataTable::Range r = scriptDataTable.all(); !r.empty(); r.popFront())
+        rtSizes->scriptData += mallocSizeOf(r.front());
 }
 
 size_t
@@ -268,9 +268,9 @@ RawFunction
 js::CloneFunctionAtCallsite(JSContext *cx, HandleFunction fun, HandleScript script, jsbytecode *pc)
 {
     JS_ASSERT(cx->typeInferenceEnabled());
-    JS_ASSERT(fun->isCloneAtCallsite());
-    JS_ASSERT(types::UseNewTypeForClone(fun));
+    JS_ASSERT(fun->nonLazyScript()->shouldCloneAtCallsite);
     JS_ASSERT(!fun->nonLazyScript()->enclosingStaticScope());
+    JS_ASSERT(types::UseNewTypeForClone(fun));
 
     typedef CallsiteCloneKey Key;
     typedef CallsiteCloneTable Table;
@@ -280,11 +280,13 @@ js::CloneFunctionAtCallsite(JSContext *cx, HandleFunction fun, HandleScript scri
         return NULL;
 
     Key key;
+    SkipRoot skipKey(cx, &key); /* Stop the analysis complaining about unrooted key. */
     key.script = script;
     key.offset = pc - script->code;
     key.original = fun;
 
     Table::AddPtr p = table.lookupForAdd(key);
+    SkipRoot skipHash(cx, &p); /* Prevent the hash from being poisoned. */
     if (p)
         return p->value;
 
@@ -295,7 +297,16 @@ js::CloneFunctionAtCallsite(JSContext *cx, HandleFunction fun, HandleScript scri
         return NULL;
 
     // Store a link back to the original for function.caller.
-    clone->setExtendedSlot(0, ObjectValue(*fun));
+    clone->nonLazyScript()->isCallsiteClone = true;
+    clone->nonLazyScript()->setOriginalFunctionObject(fun);
+
+    // Recalculate the hash if script or fun have been moved.
+    if (key.script != script && key.original != fun) {
+        key.script = script;
+        key.original = fun;
+        Table::AddPtr p = table.lookupForAdd(key);
+        JS_ASSERT(!p);
+    }
 
     if (!table.relookupOrAdd(p, key, clone.get()))
         return NULL;
@@ -436,8 +447,6 @@ static void
 ReportError(JSContext *cx, const char *message, JSErrorReport *reportp,
             JSErrorCallback callback, void *userRef)
 {
-    AssertCanGC();
-
     /*
      * Check the error report, and set a JavaScript-catchable exception
      * if the error is defined to have an associated exception.  If an
@@ -482,8 +491,6 @@ ReportError(JSContext *cx, const char *message, JSErrorReport *reportp,
 static void
 PopulateReportBlame(JSContext *cx, JSErrorReport *report)
 {
-    AutoAssertNoGC nogc;
-
     /*
      * Walk stack until we find a frame that is associated with a non-builtin
      * rather than a builtin frame.
@@ -492,7 +499,7 @@ PopulateReportBlame(JSContext *cx, JSErrorReport *report)
     if (iter.done())
         return;
 
-    report->filename = iter.script()->filename;
+    report->filename = iter.script()->filename();
     report->lineno = PCToLineNumber(iter.script(), iter.pc(), &report->column);
     report->originPrincipals = iter.script()->originPrincipals;
 }
@@ -507,8 +514,6 @@ PopulateReportBlame(JSContext *cx, JSErrorReport *report)
 void
 js_ReportOutOfMemory(JSContext *cx)
 {
-    AutoAssertNoGC nogc;
-
     cx->runtime->hadOutOfMemory = true;
 
     JSErrorReport report;
@@ -578,7 +583,7 @@ checkReportFlags(JSContext *cx, unsigned *flags)
          * We assume that if the top frame is a native, then it is strict if
          * the nearest scripted frame is strict, see bug 536306.
          */
-        UnrootedScript script = cx->stack.currentScript();
+        RawScript script = cx->stack.currentScript();
         if (script && script->strict)
             *flags &= ~JSREPORT_WARNING;
         else if (cx->hasStrictOption())
@@ -1159,10 +1164,8 @@ JSContext::JSContext(JSRuntime *rt)
     hasVersionOverride(false),
     throwing(false),
     exception(UndefinedValue()),
-    runOptions(0),
-    defaultLocale(NULL),
+    options_(0),
     reportGranularity(JS_DEFAULT_JITREPORT_GRANULARITY),
-    localeCallbacks(NULL),
     resolvingList(NULL),
     generatingError(false),
     enterCompartmentDepth_(0),
@@ -1195,18 +1198,17 @@ JSContext::JSContext(JSRuntime *rt)
     JS_ASSERT(static_cast<ContextFriendFields*>(this) ==
               ContextFriendFields::get(this));
 
-#ifdef JSGC_ROOT_ANALYSIS
+#if defined(JSGC_ROOT_ANALYSIS) || defined(JSGC_USE_EXACT_ROOTING)
     PodArrayZero(thingGCRooters);
-#if defined(JS_GC_ZEAL) && defined(DEBUG) && !defined(JS_THREADSAFE)
-    skipGCRooters = NULL;
 #endif
+#if defined(DEBUG) && defined(JS_GC_ZEAL) && defined(JSGC_ROOT_ANALYSIS) && !defined(JS_THREADSAFE)
+    skipGCRooters = NULL;
 #endif
 }
 
 JSContext::~JSContext()
 {
     /* Free the stuff hanging off of cx. */
-    js_free(defaultLocale);
     if (parseMapPool_)
         js_delete(parseMapPool_);
 
@@ -1214,7 +1216,7 @@ JSContext::~JSContext()
 }
 
 bool
-JSContext::setDefaultLocale(const char *locale)
+JSRuntime::setDefaultLocale(const char *locale)
 {
     if (!locale)
         return false;
@@ -1224,14 +1226,14 @@ JSContext::setDefaultLocale(const char *locale)
 }
 
 void
-JSContext::resetDefaultLocale()
+JSRuntime::resetDefaultLocale()
 {
     js_free(defaultLocale);
     defaultLocale = NULL;
 }
 
 const char *
-JSContext::getDefaultLocale()
+JSRuntime::getDefaultLocale()
 {
     if (defaultLocale)
         return defaultLocale;
@@ -1244,7 +1246,7 @@ JSContext::getDefaultLocale()
 #endif
     // convert to a well-formed BCP 47 language tag
     if (!locale || !strcmp(locale, "C"))
-        locale = (char *) "und";
+        locale = const_cast<char*>("und");
     lang = JS_strdup(this, locale);
     if (!lang)
         return NULL;
@@ -1265,10 +1267,10 @@ JSContext::getDefaultLocale()
 void
 JSContext::wrapPendingException()
 {
-    Value v = getPendingException();
+    RootedValue value(this, getPendingException());
     clearPendingException();
-    if (compartment->wrap(this, &v))
-        setPendingException(v);
+    if (compartment->wrap(this, &value))
+        setPendingException(value);
 }
 
 
@@ -1338,8 +1340,8 @@ JSRuntime::setGCMaxMallocBytes(size_t value)
      * mean that value.
      */
     gcMaxMallocBytes = (ptrdiff_t(value) >= 0) ? value : size_t(-1) >> 1;
-    for (CompartmentsIter c(this); !c.done(); c.next())
-        c->setGCMaxMallocBytes(value);
+    for (ZonesIter zone(this); !zone.done(); zone.next())
+        zone->setGCMaxMallocBytes(value);
 }
 
 void
@@ -1484,7 +1486,7 @@ void
 JSContext::updateJITEnabled()
 {
 #ifdef JS_METHODJIT
-    methodJitEnabled = (runOptions & JSOPTION_METHODJIT) && !IsJITBrokenHere();
+    methodJitEnabled = (options_ & JSOPTION_METHODJIT) && !IsJITBrokenHere();
 #endif
 }
 
@@ -1505,7 +1507,7 @@ JSContext::mark(JSTracer *trc)
     /* Stack frames and slots are traced by StackSpace::mark. */
 
     /* Mark other roots-by-definition in the JSContext. */
-    if (defaultCompartmentObject_ && !hasRunOption(JSOPTION_UNROOTED_GLOBAL))
+    if (defaultCompartmentObject_ && !hasOption(JSOPTION_UNROOTED_GLOBAL))
         MarkObjectRoot(trc, &defaultCompartmentObject_, "default compartment object");
     if (isExceptionPending())
         MarkValueRoot(trc, &exception, "exception");

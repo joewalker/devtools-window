@@ -17,7 +17,6 @@
 #include "jsgc.h"
 #include "jsobj.h"
 
-#include "gc/StoreBuffer.h"
 #include "gc/FindSCCs.h"
 #include "vm/GlobalObject.h"
 #include "vm/RegExpObject.h"
@@ -195,11 +194,6 @@ struct JSCompartment : private JS::shadow::Zone, public js::gc::GraphNodeBase<JS
      */
     void adoptWorkerAllocator(js::Allocator *workerAllocator);
 
-#ifdef JSGC_GENERATIONAL
-    js::gc::Nursery              gcNursery;
-    js::gc::StoreBuffer          gcStoreBuffer;
-#endif
-
   private:
     bool                         ionUsingBarriers_;
   public:
@@ -323,7 +317,7 @@ struct JSCompartment : private JS::shadow::Zone, public js::gc::GraphNodeBase<JS
         return gcState == Finished;
     }
 
-    size_t                       gcBytes;
+    volatile size_t              gcBytes;
     size_t                       gcTriggerBytes;
     size_t                       gcMaxMallocBytes;
     double                       gcHeapGrowthFactor;
@@ -334,7 +328,8 @@ struct JSCompartment : private JS::shadow::Zone, public js::gc::GraphNodeBase<JS
     int64_t                      lastCodeRelease;
 
     /* Pools for analysis and type information in this compartment. */
-    static const size_t LIFO_ALLOC_PRIMARY_CHUNK_SIZE = 32 * 1024;
+    static const size_t ANALYSIS_LIFO_ALLOC_PRIMARY_CHUNK_SIZE = 32 * 1024;
+    static const size_t TYPE_LIFO_ALLOC_PRIMARY_CHUNK_SIZE = 8 * 1024;
     js::LifoAlloc                analysisLifoAlloc;
     js::LifoAlloc                typeLifoAlloc;
 
@@ -392,8 +387,7 @@ struct JSCompartment : private JS::shadow::Zone, public js::gc::GraphNodeBase<JS
     js::types::TypeObject *getNewType(JSContext *cx, js::Class *clasp, js::TaggedProto proto,
                                       JSFunction *fun = NULL);
 
-    js::types::TypeObject *getLazyType(JSContext *cx, js::Class *clasp,
-                                       js::Handle<js::TaggedProto> proto);
+    js::types::TypeObject *getLazyType(JSContext *cx, js::Class *clasp, js::TaggedProto proto);
 
     /*
      * Hash table of all manually call site-cloned functions from within
@@ -445,7 +439,7 @@ struct JSCompartment : private JS::shadow::Zone, public js::gc::GraphNodeBase<JS
     /* Mark cross-compartment wrappers. */
     void markCrossCompartmentWrappers(JSTracer *trc);
 
-    bool wrap(JSContext *cx, js::Value *vp, JSObject *existing = NULL);
+    bool wrap(JSContext *cx, JS::MutableHandleValue vp, JS::HandleObject existing = JS::NullPtr());
     bool wrap(JSContext *cx, JSString **strp);
     bool wrap(JSContext *cx, js::HeapPtrString *strp);
     bool wrap(JSContext *cx, JSObject **objp, JSObject *existing = NULL);

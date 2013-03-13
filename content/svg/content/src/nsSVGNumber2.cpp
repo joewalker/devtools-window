@@ -6,7 +6,6 @@
 #include "nsError.h"
 #include "nsSVGAttrTearoffTable.h"
 #include "nsSVGNumber2.h"
-#include "nsTextFormatter.h"
 #include "prdtoa.h"
 #include "nsMathUtils.h"
 #include "nsContentUtils.h" // NS_ENSURE_FINITE
@@ -151,9 +150,8 @@ nsSVGNumber2::SetAnimValue(float aValue, nsSVGElement *aSVGElement)
   aSVGElement->DidAnimateNumber(mAttrEnum);
 }
 
-nsresult
-nsSVGNumber2::ToDOMAnimatedNumber(nsIDOMSVGAnimatedNumber **aResult,
-                                  nsSVGElement *aSVGElement)
+already_AddRefed<nsIDOMSVGAnimatedNumber>
+nsSVGNumber2::ToDOMAnimatedNumber(nsSVGElement* aSVGElement)
 {
   nsRefPtr<DOMAnimatedNumber> domAnimatedNumber =
     sSVGAnimatedNumberTearoffTable.GetTearoff(this);
@@ -162,7 +160,14 @@ nsSVGNumber2::ToDOMAnimatedNumber(nsIDOMSVGAnimatedNumber **aResult,
     sSVGAnimatedNumberTearoffTable.AddTearoff(this, domAnimatedNumber);
   }
 
-  domAnimatedNumber.forget(aResult);
+  return domAnimatedNumber.forget();
+}
+
+nsresult
+nsSVGNumber2::ToDOMAnimatedNumber(nsIDOMSVGAnimatedNumber **aResult,
+                                  nsSVGElement *aSVGElement)
+{
+  *aResult = ToDOMAnimatedNumber(aSVGElement).get();
   return NS_OK;
 }
 

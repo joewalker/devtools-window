@@ -367,22 +367,12 @@ NS_IMETHODIMP nsDefaultURIFixup::KeywordToURI(const nsACString& aKeyword,
         searchSvc->GetOriginalDefaultEngine(getter_AddRefs(defaultEngine));
         if (defaultEngine) {
             nsCOMPtr<nsISearchSubmission> submission;
-            // We want to allow default search plugins to specify alternate
-            // parameters that are specific to keyword searches. For the moment,
-            // do this by first looking for a magic
-            // "application/x-moz-keywordsearch" submission type. In the future,
-            // we should instead use a solution that relies on bug 587780.
+            // We allow default search plugins to specify alternate
+            // parameters that are specific to keyword searches.
             defaultEngine->GetSubmission(NS_ConvertUTF8toUTF16(keyword),
-                                         NS_LITERAL_STRING("application/x-moz-keywordsearch"),
+                                         EmptyString(),
+                                         NS_LITERAL_STRING("keyword"),
                                          getter_AddRefs(submission));
-            // If getting the special x-moz-keywordsearch submission type failed,
-            // fall back to the default response type.
-            if (!submission) {
-                defaultEngine->GetSubmission(NS_ConvertUTF8toUTF16(keyword),
-                                             EmptyString(),
-                                             getter_AddRefs(submission));
-            }
-
             if (submission) {
                 // The submission depends on POST data (i.e. the search engine's
                 // "method" is POST), we can't use this engine for keyword
@@ -391,6 +381,20 @@ NS_IMETHODIMP nsDefaultURIFixup::KeywordToURI(const nsACString& aKeyword,
                 submission->GetPostData(getter_AddRefs(postData));
                 if (postData) {
                     return NS_ERROR_NOT_AVAILABLE;
+                }
+
+                // This notification is meant for Firefox Health Report so it
+                // can increment counts from the search engine. The assumption
+                // here is that this keyword/submission will eventually result
+                // in a search. Since we only generate a URI here, there is the
+                // possibility we'll increment the counter without actually
+                // incurring a search. A robust solution would involve currying
+                // the search engine's name through various function calls.
+                nsCOMPtr<nsIObserverService> obsSvc = mozilla::services::GetObserverService();
+                if (obsSvc) {
+                  nsAutoString name;
+                  defaultEngine->GetName(name);
+                  obsSvc->NotifyObservers(nullptr, "keyword-search", name.get());
                 }
 
                 return submission->GetUri(aURI);

@@ -85,17 +85,11 @@ NS_IMPL_CYCLE_COLLECTION_CAN_SKIP_THIS_END
     NS_INTERFACE_TABLE_ENTRY(_class, nsINodeList)                             \
     NS_INTERFACE_TABLE_ENTRY(_class, nsIDOMNodeList)
 
-DOMCI_DATA(NodeList, nsBaseContentList)
-
 // QueryInterface implementation for nsBaseContentList
 NS_INTERFACE_TABLE_HEAD(nsBaseContentList)
   NS_WRAPPERCACHE_INTERFACE_MAP_ENTRY
-  NS_NODELIST_OFFSET_AND_INTERFACE_TABLE_BEGIN(nsBaseContentList)
-    NS_CONTENT_LIST_INTERFACES(nsBaseContentList)
-  NS_OFFSET_AND_INTERFACE_TABLE_END
-  NS_OFFSET_AND_INTERFACE_TABLE_TO_MAP_SEGUE
-  NS_INTERFACE_MAP_ENTRIES_CYCLE_COLLECTION(nsBaseContentList)
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(NodeList)
+  NS_INTERFACE_TABLE2(nsBaseContentList, nsINodeList, nsIDOMNodeList)
+  NS_INTERFACE_TABLE_TO_MAP_SEGUE_CYCLE_COLLECTION(nsBaseContentList)
 NS_INTERFACE_MAP_END
 
 
@@ -161,10 +155,9 @@ NS_IMPL_ADDREF_INHERITED(nsSimpleContentList, nsBaseContentList)
 NS_IMPL_RELEASE_INHERITED(nsSimpleContentList, nsBaseContentList)
 
 JSObject*
-nsSimpleContentList::WrapObject(JSContext *cx, JSObject *scope,
-                                bool *triedToWrap)
+nsSimpleContentList::WrapObject(JSContext *cx, JSObject *scope)
 {
-  return NodeListBinding::Wrap(cx, scope, this, triedToWrap);
+  return NodeListBinding::Wrap(cx, scope, this);
 }
 
 // nsFormContentList
@@ -295,18 +288,16 @@ const nsCacheableFuncStringContentList::ContentListType
 #endif
 
 JSObject*
-nsCacheableFuncStringNodeList::WrapObject(JSContext *cx, JSObject *scope,
-                                          bool *triedToWrap)
+nsCacheableFuncStringNodeList::WrapObject(JSContext *cx, JSObject *scope)
 {
-  return NodeListBinding::Wrap(cx, scope, this, triedToWrap);
+  return NodeListBinding::Wrap(cx, scope, this);
 }
 
 
 JSObject*
-nsCacheableFuncStringHTMLCollection::WrapObject(JSContext *cx, JSObject *scope,
-                                                bool *triedToWrap)
+nsCacheableFuncStringHTMLCollection::WrapObject(JSContext *cx, JSObject *scope)
 {
-  return HTMLCollectionBinding::Wrap(cx, scope, this, triedToWrap);
+  return HTMLCollectionBinding::Wrap(cx, scope, this);
 }
 
 // Hashtable for storing nsCacheableFuncStringContentList
@@ -522,28 +513,14 @@ nsContentList::~nsContentList()
 }
 
 JSObject*
-nsContentList::WrapObject(JSContext *cx, JSObject *scope, bool *triedToWrap)
+nsContentList::WrapObject(JSContext *cx, JSObject *scope)
 {
-  return HTMLCollectionBinding::Wrap(cx, scope, this, triedToWrap);
+  return HTMLCollectionBinding::Wrap(cx, scope, this);
 }
 
-DOMCI_DATA(ContentList, nsContentList)
-
-// QueryInterface implementation for nsContentList
-NS_INTERFACE_TABLE_HEAD(nsContentList)
-  NS_NODELIST_OFFSET_AND_INTERFACE_TABLE_BEGIN(nsContentList)
-    NS_CONTENT_LIST_INTERFACES(nsContentList)
-    NS_INTERFACE_TABLE_ENTRY(nsContentList, nsIHTMLCollection)
-    NS_INTERFACE_TABLE_ENTRY(nsContentList, nsIDOMHTMLCollection)
-    NS_INTERFACE_TABLE_ENTRY(nsContentList, nsIMutationObserver)
-  NS_OFFSET_AND_INTERFACE_TABLE_END
-  NS_OFFSET_AND_INTERFACE_TABLE_TO_MAP_SEGUE
-  NS_DOM_INTERFACE_MAP_ENTRY_CLASSINFO(ContentList)
-NS_INTERFACE_MAP_END_INHERITING(nsBaseContentList)
-
-
-NS_IMPL_ADDREF_INHERITED(nsContentList, nsBaseContentList)
-NS_IMPL_RELEASE_INHERITED(nsContentList, nsBaseContentList)
+NS_IMPL_ISUPPORTS_INHERITED3(nsContentList, nsBaseContentList,
+                             nsIHTMLCollection, nsIDOMHTMLCollection,
+                             nsIMutationObserver)
 
 uint32_t
 nsContentList::Length(bool aDoFlush)

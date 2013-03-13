@@ -20,14 +20,13 @@ class JSObject;
 struct JSContext;
 
 // Script "performance.timing" object
-class nsPerformanceTiming MOZ_FINAL : public nsISupports,
-                                      public nsWrapperCache
+class nsPerformanceTiming MOZ_FINAL : public nsWrapperCache
 {
 public:
   nsPerformanceTiming(nsPerformance* aPerformance,
                       nsITimedChannel* aChannel);
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsPerformanceTiming)
+  NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(nsPerformanceTiming)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(nsPerformanceTiming)
 
   nsDOMNavigationTiming* GetDOMTiming() const;
 
@@ -36,7 +35,7 @@ public:
     return mPerformance;
   }
 
-  JSObject* WrapObject(JSContext *cx, JSObject *scope, bool *triedToWrap);
+  JSObject* WrapObject(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
 
   // PerformanceNavigation WebIDL methods
   DOMTimeMilliSec NavigationStart() const {
@@ -93,13 +92,12 @@ private:
 };
 
 // Script "performance.navigation" object
-class nsPerformanceNavigation MOZ_FINAL : public nsISupports,
-                                          public nsWrapperCache
+class nsPerformanceNavigation MOZ_FINAL : public nsWrapperCache
 {
 public:
   explicit nsPerformanceNavigation(nsPerformance* aPerformance);
-  NS_DECL_CYCLE_COLLECTING_ISUPPORTS
-  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_CLASS(nsPerformanceNavigation)
+  NS_INLINE_DECL_CYCLE_COLLECTING_NATIVE_REFCOUNTING(nsPerformanceNavigation)
+  NS_DECL_CYCLE_COLLECTION_SCRIPT_HOLDER_NATIVE_CLASS(nsPerformanceNavigation)
 
   nsDOMNavigationTiming* GetDOMTiming() const;
 
@@ -108,7 +106,7 @@ public:
     return mPerformance;
   }
 
-  JSObject* WrapObject(JSContext *cx, JSObject *scope, bool *triedToWrap);
+  JSObject* WrapObject(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
 
   // PerformanceNavigation WebIDL methods
   uint16_t Type() const {
@@ -150,7 +148,7 @@ public:
     return mWindow.get();
   }
 
-  JSObject* WrapObject(JSContext *cx, JSObject *scope, bool *triedToWrap);
+  JSObject* WrapObject(JSContext *cx, JSObject *scope) MOZ_OVERRIDE;
 
   // Performance WebIDL methods
   DOMHighResTimeStamp Now();

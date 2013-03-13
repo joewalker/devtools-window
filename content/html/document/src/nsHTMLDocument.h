@@ -9,7 +9,6 @@
 #include "nsDocument.h"
 #include "nsIHTMLDocument.h"
 #include "nsIDOMHTMLDocument.h"
-#include "nsIDOMHTMLBodyElement.h"
 #include "nsIDOMHTMLCollection.h"
 #include "nsIScriptElement.h"
 #include "jsapi.h"
@@ -25,9 +24,10 @@
 #include "nsNetUtil.h"
 
 #include "nsICommandManager.h"
+#include "mozilla/dom/HTMLSharedElement.h"
+#include "nsDOMEvent.h"
 
 class nsIEditor;
-class nsIEditorDocShell;
 class nsIParser;
 class nsIURI;
 class nsIMarkupDocumentViewer;
@@ -99,6 +99,11 @@ public:
 
   // nsIDOMHTMLDocument interface
   NS_DECL_NSIDOMHTMLDOCUMENT
+
+  void RouteEvent(nsDOMEvent& aEvent)
+  {
+    RouteEvent(&aEvent);
+  }
 
   /**
    * Returns the result of document.all[aID] which can either be a node
@@ -182,7 +187,9 @@ public:
   void SetCookie(const nsAString& aCookie, mozilla::ErrorResult& rv);
   nsGenericHTMLElement *GetBody();
   void SetBody(nsGenericHTMLElement* aBody, mozilla::ErrorResult& rv);
-  Element *GetHead() { return GetHeadElement(); }
+  mozilla::dom::HTMLSharedElement *GetHead() {
+    return static_cast<mozilla::dom::HTMLSharedElement*>(GetHeadElement());
+  }
   nsIHTMLCollection* Images();
   nsIHTMLCollection* Embeds();
   nsIHTMLCollection* Plugins();
@@ -294,8 +301,6 @@ protected:
   int32_t mNumForms;
 
   static uint32_t gWyciwygSessionCnt;
-
-  static bool IsAsciiCompatible(const nsACString& aPreferredName);
 
   static void TryHintCharset(nsIMarkupDocumentViewer* aMarkupDV,
                              int32_t& aCharsetSource,

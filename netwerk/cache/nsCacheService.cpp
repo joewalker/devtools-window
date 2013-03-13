@@ -575,17 +575,17 @@ SmartCacheSize(const uint32_t availKB, bool shouldUseOldMaxSmartSize)
 
     // .5% of space above 25 GB
     if (avail10MBs > 2500) {
-        sz10MBs += (avail10MBs - 2500)*.005;
+        sz10MBs += static_cast<uint32_t>((avail10MBs - 2500)*.005);
         avail10MBs = 2500;
     }
     // 1% of space between 7GB -> 25 GB
     if (avail10MBs > 700) {
-        sz10MBs += (avail10MBs - 700)*.01;
+        sz10MBs += static_cast<uint32_t>((avail10MBs - 700)*.01);
         avail10MBs = 700;
     }
     // 5% of space between 500 MB -> 7 GB
     if (avail10MBs > 50) {
-        sz10MBs += (avail10MBs - 50)*.05;
+        sz10MBs += static_cast<uint32_t>((avail10MBs - 50)*.05);
         avail10MBs = 50;
     }
 
@@ -595,10 +595,10 @@ SmartCacheSize(const uint32_t availKB, bool shouldUseOldMaxSmartSize)
     // percentage of available space and a smaller minimum.
 
     // 20% of space up to 500 MB (10 MB min)
-    sz10MBs += std::max<uint32_t>(1, avail10MBs * .2);
+    sz10MBs += std::max<uint32_t>(1, static_cast<uint32_t>(avail10MBs * .2));
 #else
     // 40% of space up to 500 MB (50 MB min)
-    sz10MBs += std::max<uint32_t>(5, avail10MBs * .4);
+    sz10MBs += std::max<uint32_t>(5, static_cast<uint32_t>(avail10MBs * .4));
 #endif
 
     return std::min<uint32_t>(maxSize, sz10MBs * 10 * 1024);
@@ -634,7 +634,8 @@ nsCacheProfilePrefObserver::GetSmartCacheSize(const nsAString& cachePath,
     if (NS_FAILED(rv))
         return DEFAULT_CACHE_SIZE;
 
-    return SmartCacheSize((bytesAvailable / 1024) + currentSize,
+    return SmartCacheSize(static_cast<uint32_t>((bytesAvailable / 1024) +
+                                                currentSize),
                           shouldUseOldMaxSmartSize);
 }
 
@@ -718,17 +719,8 @@ nsCacheProfilePrefObserver::ReadPrefs(nsIPrefBranch* branch)
             if (!directory)
                 directory = profDir;
             else if (profDir) {
-                bool same;
-                if (NS_SUCCEEDED(profDir->Equals(directory, &same)) && !same) {
-                    // We no longer store the cache directory in the main
-                    // profile directory, so we should cleanup the old one.
-                    rv = profDir->AppendNative(NS_LITERAL_CSTRING("Cache"));
-                    if (NS_SUCCEEDED(rv)) {
-                        bool exists;
-                        if (NS_SUCCEEDED(profDir->Exists(&exists)) && exists)
-                            nsDeleteDir::DeleteDir(profDir, false);
-                    }
-                }
+                nsCacheService::MoveOrRemoveDiskCache(profDir, directory, 
+                                                      "Cache");
             }
         }
         // use file cache in build tree only if asked, to avoid cache dir litter
@@ -794,6 +786,10 @@ nsCacheProfilePrefObserver::ReadPrefs(nsIPrefBranch* branch)
                                    getter_AddRefs(directory));
             if (!directory)
                 directory = profDir;
+            else if (profDir) {
+                nsCacheService::MoveOrRemoveDiskCache(profDir, directory, 
+                                                      "OfflineCache");
+            }
         }
 #if DEBUG
         if (!directory) {
@@ -3005,6 +3001,57 @@ nsCacheService::SetDiskSmartSize_Locked()
     }
 
     return NS_OK;
+}
+
+void
+nsCacheService::MoveOrRemoveDiskCache(nsIFile *aOldCacheDir, 
+                                      nsIFile *aNewCacheDir,
+                                      const char *aCacheSubdir)
+{
+    bool same;
+    if (NS_FAILED(aOldCacheDir->Equals(aNewCacheDir, &same)) || same)
+        return;
+
+    nsCOMPtr<nsIFile> aOldCacheSubdir;
+    aOldCacheDir->Clone(getter_AddRefs(aOldCacheSubdir));
+
+    nsresult rv = aOldCacheSubdir->AppendNative(
+        nsDependentCString(aCacheSubdir));
+    if (NS_FAILED(rv))
+        return;
+
+    bool exists;
+    if (NS_FAILED(aOldCacheSubdir->Exists(&exists)) || !exists)
+        return;
+
+    nsCOMPtr<nsIFile> aNewCacheSubdir;
+    aNewCacheDir->Clone(getter_AddRefs(aNewCacheSubdir));
+
+    rv = aNewCacheSubdir->AppendNative(nsDependentCString(aCacheSubdir));
+    if (NS_FAILED(rv))
+        return;
+    
+    nsAutoCString newPath;
+    rv = aNewCacheSubdir->GetNativePath(newPath);
+    if (NS_FAILED(rv))
+        return;
+        
+    if (NS_SUCCEEDED(aNewCacheSubdir->Exists(&exists)) && !exists) {
+        // New cache directory does not exist, try to move the old one here
+        // rename needs an empty target directory
+        rv = aNewCacheSubdir->Create(nsIFile::DIRECTORY_TYPE, 0777); 
+        if (NS_SUCCEEDED(rv)) {
+            nsAutoCString oldPath;
+            rv = aOldCacheSubdir->GetNativePath(oldPath);
+            if (NS_FAILED(rv))
+                return;
+            if(rename(oldPath.get(), newPath.get()) == 0)
+                return;
+        }
+    }
+    
+    // Delay delete by 1 minute to avoid IO thrash on startup.
+    nsDeleteDir::DeleteDir(aOldCacheSubdir, false, 60000);
 }
 
 static bool

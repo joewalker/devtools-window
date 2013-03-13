@@ -32,17 +32,17 @@ ShapeHasher::match(const Key k, const Lookup &l)
     return k->matches(l);
 }
 
-UnrootedShape
+RawShape
 PropertyTree::newShape(JSContext *cx)
 {
-    UnrootedShape shape = js_NewGCShape(cx);
+    RawShape shape = js_NewGCShape(cx);
     if (!shape)
         JS_ReportOutOfMemory(cx);
     return shape;
 }
 
 static KidsHash *
-HashChildren(UnrootedShape kid1, UnrootedShape kid2)
+HashChildren(RawShape kid1, RawShape kid2)
 {
     KidsHash *hash = js_new<KidsHash>();
     if (!hash || !hash->init(2)) {
@@ -56,7 +56,7 @@ HashChildren(UnrootedShape kid1, UnrootedShape kid2)
 }
 
 bool
-PropertyTree::insertChild(JSContext *cx, UnrootedShape parent, UnrootedShape child)
+PropertyTree::insertChild(JSContext *cx, RawShape parent, RawShape child)
 {
     JS_ASSERT(!parent->inDictionary());
     JS_ASSERT(!child->parent);
@@ -73,7 +73,7 @@ PropertyTree::insertChild(JSContext *cx, UnrootedShape parent, UnrootedShape chi
     }
 
     if (kidp->isShape()) {
-        UnrootedShape shape = kidp->toShape();
+        RawShape shape = kidp->toShape();
         JS_ASSERT(shape != child);
         JS_ASSERT(!shape->matches(child));
 
@@ -97,7 +97,7 @@ PropertyTree::insertChild(JSContext *cx, UnrootedShape parent, UnrootedShape chi
 }
 
 void
-Shape::removeChild(UnrootedShape child)
+Shape::removeChild(RawShape child)
 {
     JS_ASSERT(!child->inDictionary());
     JS_ASSERT(child->parent == this);
@@ -127,13 +127,11 @@ Shape::removeChild(UnrootedShape child)
     }
 }
 
-UnrootedShape
+RawShape
 PropertyTree::getChild(JSContext *cx, Shape *parent_, uint32_t nfixed, const StackShape &child)
 {
-    AssertCanGC();
-
     {
-        UnrootedShape shape = NULL;
+        RawShape shape = NULL;
 
         JS_ASSERT(parent_);
 
@@ -147,7 +145,7 @@ PropertyTree::getChild(JSContext *cx, Shape *parent_, uint32_t nfixed, const Sta
          */
         KidsPointer *kidp = &parent_->kids;
         if (kidp->isShape()) {
-            UnrootedShape kid = kidp->toShape();
+            RawShape kid = kidp->toShape();
             if (kid->matches(child))
                 shape = kid;
         } else if (kidp->isHash()) {
@@ -189,56 +187,61 @@ PropertyTree::getChild(JSContext *cx, Shape *parent_, uint32_t nfixed, const Sta
     StackShape::AutoRooter childRoot(cx, &child);
     RootedShape parent(cx, parent_);
 
-    UnrootedShape shape = newShape(cx);
+    RawShape shape = newShape(cx);
     if (!shape)
-        return UnrootedShape(NULL);
+        return NULL;
 
     new (shape) Shape(child, nfixed);
 
     if (!insertChild(cx, parent, shape))
-        return UnrootedShape(NULL);
+        return NULL;
 
     return shape;
 }
 
 void
+Shape::sweep()
+{
+    if (inDictionary())
+        return;
+
+    /*
+     * We detach the child from the parent if the parent is reachable.
+     *
+     * Note that due to incremental sweeping, the parent pointer may point
+     * to the original reachable parent, or it may point to a new live
+     * object allocated in the same cell that used to hold the parent.
+     *
+     * There are three cases:
+     *
+     * Case 1: parent is not marked - parent is unreachable, may have been
+     *         finalized, and the cell may subsequently have been
+     *         reallocated to a compartment that is not being marked (cells
+     *         are marked when allocated in a compartment that is currenly
+     *         being marked by the collector).
+     *
+     * Case 2: parent is marked and is in a different compartment - parent
+     *         has been freed and reallocated to compartment that was being
+     *         marked.
+     *
+     * Case 3: parent is marked and is in the same compartment - parent is
+     *         stil reachable and we need to detach from it.
+     */
+    if (parent && parent->isMarked() && parent->compartment() == compartment())
+        parent->removeChild(this);
+}
+
+void
 Shape::finalize(FreeOp *fop)
 {
-    if (!inDictionary()) {
-        /*
-         * We detach the child from the parent if the parent is reachable.
-         *
-         * Note that due to incremental sweeping, the parent pointer may point
-         * to the original reachable parent, or it may point to a new live
-         * object allocated in the same cell that used to hold the parent.
-         *
-         * There are three cases:
-         *
-         * Case 1: parent is not marked - parent is unreachable, may have been
-         *         finalized, and the cell may subsequently have been
-         *         reallocated to a compartment that is not being marked (cells
-         *         are marked when allocated in a compartment that is currenly
-         *         being marked by the collector).
-         *
-         * Case 2: parent is marked and is in a different compartment - parent
-         *         has been freed and reallocated to compartment that was being
-         *         marked.
-         *
-         * Case 3: parent is marked and is in the same compartment - parent is
-         *         stil reachable and we need to detach from it.
-         */
-        if (parent && parent->isMarked() && parent->compartment() == compartment())
-            parent->removeChild(this);
-
-        if (kids.isHash())
-            fop->delete_(kids.toHash());
-    }
+    if (!inDictionary() && kids.isHash())
+        fop->delete_(kids.toHash());
 }
 
 #ifdef DEBUG
 
 void
-KidsPointer::checkConsistency(UnrootedShape aKid) const
+KidsPointer::checkConsistency(RawShape aKid) const
 {
     if (isShape()) {
         JS_ASSERT(toShape() == aKid);
@@ -323,7 +326,7 @@ Shape::dumpSubtree(JSContext *cx, int level, FILE *fp) const
     if (!kids.isNull()) {
         ++level;
         if (kids.isShape()) {
-            UnrootedShape kid = kids.toShape();
+            RawShape kid = kids.toShape();
             JS_ASSERT(kid->parent == this);
             kid->dumpSubtree(cx, level, fp);
         } else {

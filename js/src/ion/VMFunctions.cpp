@@ -13,6 +13,10 @@
 
 #include "vm/StringObject-inl.h"
 
+#include "builtin/ParallelArray.h"
+
+#include "frontend/TokenStream.h"
+
 #include "jsboolinlines.h"
 #include "jsinterpinlines.h"
 
@@ -49,15 +53,13 @@ ShouldMonitorReturnType(JSFunction *fun)
 bool
 InvokeFunction(JSContext *cx, HandleFunction fun0, uint32_t argc, Value *argv, Value *rval)
 {
-    AssertCanGC();
-
     RootedFunction fun(cx, fun0);
     if (fun->isInterpreted()) {
         if (fun->isInterpretedLazy() && !fun->getOrCreateScript(cx))
             return false;
 
         // Clone function at call site if needed.
-        if (fun->isCloneAtCallsite()) {
+        if (fun->nonLazyScript()->shouldCloneAtCallsite) {
             RootedScript script(cx);
             jsbytecode *pc;
             types::TypeScript::GetPcScript(cx, script.address(), &pc);
@@ -69,7 +71,7 @@ InvokeFunction(JSContext *cx, HandleFunction fun0, uint32_t argc, Value *argv, V
         // In order to prevent massive bouncing between Ion and JM, see if we keep
         // hitting functions that are uncompilable.
         if (cx->methodJitEnabled && !fun->nonLazyScript()->canIonCompile()) {
-            UnrootedScript script = GetTopIonJSScript(cx);
+            RawScript script = GetTopIonJSScript(cx);
             if (script->hasIonScript() &&
                 ++script->ion->slowCallCount >= js_IonOptions.slowCallLimit)
             {
@@ -116,7 +118,7 @@ InvokeFunction(JSContext *cx, HandleFunction fun0, uint32_t argc, Value *argv, V
 JSObject *
 NewGCThing(JSContext *cx, gc::AllocKind allocKind, size_t thingSize)
 {
-    return gc::NewGCThing<JSObject, CanGC>(cx, allocKind, thingSize);
+    return gc::NewGCThing<JSObject, CanGC>(cx, allocKind, thingSize, gc::DefaultHeap);
 }
 
 bool
@@ -250,7 +252,6 @@ template bool StringsEqual<false>(JSContext *cx, HandleString lhs, HandleString 
 JSBool
 ObjectEmulatesUndefined(RawObject obj)
 {
-    AutoAssertNoGC nogc;
     return EmulatesUndefined(obj);
 }
 
@@ -269,18 +270,15 @@ JSObject*
 NewInitArray(JSContext *cx, uint32_t count, types::TypeObject *typeArg)
 {
     RootedTypeObject type(cx, typeArg);
-    RootedObject obj(cx, NewDenseAllocatedArray(cx, count));
+    NewObjectKind newKind = !type ? SingletonObject : GenericObject;
+    RootedObject obj(cx, NewDenseAllocatedArray(cx, count, NULL, newKind));
     if (!obj)
         return NULL;
 
-    if (!type) {
-        if (!JSObject::setSingletonType(cx, obj))
-            return NULL;
-
+    if (!type)
         types::TypeScript::Monitor(cx, ObjectValue(*obj));
-    } else {
+    else
         obj->setType(type);
-    }
 
     return obj;
 }
@@ -288,19 +286,16 @@ NewInitArray(JSContext *cx, uint32_t count, types::TypeObject *typeArg)
 JSObject*
 NewInitObject(JSContext *cx, HandleObject templateObject)
 {
-    RootedObject obj(cx, CopyInitializerObject(cx, templateObject));
+    NewObjectKind newKind = templateObject->hasSingletonType() ? SingletonObject : GenericObject;
+    RootedObject obj(cx, CopyInitializerObject(cx, templateObject, newKind));
 
     if (!obj)
         return NULL;
 
-    if (templateObject->hasSingletonType()) {
-        if (!JSObject::setSingletonType(cx, obj))
-            return NULL;
-
+    if (templateObject->hasSingletonType())
         types::TypeScript::Monitor(cx, ObjectValue(*obj));
-    } else {
+    else
         obj->setType(templateObject->type());
-    }
 
     return obj;
 }
@@ -499,10 +494,58 @@ CreateThis(JSContext *cx, HandleObject callee, MutableHandleValue rval)
     if (callee->isFunction()) {
         JSFunction *fun = callee->toFunction();
         if (fun->isInterpreted())
-            rval.set(ObjectValue(*js_CreateThisForFunction(cx, callee, false)));
+            rval.set(ObjectValue(*CreateThisForFunction(cx, callee, false)));
     }
 
     return true;
+}
+
+void
+GetDynamicName(JSContext *cx, JSObject *scopeChain, JSString *str, Value *vp)
+{
+    // Lookup a string on the scope chain, returning either the value found or
+    // undefined through rval. This function is infallible, and cannot GC or
+    // invalidate.
+
+    JSAtom *atom;
+    if (str->isAtom()) {
+        atom = &str->asAtom();
+    } else {
+        atom = AtomizeString<NoGC>(cx, str);
+        if (!atom) {
+            vp->setUndefined();
+            return;
+        }
+    }
+
+    if (!frontend::IsIdentifier(atom) || frontend::FindKeyword(atom->chars(), atom->length())) {
+        vp->setUndefined();
+        return;
+    }
+
+    Shape *shape = NULL;
+    JSObject *scope = NULL, *pobj = NULL;
+    if (LookupNameNoGC(cx, atom->asPropertyName(), scopeChain, &scope, &pobj, &shape)) {
+        if (FetchNameNoGC(pobj, shape, MutableHandleValue::fromMarkedLocation(vp)))
+            return;
+    }
+
+    vp->setUndefined();
+}
+
+JSBool
+FilterArguments(JSContext *cx, JSString *str)
+{
+    // getChars() is fallible, but cannot GC: it can only allocate a character
+    // for the flattened string. If this call fails then the calling Ion code
+    // will bailout, resume in the interpreter and likely fail again when
+    // trying to flatten the string and unwind the stack.
+    const jschar *chars = str->getChars(cx);
+    if (!chars)
+        return false;
+
+    static jschar arguments[] = {'a', 'r', 'g', 'u', 'm', 'e', 'n', 't', 's'};
+    return !StringHasPattern(chars, str->length(), arguments, mozilla::ArrayLength(arguments));
 }
 
 } // namespace ion
